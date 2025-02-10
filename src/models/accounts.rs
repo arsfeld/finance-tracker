@@ -42,7 +42,7 @@ impl Validatable for super::_entities::accounts::ActiveModel {
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for super::_entities::accounts::ActiveModel {
-    async fn before_save<C>(self, _db: &C, insert: bool) -> Result<Self, DbErr>
+    async fn before_save<C>(self, _db: &C, _insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {

@@ -48,6 +48,8 @@ url = "2.5.4"
 prettytable-rs = "0.10.0"
 rust_decimal = "1.36.0"
 llm = { version = "1.0.4", features = ["openai", "anthropic", "ollama", "deepseek", "xai", "phind", "google", "groq", "api"] }
+reqwest = "0.12.12"
+chrono-tz = "0.10.1"
 # /view engine
 
 [[bin]]

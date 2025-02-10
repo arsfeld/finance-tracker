@@ -139,7 +139,15 @@ auth:
 
 
 settings:
+  tz: America/Toronto
   simplefin_bridge:
     url: {{ get_env(name="SIMPLEFIN_BRIDGE_URL", default="https://beta-bridge.simplefin.org/simplefin") }}
   openai:
     api_key: {{ get_env(name="OPENAI_API_KEY", default="sk-TESTKEY") }}
+  twilio:
+    account_sid: {{ get_env(name="TWILIO_ACCOUNT_SID", default="") }}
+    auth_token: {{ get_env(name="TWILIO_AUTH_TOKEN", default="") }}
+    from_phone: {{ get_env(name="TWILIO_FROM_PHONE", default="") | as_str}}
+    to_phones: {% for number in get_env(name="TWILIO_TO_PHONES") | split(pat=",") %}
+      - {{ number | as_str }}
+    {% endfor %}

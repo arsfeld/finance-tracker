@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use loco_rs::prelude::*;
-use sea_orm::{prelude::Decimal};
+use sea_orm::{prelude::Decimal, QueryOrder, Order};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use chrono::NaiveDate;
@@ -116,6 +116,7 @@ impl super::_entities::transactions::Model {
                     )
                     .build(),
             )
+            .order_by(transactions::Column::Posted, Order::Desc)
             .all(db)
             .await?;
         Ok(transactions)

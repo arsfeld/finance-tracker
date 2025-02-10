@@ -8,6 +8,9 @@ debug/
 target/
 dist/
 
+.env
+.env.*
+
 # include cargo lock
 !Cargo.lock
 
@@ -16,7 +19,6 @@ dist/
 
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
-
 *.sqlite
 
 # Devenv

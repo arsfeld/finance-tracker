@@ -1,3 +1,3 @@
 pub mod seed;
-pub mod sync_data;
-pub mod categorize;
+pub mod sync;
+pub mod summarize;

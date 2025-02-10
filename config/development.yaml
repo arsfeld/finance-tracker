@@ -1,15 +1,22 @@
 # Loco configuration file documentation
 
+{% set storage_path = get_env(name="STORAGE_PATH", default="./storage") %}
+{% set app_env = get_env(name="LOCO_ENV", default="development") %}
+
 # Application logging configuration
 logger:
   # Enable or disable logging.
   enable: true
   # Enable pretty backtrace (sets RUST_BACKTRACE=1)
-  pretty_backtrace: true
+  pretty_backtrace: {% if app_env == "development" %}true{% else %}false{% endif %}
   # Log level, options: trace, debug, info, warn or error.
-  level: debug
+  {% if app_env == "development" %}
+  level: {{ get_env(name="LOG_LEVEL", default="debug") }}
+  {% else %}
+  level: {{ get_env(name="LOG_LEVEL", default="info") }}
+  {% endif %}
   # Define the logging format. options: compact, pretty or json
-  format: compact
+  format: {{ get_env(name="LOG_FORMAT", default="compact") }}
   # By default the logger has filtering only logs that came from your code or logs that came from `loco` framework. to see all third party libraries
   # Uncomment the line below to override to see all third party libraries you can enable this config and override the logger filters.
   # override_filter: trace
@@ -17,9 +24,9 @@ logger:
 # Web server configuration
 server:
   # Port on which the server will listen. the server binding is 0.0.0.0:{PORT}
-  port: 5150
+  port: {{ get_env(name="LISTEN_PORT", default="5150") }}
   # The UI hostname or IP address that mailers will point to.
-  host: http://localhost
+  host: {{ get_env(name="APP_URL", default="http://localhost") }}
   # Out of the box middleware configuration. to disable middleware you can changed the `enable` field to `false` of comment the middleware block
   middlewares:
     # #############################################
@@ -81,7 +88,7 @@ mailer:
   # SMTP mailer configuration.
   smtp:
     # Enable/Disable smtp mailer.
-    enable: true
+    enable: false
     # SMTP server host. e.x localhost, smtp.gmail.com
     host: {{ get_env(name="MAILER_HOST", default="localhost") }}
     # SMTP server port
@@ -102,7 +109,7 @@ mailer:
 # Database Configuration
 database:
   # Database connection URI
-  uri: {{ get_env(name="DATABASE_URL", default="sqlite://finance_tracker_development.sqlite?mode=rwc") }}
+  uri: {{ get_env(name="DATABASE_URL", default="sqlite://" ~ storage_path ~ "/finance_tracker_development.sqlite?mode=rwc") }}
   # When enabled, the sql query will be logged.
   enable_logging: false
   # Set the timeout duration when acquiring a connection.
@@ -110,7 +117,7 @@ database:
   # Set the idle duration before closing a connection.
   idle_timeout: 500
   # Minimum number of connections for a pool.
-  min_connections: 1
+  min_connections: {{ get_env(name="DB_MIN_CONNECTIONS", default="1") }}
   # Maximum number of connections for a pool.
   max_connections: 1
   # Run migration up when application loaded
@@ -133,7 +140,7 @@ auth:
   # JWT authentication
   jwt:
     # Secret key for token generation and verification
-    secret: VUWlcrb7jAc9HuP4RtrZ
+    secret: {{ get_env(name="JWT_SECRET", default="VUWlcrb7jAc9HuP4RtrZ") }}
     # Token expiration time in seconds
     expiration: 604800 # 7 days
 
@@ -151,3 +158,25 @@ settings:
     to_phones: {% for number in get_env(name="TWILIO_TO_PHONES") | split(pat=",") %}
       - {{ number | as_str }}
     {% endfor %}
+
+scheduler:
+  output: stdout
+  jobs:
+    sync:
+        shell: false
+        run: sync
+        schedule: "at 5:00 pm"
+        # schedule: "* * * * * * *"
+        output: stdout
+        tags: ['sync']
+
+    summarize:
+        shell: false
+        run: summarize
+        schedule: "7pm every Thursday or Tuesday"
+        output: stdout
+        tags: ['summarize']
+
+    # run_task:
+    #     run: "foo"
+    #     schedule: "at 10:00 am"

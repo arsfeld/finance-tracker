@@ -8,13 +8,13 @@ use llm::{
 use loco_rs::prelude::*;
 use reqwest;
 
-pub struct Categorize;
+pub struct Summarize;
 
 #[async_trait]
-impl Task for Categorize {
+impl Task for Summarize {
     fn task(&self) -> TaskInfo {
         TaskInfo {
-            name: "categorize".to_string(),
+            name: "summarize".to_string(),
             detail: "Task generator".to_string(),
         }
     }

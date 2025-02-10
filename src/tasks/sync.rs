@@ -8,38 +8,38 @@ use crate::models::accounts::Model as AccountModel;
 use crate::models::transactions::Model as TransactionModel;
 
 #[derive(Debug, Error)]
-pub enum SyncDataError {
+pub enum SyncError {
     #[error("SimpleFin error: {0}")]
     SimpleFinError(#[from] simplefin_bridge::SimpleFinError),
     #[error("URL parsing error: {0}")]
     UrlError(#[from] url::ParseError),
 }
 
-pub struct SyncData;
+pub struct Sync;
 
 #[async_trait]
-impl Task for SyncData {
+impl Task for Sync {
     fn task(&self) -> TaskInfo {
         TaskInfo {
-            name: "sync_data".to_string(),
-            detail: "Task generator".to_string(),
+            name: "sync".to_string(),
+            detail: "Task sync".to_string(),
         }
     }
 
     async fn run(&self, ctx: &AppContext, _vars: &task::Vars) -> Result<()> {
-        println!("Task SyncData generated");
+        println!("Task Sync generated");
 
         let settings = common::settings::Settings::from_json(
             ctx.config.settings.as_ref().unwrap()
         )?;
 
         let url_parsed = url::Url::parse(&settings.simplefin_bridge.unwrap().url)
-            .map_err(|e| loco_rs::Error::wrap(Box::new(SyncDataError::UrlError(e))))?;
+            .map_err(|e| loco_rs::Error::wrap(Box::new(SyncError::UrlError(e))))?;
         let bridge = simplefin_bridge::SimpleFinBridge::new(url_parsed);
 
         let info = bridge.info()
             .await
-            .map_err(|e| loco_rs::Error::wrap(Box::new(SyncDataError::SimpleFinError(e))))?;
+            .map_err(|e| loco_rs::Error::wrap(Box::new(SyncError::SimpleFinError(e))))?;
         println!("info: {:?}", info);
 
         let now = Local::now().date_naive();
@@ -66,7 +66,7 @@ impl Task for SyncData {
 
         let accounts = bridge.accounts(Some(params))
             .await
-            .map_err(|e| loco_rs::Error::wrap(Box::new(SyncDataError::SimpleFinError(e))))?;
+            .map_err(|e| loco_rs::Error::wrap(Box::new(SyncError::SimpleFinError(e))))?;
         
         // Persist accounts to database
         for account in accounts.accounts {

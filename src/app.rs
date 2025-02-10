@@ -61,8 +61,8 @@ impl Hooks for App {
     }
 
     fn register_tasks(tasks: &mut Tasks) {
-        tasks.register(tasks::sync_data::SyncData);
-        tasks.register(tasks::categorize::Categorize);
+        tasks.register(tasks::sync::Sync);
+        tasks.register(tasks::summarize::Summarize);
         tasks.register(tasks::seed::SeedData);
     }
 

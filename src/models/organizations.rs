@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use chrono::offset::Local;
 use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};

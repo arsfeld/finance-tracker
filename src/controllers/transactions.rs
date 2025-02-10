@@ -1,8 +1,6 @@
 use axum::debug_handler;
-use axum::extract::Query;
 use axum::routing::get;
 use loco_rs::prelude::*;
-use serde::{Deserialize, Serialize};
 
 use crate::{models::transactions, views::transactions::TransactionResponse};
 

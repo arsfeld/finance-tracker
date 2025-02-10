@@ -2,7 +2,7 @@ use crate::common;
 use crate::models::accounts::Model as AccountModel;
 use crate::models::organizations::Model as OrganizationModel;
 use crate::models::transactions::Model as TransactionModel;
-use chrono::{Datelike, Duration, Local, NaiveDate, Utc};
+use chrono::{Datelike, Duration, Local, NaiveDate};
 use loco_rs::prelude::*;
 use thiserror::Error;
 use url;

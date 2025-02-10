@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use loco_rs::prelude::*;
 use sea_orm::prelude::Decimal;
 use serde::{Deserialize, Serialize};

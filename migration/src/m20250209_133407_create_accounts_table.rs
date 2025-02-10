@@ -32,26 +32,27 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Accounts::Name).string().not_null())
                     .col(
                         ColumnDef::new(Accounts::Currency)
-                            .char_len(3)  // ISO 4217 currency codes are always 3 characters
-                            .not_null()
+                            .char_len(3) // ISO 4217 currency codes are always 3 characters
+                            .not_null(),
                     )
                     .col(
                         ColumnDef::new(Accounts::Balance)
-                            .decimal_len(16, 4)  // Supports large numbers with 4 decimal places
-                            .not_null()
+                            .decimal_len(16, 4) // Supports large numbers with 4 decimal places
+                            .not_null(),
                     )
+                    .col(ColumnDef::new(Accounts::AvailableBalance).decimal_len(16, 4))
                     .col(
-                        ColumnDef::new(Accounts::AvailableBalance)
-                            .decimal_len(16, 4)
+                        ColumnDef::new(Accounts::BalanceDate)
+                            .big_integer()
+                            .not_null(),
                     )
-                    .col(ColumnDef::new(Accounts::BalanceDate).big_integer().not_null())
                     .col(ColumnDef::new(Accounts::Extra).json())
                     .col(ColumnDef::new(Accounts::OrganizationId).string().not_null())
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk-accounts-organization_id")
                             .from(Accounts::Table, Accounts::OrganizationId)
-                            .to(Organizations::Table, Organizations::Id)
+                            .to(Organizations::Table, Organizations::Id),
                     )
                     .to_owned(),
             )
@@ -71,4 +72,3 @@ enum Organizations {
     Table,
     Id,
 }
-

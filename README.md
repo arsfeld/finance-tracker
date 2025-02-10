@@ -1,10 +1,7 @@
-# Welcome to Loco :train:
+# Welcome to Finance Tracker 
 
-[Loco](https://loco.rs) is a web and API framework running on Rust.
-
-This is the **SaaS starter** which includes a `User` model and authentication based on JWT.
-It also include configuration sections that help you pick either a frontend or a server-side template set up for your fullstack server.
-
+This project is a quick and dirty way of fetching some bank transactions from SimpleFin Bridge
+and asking an LLM agent to summarize.
 
 ## Quick Start
 

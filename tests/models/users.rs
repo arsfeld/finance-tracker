@@ -1,9 +1,9 @@
-use insta::assert_debug_snapshot;
-use loco_rs::{model::ModelError, testing};
 use finance_tracker::{
     app::App,
     models::users::{self, Model, RegisterParams},
 };
+use insta::assert_debug_snapshot;
+use loco_rs::{model::ModelError, testing};
 use sea_orm::{ActiveModelTrait, ActiveValue, IntoActiveModel};
 use serial_test::serial;
 

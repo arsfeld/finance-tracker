@@ -1,9 +1,9 @@
 use async_trait::async_trait;
+use chrono::NaiveDate;
 use loco_rs::prelude::*;
-use sea_orm::{prelude::Decimal, QueryOrder, Order};
+use sea_orm::{prelude::Decimal, Order, QueryOrder};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use chrono::NaiveDate;
 
 pub use super::_entities::transactions::{self, ActiveModel, Entity, Model};
 use super::accounts;
@@ -40,7 +40,6 @@ impl Validatable for super::_entities::transactions::ActiveModel {
     }
 }
 
-
 #[async_trait::async_trait]
 impl ActiveModelBehavior for super::_entities::transactions::ActiveModel {
     async fn before_save<C>(self, _db: &C, insert: bool) -> Result<Self, DbErr>
@@ -59,7 +58,6 @@ impl ActiveModelBehavior for super::_entities::transactions::ActiveModel {
 }
 
 impl super::_entities::transactions::Model {
-
     /// finds all transactions
     ///
     /// # Errors
@@ -105,14 +103,27 @@ impl super::_entities::transactions::Model {
     /// # Errors
     ///
     /// When DB query error occurs
-    pub async fn find_by_billing_period(db: &DatabaseConnection, billing_period: (NaiveDate, NaiveDate)) -> ModelResult<Vec<Self>> {
+    pub async fn find_by_billing_period(
+        db: &DatabaseConnection,
+        billing_period: (NaiveDate, NaiveDate),
+    ) -> ModelResult<Vec<Self>> {
         let transactions = transactions::Entity::find()
             .filter(
                 model::query::condition()
                     .between(
-                        transactions::Column::Posted, 
-                        billing_period.0.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp(), 
-                        billing_period.1.and_hms_opt(23, 59, 59).unwrap().and_utc().timestamp()
+                        transactions::Column::Posted,
+                        billing_period
+                            .0
+                            .and_hms_opt(0, 0, 0)
+                            .unwrap()
+                            .and_utc()
+                            .timestamp(),
+                        billing_period
+                            .1
+                            .and_hms_opt(23, 59, 59)
+                            .unwrap()
+                            .and_utc()
+                            .timestamp(),
                     )
                     .build(),
             )
@@ -163,7 +174,6 @@ impl super::_entities::transactions::Model {
         Ok(transaction)
     }
 
-
     pub async fn from_bridge(
         db: &DatabaseConnection,
         params: &simplefin_bridge::models::Transaction,
@@ -173,17 +183,19 @@ impl super::_entities::transactions::Model {
 
         let id = params.id.clone();
 
-        let (created, mut active_transaction) =
-            match transactions::Entity::find_by_id(id.clone()).one(&txn).await? {
-                Some(model) => (false, model.into_active_model()),
-                None => (
-                    true,
-                    transactions::ActiveModel {
-                        id: ActiveValue::set(id.clone()),
-                        ..Default::default()
-                    },
-                ),
-            };
+        let (created, mut active_transaction) = match transactions::Entity::find_by_id(id.clone())
+            .one(&txn)
+            .await?
+        {
+            Some(model) => (false, model.into_active_model()),
+            None => (
+                true,
+                transactions::ActiveModel {
+                    id: ActiveValue::set(id.clone()),
+                    ..Default::default()
+                },
+            ),
+        };
 
         active_transaction.account_id = ActiveValue::set(account_id.to_string());
         active_transaction.posted = ActiveValue::set(params.posted);
@@ -203,4 +215,4 @@ impl super::_entities::transactions::Model {
 
         Ok(transaction)
     }
-} 
+}

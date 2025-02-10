@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use async_trait::async_trait;
+use dotenv::dotenv;
 use loco_rs::{
     app::{AppContext, Hooks, Initializer},
     bgworker::{BackgroundWorker, Queue},
@@ -13,7 +14,6 @@ use loco_rs::{
 };
 use migration::Migrator;
 use sea_orm::DatabaseConnection;
-use dotenv::dotenv;
 
 use crate::{
     controllers, initializers, models::_entities::users, tasks, workers::downloader::DownloadWorker,

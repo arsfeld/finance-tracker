@@ -4,10 +4,7 @@ use axum::routing::get;
 use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    models::accounts,
-    views::accounts::AccountResponse,
-};
+use crate::{models::accounts, views::accounts::AccountResponse};
 
 /// Query parameters used to filter accounts by organization id.
 #[derive(Debug, Deserialize, Serialize)]
@@ -27,7 +24,10 @@ async fn list_accounts(
     } else {
         accounts::Model::find_by_organization_id(&ctx.db, &query.organization_id.unwrap()).await?
     };
-    let serialized_accounts: Vec<AccountResponse> = accounts_list.into_iter().map(AccountResponse::from).collect();
+    let serialized_accounts: Vec<AccountResponse> = accounts_list
+        .into_iter()
+        .map(AccountResponse::from)
+        .collect();
     format::json(serialized_accounts)
 }
 

@@ -6,7 +6,6 @@ use finance_tracker::workers::sync::SyncWorker;
 use finance_tracker::workers::sync::SyncWorkerArgs;
 use serial_test::serial;
 
-
 #[tokio::test]
 #[serial]
 async fn test_run_sync_data_worker() {

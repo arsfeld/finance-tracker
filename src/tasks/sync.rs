@@ -1,11 +1,11 @@
-use loco_rs::prelude::*;
 use crate::common;
-use thiserror::Error;
-use chrono::{Local, Duration, NaiveDate, Utc, Datelike};
-use url;
-use crate::models::organizations::Model as OrganizationModel;
 use crate::models::accounts::Model as AccountModel;
+use crate::models::organizations::Model as OrganizationModel;
 use crate::models::transactions::Model as TransactionModel;
+use chrono::{Datelike, Duration, Local, NaiveDate, Utc};
+use loco_rs::prelude::*;
+use thiserror::Error;
+use url;
 
 #[derive(Debug, Error)]
 pub enum SyncError {
@@ -29,15 +29,15 @@ impl Task for Sync {
     async fn run(&self, ctx: &AppContext, _vars: &task::Vars) -> Result<()> {
         println!("Task Sync generated");
 
-        let settings = common::settings::Settings::from_json(
-            ctx.config.settings.as_ref().unwrap()
-        )?;
+        let settings =
+            common::settings::Settings::from_json(ctx.config.settings.as_ref().unwrap())?;
 
         let url_parsed = url::Url::parse(&settings.simplefin_bridge.unwrap().url)
             .map_err(|e| loco_rs::Error::wrap(Box::new(SyncError::UrlError(e))))?;
         let bridge = simplefin_bridge::SimpleFinBridge::new(url_parsed);
 
-        let info = bridge.info()
+        let info = bridge
+            .info()
             .await
             .map_err(|e| loco_rs::Error::wrap(Box::new(SyncError::SimpleFinError(e))))?;
         println!("info: {:?}", info);
@@ -50,11 +50,7 @@ impl Task for Sync {
             .unwrap()
             .and_utc()
             .timestamp();
-        let end_date = now
-            .and_hms_opt(23, 59, 59)
-            .unwrap()
-            .and_utc()
-            .timestamp();
+        let end_date = now.and_hms_opt(23, 59, 59).unwrap().and_utc().timestamp();
 
         let params = simplefin_bridge::AccountsParams {
             start_date: Some(start_date),
@@ -64,10 +60,11 @@ impl Task for Sync {
             pending: None,
         };
 
-        let accounts = bridge.accounts(Some(params))
+        let accounts = bridge
+            .accounts(Some(params))
             .await
             .map_err(|e| loco_rs::Error::wrap(Box::new(SyncError::SimpleFinError(e))))?;
-        
+
         // Persist accounts to database
         for account in accounts.accounts {
             println!("Processing account id: {:?}", account.id);

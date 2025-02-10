@@ -34,9 +34,9 @@ impl SimpleFinBridge {
     }
 
     /// Creates a new SimpleFinBridge instance from a base64-encoded token.
-    /// 
+    ///
     /// # Errors
-    /// 
+    ///
     /// Returns `SimpleFinError` if:
     /// - Token is not valid base64
     /// - Token does not contain valid UTF-8
@@ -45,12 +45,7 @@ impl SimpleFinBridge {
     pub async fn from_token(token: &str) -> Result<Self> {
         let claim_url = String::from_utf8(BASE64_STANDARD.decode(token)?)?;
         let client = reqwest::Client::new();
-        let access_url = client
-            .post(claim_url)
-            .send()
-            .await?
-            .text()
-            .await?;
+        let access_url = client.post(claim_url).send().await?.text().await?;
 
         println!("access_url: {}", access_url);
 
@@ -63,12 +58,7 @@ impl SimpleFinBridge {
         let mut info_url = self.url.clone();
         info_url.set_path(&format!("{}/info", info_url.path()));
 
-        Ok(self.client
-            .get(info_url)
-            .send()
-            .await?
-            .json()
-            .await?)
+        Ok(self.client.get(info_url).send().await?.json().await?)
     }
 
     /// Fetches account information
@@ -83,12 +73,7 @@ impl SimpleFinBridge {
 
         println!("accounts_url: {}", accounts_url);
 
-        Ok(self.client
-            .get(accounts_url)
-            .send()
-            .await?
-            .json()
-            .await?)
+        Ok(self.client.get(accounts_url).send().await?.json().await?)
     }
 }
 
@@ -229,8 +214,7 @@ mod tests {
         let all_accounts = bridge.accounts(None).await?;
         let account_id = all_accounts.accounts[0].id.clone();
 
-        let params = AccountsParams::new()
-            .account_ids(vec![account_id.clone()]);
+        let params = AccountsParams::new().account_ids(vec![account_id.clone()]);
 
         let filtered_accounts = bridge.accounts(Some(params)).await?;
         assert!(filtered_accounts.errors.is_empty());
@@ -242,8 +226,7 @@ mod tests {
     #[tokio::test]
     async fn test_accounts_balances_only() -> Result<()> {
         let bridge = setup_bridge().await?;
-        let params = AccountsParams::new()
-            .balances_only(true);
+        let params = AccountsParams::new().balances_only(true);
 
         let accounts = bridge.accounts(Some(params)).await?;
         assert!(accounts.errors.is_empty());
@@ -257,7 +240,7 @@ mod tests {
     fn test_accounts_params_query_string() {
         let params = AccountsParams::new()
             .start_date(1577836800) // 2020-01-01
-            .end_date(1609459199)   // 2020-12-31
+            .end_date(1609459199) // 2020-12-31
             .pending(true)
             .account_ids(vec!["123".to_string(), "456".to_string()])
             .balances_only(true);

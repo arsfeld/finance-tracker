@@ -26,39 +26,27 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(Organizations::Id)
                             .string()
                             .not_null()
-                            .primary_key()
+                            .primary_key(),
                     )
-                    .col(
-                        ColumnDef::new(Organizations::Domain)
-                            .string_len(255)
-                            .null()
-                    )
+                    .col(ColumnDef::new(Organizations::Domain).string_len(255).null())
                     .col(
                         ColumnDef::new(Organizations::SfinUrl)
                             .string_len(512)
-                            .not_null()
+                            .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(Organizations::Name)
-                            .string_len(255)
-                            .null()
-                    )
-                    .col(
-                        ColumnDef::new(Organizations::Url)
-                            .string_len(512)
-                            .null()
-                    )
+                    .col(ColumnDef::new(Organizations::Name).string_len(255).null())
+                    .col(ColumnDef::new(Organizations::Url).string_len(512).null())
                     .col(
                         ColumnDef::new(Organizations::CreatedAt)
                             .timestamp_with_time_zone()
                             .not_null()
-                            .default(Expr::current_timestamp())
+                            .default(Expr::current_timestamp()),
                     )
                     .col(
                         ColumnDef::new(Organizations::UpdatedAt)
                             .timestamp_with_time_zone()
                             .not_null()
-                            .default(Expr::current_timestamp())
+                            .default(Expr::current_timestamp()),
                     )
                     .to_owned(),
             )
@@ -93,7 +81,7 @@ impl MigrationTrait for Migration {
                 Index::drop()
                     .name("idx_organizations_domain")
                     .table(Organizations::Table)
-                    .to_owned()
+                    .to_owned(),
             )
             .await?;
 
@@ -102,18 +90,13 @@ impl MigrationTrait for Migration {
                 Index::drop()
                     .name("idx_organizations_name")
                     .table(Organizations::Table)
-                    .to_owned()
+                    .to_owned(),
             )
             .await?;
 
         // Then drop the table
         manager
-            .drop_table(
-                Table::drop()
-                    .table(Organizations::Table)
-                    .to_owned()
-            )
+            .drop_table(Table::drop().table(Organizations::Table).to_owned())
             .await
     }
 }
-

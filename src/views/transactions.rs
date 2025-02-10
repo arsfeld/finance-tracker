@@ -1,6 +1,6 @@
-use serde::Serialize;
-use sea_orm::prelude::Decimal;
 use crate::models::transactions::Model;
+use sea_orm::prelude::Decimal;
+use serde::Serialize;
 use serde_json::Value;
 
 /// A view that serializes the account
@@ -30,4 +30,4 @@ impl From<Model> for TransactionResponse {
             extra: model.extra,
         }
     }
-} 
+}

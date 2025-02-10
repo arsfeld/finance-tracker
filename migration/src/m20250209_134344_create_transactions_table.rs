@@ -35,11 +35,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(
-                        ColumnDef::new(Transactions::AccountId)
-                            .string()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Transactions::AccountId).string().not_null())
                     .col(
                         ColumnDef::new(Transactions::Posted)
                             .big_integer()
@@ -60,16 +56,8 @@ impl MigrationTrait for Migration {
                             .big_integer()
                             .null(),
                     )
-                    .col(
-                        ColumnDef::new(Transactions::Pending)
-                            .boolean()
-                            .null(),
-                    )
-                    .col(
-                        ColumnDef::new(Transactions::Extra)
-                            .json()
-                            .null(),
-                    )
+                    .col(ColumnDef::new(Transactions::Pending).boolean().null())
+                    .col(ColumnDef::new(Transactions::Extra).json().null())
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_transaction_account")
@@ -89,4 +77,3 @@ impl MigrationTrait for Migration {
             .await
     }
 }
-

@@ -11,7 +11,7 @@ interface Account {
   available_balance: number;
   balance_date: number;
   organization_id: string;
-  extra?: any;
+  extra?: any; // eslint-disable-line
 }
 
 // This is a server component by default in Next.js App Router.

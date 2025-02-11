@@ -39,6 +39,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 ENV STORAGE_PATH=/app/data
+ENV LOCO_ENV=production
 
 COPY --from=builder /usr/src/config /app/config
 COPY --from=builder /usr/src/assets /app/assets

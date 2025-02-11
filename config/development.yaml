@@ -171,15 +171,14 @@ scheduler:
     sync:
         shell: false
         run: sync
-        schedule: "at 5:00 pm"
-        # schedule: "* * * * * * *"
+        schedule: {{ get_env(name="SYNC_SCHEDULE", default="at 5:00 pm") }}
         output: stdout
         tags: ['sync']
 
     summarize:
         shell: false
         run: summarize
-        schedule: "7pm every Thursday or Tuesday"
+        schedule: {{ get_env(name="SUMMARIZE_SCHEDULE", default="at 7:00 pm") }}
         output: stdout
         tags: ['summarize']
 

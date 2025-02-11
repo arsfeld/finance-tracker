@@ -88,16 +88,16 @@ mailer:
   # SMTP mailer configuration.
   smtp:
     # Enable/Disable smtp mailer.
-    enable: false
+    enable: true
     # SMTP server host. e.x localhost, smtp.gmail.com
-    host: {{ get_env(name="MAILER_HOST", default="localhost") }}
+    host: {{ get_env(name="MAILER_HOST", default="smtp.gmail.com") }}
     # SMTP server port
-    port: 1025
+    port: {{ get_env(name="MAILER_PORT", default="587") }}
     # Use secure connection (SSL/TLS).
-    secure: false
-    # auth:
-    #   user:
-    #   password:
+    secure: {{ get_env(name="MAILER_SECURE", default="true") }}
+    auth:
+      user: {{ get_env(name="MAILER_USER", default="") }}
+      password: {{ get_env(name="MAILER_PASSWORD", default="") }}
 
 # Initializers Configuration
 # initializers:
@@ -157,6 +157,12 @@ settings:
     from_phone: {{ get_env(name="TWILIO_FROM_PHONE", default="") | as_str}}
     to_phones: {% for number in get_env(name="TWILIO_TO_PHONES") | split(pat=",") %}
       - {{ number | as_str }}
+    {% endfor %}
+  mailer:
+    from: {{ get_env(name="MAILER_FROM", default="noreply@example.com") }}
+    reply_to: {{ get_env(name="MAILER_REPLY_TO", default="") }}
+    to: {% for email in get_env(name="MAILER_TO") | split(pat=",") %}
+      - {{ email | as_str }}
     {% endfor %}
 
 scheduler:

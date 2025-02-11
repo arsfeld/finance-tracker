@@ -150,9 +150,9 @@ impl super::_entities::accounts::Model {
 
         active_account.name = ActiveValue::set(params.name.clone());
         active_account.currency = ActiveValue::set(params.currency.clone());
-        active_account.balance = ActiveValue::set(params.balance.clone());
+        active_account.balance = ActiveValue::set(params.balance);
         active_account.available_balance =
-            ActiveValue::set(params.available_balance.unwrap().clone());
+            ActiveValue::set(params.available_balance.unwrap());
         active_account.balance_date = ActiveValue::set(params.balance_date);
         active_account.extra = ActiveValue::set(params.extra.clone());
         active_account.organization_id = ActiveValue::set(params.org.id.as_ref().unwrap().clone());

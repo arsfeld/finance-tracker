@@ -130,7 +130,7 @@ impl super::_entities::organizations::Model {
                 ),
             };
 
-        println!("active_org: {:?}", active_org);
+        println!("active_org: {active_org:?}");
 
         active_org.domain = ActiveValue::set(params.domain.clone());
         active_org.sfin_url = ActiveValue::set(params.sfin_url.clone());
@@ -138,7 +138,7 @@ impl super::_entities::organizations::Model {
         active_org.url = ActiveValue::set(params.url.clone());
         active_org.updated_at = ActiveValue::set(Local::now().into());
 
-        println!("active_org: {:?}", active_org);
+        println!("active_org: {active_org:?}");
 
         let org = if created {
             active_org.insert(&txn).await?
@@ -146,7 +146,7 @@ impl super::_entities::organizations::Model {
             active_org.update(&txn).await?
         };
 
-        println!("org: {:?}", org);
+        println!("org: {org:?}");
 
         txn.commit().await?;
 

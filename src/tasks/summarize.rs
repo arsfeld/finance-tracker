@@ -1,12 +1,16 @@
 use crate::common;
 use crate::models::transactions::Model as TransactionModel;
-use chrono::{Datelike, Local, NaiveDate};
+use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Utc};
 use llm::{
     builder::{LLMBackend, LLMBuilder},
     chat::{ChatMessage, ChatRole},
 };
+use loco_rs::controller::views::engines;
+use loco_rs::mailer::{Email, MailerWorker};
 use loco_rs::prelude::*;
 use reqwest;
+use serde_json::json;
+use tabled::{builder::Builder, settings::Style};
 
 pub struct Summarize;
 
@@ -39,14 +43,20 @@ impl Task for Summarize {
         // Use the same billing period for the LLM message
         match process_llm(&settings, billing_period, &transactions_formatted).await {
             Ok(text) => {
-                println!("Chat response:\n{}", text);
+                println!("Chat response:\n{text}");
                 if let Some(twilio_config) = settings.twilio.as_ref() {
                     send_twilio_sms(twilio_config, &text).await;
                 } else {
                     eprintln!("Twilio settings not configured.");
                 }
+
+                // if let Some(mailer_settings) = settings.mailer.as_ref() {
+                //     send_email(ctx, mailer_settings, &text).await?;
+                // } else {
+                //     eprintln!("Mailer settings not configured.");
+                // }
             }
-            Err(e) => eprintln!("Chat error: {}", e),
+            Err(e) => eprintln!("Chat error: {e}"),
         }
 
         Ok(())
@@ -68,12 +78,56 @@ async fn get_transactions_for_period(
         return Ok(String::new());
     }
 
-    // Format transactions for the message
-    Ok(transactions
-        .iter()
-        .map(|t| format!("{}: {} - {}", t.posted, t.description, t.amount))
-        .collect::<Vec<String>>()
-        .join("\n"))
+    let mut builder = Builder::default();
+
+    for transaction in transactions {
+        let datetime = chrono::DateTime::from_timestamp(transaction.posted, 0)
+            .expect("Posted timestamp is invalid");
+        builder.push_record([
+            transaction.description,
+            transaction.amount.to_string(),
+            datetime.format("%Y-%m-%d").to_string(),
+        ]);
+    }
+
+    let mut table = builder.build();
+    table.with(Style::modern_rounded().remove_horizontal());
+
+    Ok(table.to_string())
+}
+
+async fn send_email(
+    ctx: &AppContext,
+    mailer_settings: &crate::common::settings::MailerSettings,
+    text: &str,
+) -> Result<()> {
+    let tera_engine = engines::TeraView::build()?;
+    let context = json!({
+        "message": text,
+    });
+
+    let template = tera_engine.render("email.mjml", &context).unwrap();
+
+    let root = mrml::parse(&template).expect("parse template");
+    let opts = mrml::prelude::render::RenderOptions::default();
+    let content = root.render(&opts).expect("render template");
+
+    for to in mailer_settings.to.iter() {
+        let email = Email {
+            from: Some(mailer_settings.from.clone()),
+            to: to.clone(),
+            reply_to: mailer_settings.reply_to.clone(),
+            subject: "Transaction Summary".to_string(),
+            text: text.to_string(),
+            html: content.clone(),
+            bcc: None,
+            cc: None,
+        };
+
+        MailerWorker::perform_later(ctx, email.clone()).await?;
+    }
+
+    Ok(())
 }
 
 // Helper function for sending SMS through Twilio
@@ -100,7 +154,7 @@ async fn send_twilio_sms(twilio_config: &crate::common::settings::TwilioSettings
         {
             Ok(response) => {
                 if response.status().is_success() {
-                    println!("SMS sent successfully to {}.", to_phone);
+                    println!("SMS sent successfully to {to_phone}.");
                 } else {
                     eprintln!(
                         "Failed to send SMS to {}. Status: {}, Body: {:?}",
@@ -111,7 +165,7 @@ async fn send_twilio_sms(twilio_config: &crate::common::settings::TwilioSettings
                 }
             }
             Err(e) => {
-                eprintln!("Error sending SMS to {}: {}", to_phone, e);
+                eprintln!("Error sending SMS to {to_phone}: {e}");
             }
         }
     }
@@ -135,26 +189,27 @@ async fn process_llm(
         .expect("Failed to build LLM");
 
     let message = ChatMessage {
-            role: ChatRole::User,
-            content: format!("
-                The billing period is from {} to {}.
-            
-                Write a few sentences about the following transactions, focus on:
-                - Be concise, don't write more than 100 words
-                - main categories, with the total amount
-                - the biggest expenses
-                - the total amount of money spent (don't count payments, credits or refunds)
-                - don't show payments, credits or refunds
+        role: ChatRole::User,
+        content: format!(
+            "
+Write a few sentences about the following transactions, focus on:
+- Be concise, don't write more than 100 words
+- main categories, with the total amount
+- the biggest expenses
+- the total amount of money spent (don't count payments, credits or refunds)
+- don't show payments, credits or refunds
 
-                Create separate sections for total expenses, major categories and the biggest expenses.
-                Show the billing period and summarize spending in the period.
-                
-                Transactions: {}", billing_period.0, billing_period.1, transactions_formatted),
-        };
+Create separate sections for total expenses, major categories and the biggest expenses.
+Show the billing period and summarize spending in the period.
+The billing period is from {} to {}.
 
-    println!("Prompt: {:?}", message);
+Transactions: 
+{}",
+            billing_period.0, billing_period.1, transactions_formatted
+        ),
+    };
 
-    llm.chat(&[message])
-        .await
-        .map_err(|e| loco_rs::Error::wrap(e))
+    println!("Prompt: {}", message.content);
+
+    llm.chat(&[message]).await.map_err(loco_rs::Error::wrap)
 }

@@ -50,6 +50,8 @@ rust_decimal = "1.36.0"
 llm = { version = "1.0.4", features = ["openai", "anthropic", "ollama", "deepseek", "xai", "phind", "google", "groq", "api"] }
 reqwest = "0.12.12"
 chrono-tz = "0.10.1"
+mrml = "4.0.1"
+tabled = "0.18.0"
 # /view engine
 
 [[bin]]

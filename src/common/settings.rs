@@ -21,8 +21,8 @@ pub enum PhoneNumber {
 impl fmt::Display for PhoneNumber {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            PhoneNumber::String(s) => write!(f, "{}", s),
-            PhoneNumber::Number(n) => write!(f, "{}", n),
+            Self::String(s) => write!(f, "{s}"),
+            Self::Number(n) => write!(f, "{n}"),
         }
     }
 }
@@ -36,11 +36,19 @@ pub struct TwilioSettings {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct MailerSettings {
+    pub from: String,
+    pub reply_to: Option<String>,
+    pub to: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Settings {
     pub tz: String,
     pub simplefin_bridge: Option<SimpleFinBridgeSettings>,
     pub openai: Option<OpenAiSettings>,
     pub twilio: Option<TwilioSettings>,
+    pub mailer: Option<MailerSettings>,
 }
 
 impl Settings {

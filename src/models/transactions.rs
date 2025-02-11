@@ -198,7 +198,7 @@ impl super::_entities::transactions::Model {
 
         active_transaction.account_id = ActiveValue::set(account_id.to_string());
         active_transaction.posted = ActiveValue::set(params.posted);
-        active_transaction.amount = ActiveValue::set(params.amount.clone());
+        active_transaction.amount = ActiveValue::set(params.amount);
         active_transaction.description = ActiveValue::set(params.description.clone());
         active_transaction.transacted_at = ActiveValue::set(params.transacted_at);
         active_transaction.pending = ActiveValue::set(params.pending);

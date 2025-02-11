@@ -8,7 +8,9 @@ pub struct SimpleFinBridgeSettings {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OpenAiSettings {
+    pub backend: String,
     pub api_key: String,
+    pub model: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

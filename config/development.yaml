@@ -151,6 +151,8 @@ settings:
     url: {{ get_env(name="SIMPLEFIN_BRIDGE_URL", default="https://beta-bridge.simplefin.org/simplefin") }}
   openai:
     api_key: {{ get_env(name="OPENAI_API_KEY", default="sk-TESTKEY") }}
+    model: {{ get_env(name="OPENAI_MODEL", default="claude-3-5-sonnet-latest") }}
+    backend: {{ get_env(name="OPENAI_BACKEND", default="anthropic") }}
   twilio:
     account_sid: {{ get_env(name="TWILIO_ACCOUNT_SID", default="") }}
     auth_token: {{ get_env(name="TWILIO_AUTH_TOKEN", default="") }}

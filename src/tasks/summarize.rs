@@ -11,7 +11,7 @@ use loco_rs::prelude::*;
 use reqwest;
 use serde_json::json;
 use tabled::{builder::Builder, settings::Style};
-
+use std::str::FromStr;
 pub struct Summarize;
 
 #[async_trait]
@@ -178,10 +178,10 @@ async fn process_llm(
     transactions_formatted: &str,
 ) -> Result<String> {
     let llm = LLMBuilder::new()
-        .backend(LLMBackend::Anthropic)
+        .backend(LLMBackend::from_str(&settings.openai.as_ref().unwrap().backend).unwrap())
         .system("You're a helpful assistant that creates a summary of expenses in the last month.")
         .api_key(settings.openai.as_ref().unwrap().api_key.clone())
-        .model("claude-3-5-sonnet-latest")
+        .model(settings.openai.as_ref().unwrap().model.clone())
         .timeout_seconds(1200)
         .temperature(0.7)
         .stream(false)

@@ -1,6 +1,6 @@
 # Loco configuration file documentation
 
-{% set storage_path = get_env(name="STORAGE_PATH", default="./storage") %}
+{% set storage_path = get_env(name="STORAGE_PATH", default="./data") %}
 {% set app_env = get_env(name="LOCO_ENV", default="development") %}
 
 # Application logging configuration

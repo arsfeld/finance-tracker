@@ -36,11 +36,15 @@ RUN apt-get update && apt-get install -y \
     openssl \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /usr/app
+WORKDIR /app
 
-COPY --from=builder /usr/src/config /usr/app/config
-COPY --from=builder /usr/src/assets /usr/app/assets
-COPY --from=builder /usr/src/target/release/finance_tracker-cli /usr/app/finance_tracker-cli
-COPY --from=ui-builder /usr/src/ui/dist /usr/app/ui/dist
+ENV STORAGE_PATH=/app/data
 
-ENTRYPOINT ["/usr/app/finance_tracker-cli"]
+COPY --from=builder /usr/src/config /app/config
+COPY --from=builder /usr/src/assets /app/assets
+COPY --from=builder /usr/src/target/release/finance_tracker-cli /app/finance_tracker-cli
+COPY --from=ui-builder /usr/src/ui/dist /app/ui/dist
+
+VOLUME /app/data
+
+ENTRYPOINT ["/app/finance_tracker-cli"]

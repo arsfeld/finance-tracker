@@ -2,10 +2,7 @@ use crate::{error::SyncError, settings::Settings};
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 use lettre::message::{header::ContentType, Message};
-use lettre::{
-    transport::smtp::authentication::Credentials, AsyncSmtpTransport, AsyncTransport,
-    Tokio1Executor,
-};
+use lettre::{transport::smtp::AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
 use simplefin_bridge::models::Transaction;
 use tera::{Context, Tera};
 
@@ -14,7 +11,7 @@ pub async fn send_twilio_sms(settings: &Settings, text: &str) -> Result<(), Sync
     let client = reqwest::Client::new();
     let twilio_url = format!(
         "https://api.twilio.com/2010-04-01/Accounts/{}/Messages.json",
-        settings.twilio_account_sid
+        settings.twilio_account_sid.as_ref().unwrap()
     );
 
     let spinner = ProgressBar::new_spinner();
@@ -25,14 +22,17 @@ pub async fn send_twilio_sms(settings: &Settings, text: &str) -> Result<(), Sync
             .expect("Failed to create spinner template"),
     );
 
-    for to_phone in settings.twilio_to_phones.split(',') {
+    for to_phone in settings.twilio_to_phones.as_ref().unwrap().split(',') {
         spinner.set_message(format!("Sending SMS to {to_phone}"));
 
         // Add delay between messages to prevent rate limiting
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
         let params = [
-            ("From", settings.twilio_from_phone.to_string()),
+            (
+                "From",
+                settings.twilio_from_phone.as_ref().unwrap().to_string(),
+            ),
             ("To", to_phone.trim().to_string()), // Trim whitespace from phone numbers
             ("Body", text.to_owned()),
         ];
@@ -40,8 +40,8 @@ pub async fn send_twilio_sms(settings: &Settings, text: &str) -> Result<(), Sync
         match client
             .post(&twilio_url)
             .basic_auth(
-                &settings.twilio_account_sid,
-                Some(&settings.twilio_auth_token),
+                settings.twilio_account_sid.as_ref().unwrap(),
+                Some(&settings.twilio_auth_token.as_ref().unwrap()),
             )
             .form(&params)
             .send()
@@ -105,13 +105,20 @@ pub async fn send_email(
 
     // Build the email message using Lettre.
     let email = Message::builder()
-        .from(settings.mailer_from.parse().map_err(|e| {
-            SyncError::EmailError(format!(
-                "Invalid sender email '{:?}': {}",
-                settings.mailer_from, e
-            ))
-        })?)
-        .to(settings.mailer_to.parse().map_err(|e| {
+        .from(
+            settings
+                .mailer_from
+                .as_ref()
+                .unwrap()
+                .parse()
+                .map_err(|e| {
+                    SyncError::EmailError(format!(
+                        "Invalid sender email '{:?}': {}",
+                        settings.mailer_from, e
+                    ))
+                })?,
+        )
+        .to(settings.mailer_to.as_ref().unwrap().parse().map_err(|e| {
             SyncError::EmailError(format!(
                 "Invalid recipient email '{:?}': {}",
                 settings.mailer_to, e
@@ -122,15 +129,10 @@ pub async fn send_email(
         .body(email_html)
         .map_err(|e| SyncError::EmailError(format!("Failed to build email: {e}")))?;
 
-    // Create SMTP credentials and transport.
-    let creds = Credentials::new(
-        settings.mailer_user.clone(),
-        settings.mailer_password.clone(),
-    );
+    let mailer_url = settings.mailer_url.clone().unwrap();
 
-    let mailer = AsyncSmtpTransport::<Tokio1Executor>::relay(&settings.mailer_host)
+    let mailer = AsyncSmtpTransport::<Tokio1Executor>::from_url(&mailer_url)
         .map_err(|e| SyncError::EmailError(format!("Failed to create SMTP transport: {e}")))?
-        .credentials(creds)
         .build();
 
     // Send the email and report the outcome.
@@ -139,7 +141,7 @@ pub async fn send_email(
             spinner.println(format!(
                 "{} Email sent successfully to {}",
                 style("✓").green(),
-                settings.mailer_to
+                settings.mailer_to.clone().unwrap()
             ));
             Ok(())
         }
@@ -159,7 +161,7 @@ pub async fn send_ntfy_notification(settings: &Settings, text: &str) -> Result<(
     };
 
     // Ensure that the ntfy_topic is set in your settings.
-    let ntfy_topic = settings.ntfy_topic.trim();
+    let ntfy_topic = settings.ntfy_topic.as_ref().unwrap().trim();
     let ntfy_url = format!("{ntfy_server}/{ntfy_topic}");
 
     let spinner = ProgressBar::new_spinner();

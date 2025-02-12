@@ -18,7 +18,7 @@
     </mj-head>
     <mj-body background-color="#f0f7f4">
         <!-- Header Section -->
-        <mj-section padding-bottom="20px" background-color="#ffffff" margin="20px">
+        <mj-section padding-bottom="20px" background-color="#ffffff">
             <mj-column>
                 <mj-raw>
                     <svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
@@ -43,6 +43,12 @@
             </mj-column>
         </mj-section>
 
+        <mj-section>
+            <mj-column>
+                <mj-divider border-width="1px" border-style="dashed" border-color="lightgrey" />
+            </mj-column>
+        </mj-section>
+        
         <!-- Transactions Table Section -->
         <mj-section background-color="#ffffff" padding="0" border-radius="16px">
             <mj-column padding="0">
@@ -68,8 +74,14 @@
             </mj-column>
         </mj-section>
 
+        <mj-section>
+            <mj-column>
+                <mj-divider border-width="1px" border-style="dashed" border-color="lightgrey" />
+            </mj-column>
+        </mj-section>
+
         <!-- Footer Section -->
-        <mj-section background-color="#e8f5e9" margin="20px">
+        <mj-section background-color="#e8f5e9">
             <mj-column>
                 <mj-text align="center" color="#4a4a4a" font-size="12px" padding="10px">
                     This is an automated message. Please do not reply to this email.

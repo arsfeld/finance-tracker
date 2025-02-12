@@ -20,7 +20,7 @@ use transactions::{format_transactions, get_transactions_for_period, validate_bi
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Skip sending SMS notifications
-    #[arg(long, default_value_t = true)]
+    #[arg(long)]
     skip_sms: bool,
 
     /// Skip sending email notifications
@@ -30,6 +30,21 @@ struct Args {
     /// Skip sending ntfy notifications
     #[arg(long)]
     skip_ntfy: bool,
+}
+
+#[must_use] pub const fn has_twilio_settings(settings: &Settings) -> bool {
+    settings.twilio_to_phones.is_some()
+        && settings.twilio_account_sid.is_some()
+        && settings.twilio_auth_token.is_some()
+        && settings.twilio_from_phone.is_some()
+}
+
+#[must_use] pub const fn has_mailer_settings(settings: &Settings) -> bool {
+    settings.mailer_to.is_some() && settings.mailer_url.is_some() && settings.mailer_from.is_some()
+}
+
+#[must_use] pub const fn has_ntfy_settings(settings: &Settings) -> bool {
+    settings.ntfy_topic.is_some()
 }
 
 #[tokio::main]
@@ -62,19 +77,19 @@ async fn main() -> Result<()> {
             println!("\n{} AI Summary:", style("✨").bold());
             println!("{}", style(text.clone()).cyan());
 
-            if !args.skip_ntfy {
+            if !args.skip_ntfy && has_ntfy_settings(&settings) {
                 send_ntfy_notification(&settings, &text).await?;
             } else {
                 println!("{} Skipping ntfy notification", style("ℹ️").bold());
             }
 
-            if !args.skip_email {
+            if !args.skip_email && has_mailer_settings(&settings) {
                 send_email(&settings, &text, transactions.clone()).await?;
             } else {
                 println!("{} Skipping email notification", style("ℹ️").bold());
             }
 
-            if !args.skip_sms {
+            if !args.skip_sms && has_twilio_settings(&settings) {
                 println!("\n{} Sending SMS notifications...", style("📱").bold());
                 if let Err(e) = send_twilio_sms(&settings, &text).await {
                     eprintln!("{} SMS error: {}", style("❌").bold(), e);

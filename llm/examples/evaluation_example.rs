@@ -1,7 +1,7 @@
 //! Example demonstrating evaluation and comparison of multiple LLM providers
 //!
 //! This example shows how to:
-//! 1. Initialize multiple LLM providers (Anthropic, Phind, DeepSeek)
+//! 1. Initialize multiple LLM providers (Anthropic, Phind, `DeepSeek`)
 //! 2. Configure scoring functions to evaluate responses
 //! 3. Send the same prompt to all providers
 //! 4. Compare and score the responses
@@ -107,7 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Display results with scores
     for (i, item) in results.iter().enumerate() {
-        println!("\n=== LLM #{} ===", i);
+        println!("\n=== LLM #{i} ===");
         println!("Score: {:.2}", item.score);
         println!("Response:\n{}", item.text);
         println!("================\n");

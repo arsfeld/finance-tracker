@@ -1,7 +1,7 @@
 //! Example demonstrating how to chain multiple LLM backends together
 //!
 //! This example shows how to:
-//! 1. Initialize multiple LLM backends (OpenAI, Anthropic)
+//! 1. Initialize multiple LLM backends (`OpenAI`, Anthropic)
 //! 2. Create a registry to manage multiple backends
 //! 3. Build a multi-step chain that uses different backends at each step
 //! 4. Pass results between steps using template variables
@@ -89,7 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .run().await?;
 
     // Display results from all steps
-    println!("Results: {:?}", chain_res);
+    println!("Results: {chain_res:?}");
     // Example output format:
     // chain_res["analysis"] => "The code has potential performance issues..."
     // chain_res["optimization"] => "Here are some suggested optimizations..."

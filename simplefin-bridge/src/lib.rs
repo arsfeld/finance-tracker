@@ -47,8 +47,6 @@ impl SimpleFinBridge {
         let client = reqwest::Client::new();
         let access_url = client.post(claim_url).send().await?.text().await?;
 
-        println!("access_url: {}", access_url);
-
         let parsed_url = Url::parse(&access_url)?;
         Ok(Self::new(parsed_url))
     }
@@ -70,8 +68,6 @@ impl SimpleFinBridge {
             let query = params.to_query_string();
             accounts_url.set_query(Some(&query));
         }
-
-        println!("accounts_url: {}", accounts_url);
 
         Ok(self.client.get(accounts_url).send().await?.json().await?)
     }

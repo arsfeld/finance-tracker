@@ -15,6 +15,7 @@
     git
     gcc
     cargo-watch
+    cargo-edit
     pnpm
     nodePackages.prettier
     nodejs

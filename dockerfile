@@ -29,21 +29,6 @@ COPY . .
 
 RUN cargo build --release
 
-FROM node:20 AS ui-builder
-
-RUN npm install -g pnpm@9.14.4
-
-WORKDIR /app/ui
-
-COPY ui/package.json .
-COPY ui/pnpm-lock.yaml .
-
-RUN pnpm install --frozen-lockfile
-
-COPY ui/ .
-
-RUN pnpm build
-
 FROM debian:bookworm-slim AS runner
 
 RUN apt-get update && apt-get install -y \
@@ -52,16 +37,6 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-ENV STORAGE_PATH=/app/data
-ENV LOCO_ENV=production
+COPY --from=builder /app/target/release/finance-tracker /app/finance-tracker
 
-COPY --from=builder /app/config /app/config
-COPY --from=builder /app/assets /app/assets
-COPY --from=builder /app/target/release/finance_tracker-cli /app/finance_tracker-cli
-COPY --from=ui-builder /app/ui/dist /app/ui/dist
-
-COPY supervisor.conf /etc/supervisor/conf.d/supervisor.conf
-
-VOLUME /app/data
-
-CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisor.conf"]
+CMD ["/app/finance-tracker"]

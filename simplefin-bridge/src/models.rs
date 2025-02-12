@@ -1,18 +1,18 @@
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 pub struct Info {
     pub versions: Vec<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AccountSet {
     pub errors: Vec<String>,
     pub accounts: Vec<Account>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Account {
     pub org: Organization,
     pub id: String,
@@ -27,7 +27,7 @@ pub struct Account {
     pub extra: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Organization {
     pub domain: Option<String>,
     #[serde(rename = "sfin-url")]
@@ -37,7 +37,7 @@ pub struct Organization {
     pub id: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Transaction {
     pub id: String,
     pub posted: i64,

@@ -16,4 +16,7 @@ pub enum SyncError {
     
     #[error("Validation error: {0}")]
     ValidationError(String),
+
+    #[error("Email error: {0}")]
+    EmailError(String),
 } 

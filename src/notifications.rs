@@ -1,0 +1,125 @@
+use crate::{error::SyncError, settings::Settings};
+use console::style;
+use indicatif::{ProgressBar, ProgressStyle};
+use reqwest;
+use simplefin_bridge::models::Transaction;
+use tera::{Context, Tera};
+use lettre::{AsyncSmtpTransport, Tokio1Executor, AsyncTransport, transport::smtp::authentication::Credentials};
+use lettre::message::{header::ContentType, Message};
+
+// Update the SMS sending function to handle rate limiting and provide better feedback
+pub async fn send_twilio_sms(settings: &Settings, text: &str) -> Result<(), SyncError> {
+    let client = reqwest::Client::new();
+    let twilio_url = format!(
+        "https://api.twilio.com/2010-04-01/Accounts/{}/Messages.json",
+        settings.twilio_account_sid
+    );
+
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈")
+            .template("{spinner:.green} {msg}")
+            .expect("Failed to create spinner template")
+    );
+
+    for to_phone in settings.twilio_to_phones.split(',') {
+        spinner.set_message(format!("Sending SMS to {}", to_phone));
+        
+        // Add delay between messages to prevent rate limiting
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+        let params = [
+            ("From", settings.twilio_from_phone.to_string()),
+            ("To", to_phone.trim().to_string()),  // Trim whitespace from phone numbers
+            ("Body", text.to_owned()),
+        ];
+
+        match client
+            .post(&twilio_url)
+            .basic_auth(&settings.twilio_account_sid, Some(&settings.twilio_auth_token))
+            .form(&params)
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if response.status().is_success() {
+                    spinner.println(format!("{} SMS sent successfully to {}", style("✓").green(), to_phone));
+                } else {
+                    let status = response.status();
+                    let error_body = response.text().await.unwrap_or_default();
+                    return Err(SyncError::TwilioError(format!(
+                        "Failed to send SMS to {}. Status: {}, Body: {}",
+                        to_phone,
+                        status,
+                        error_body
+                    )));
+                }
+            }
+            Err(e) => {
+                return Err(SyncError::TwilioError(format!(
+                    "Error sending SMS to {}: {}",
+                    to_phone, e
+                )));
+            }
+        }
+    }
+    
+    spinner.finish_and_clear();
+    Ok(())
+}
+
+pub async fn send_email(settings: &Settings, text: &str, transactions: Vec<Transaction>) -> Result<(), SyncError> {
+    let tera = Tera::new("templates/**/*").unwrap();
+
+    let parser = pulldown_cmark::Parser::new(text);
+    let mut html_output = String::new();
+    pulldown_cmark::html::push_html(&mut html_output, parser);
+
+    let mut context = Context::new();
+    context.insert("text", &html_output);
+    context.insert("transactions", &transactions);
+
+    let email_html = tera.render("email.mjml", &context).unwrap();
+
+    let root = mrml::parse(&email_html).unwrap();
+    let opts = mrml::prelude::render::RenderOptions::default();
+    let email_html = root.render(&opts).unwrap();
+
+    // Build the email message using Lettre.
+    let email = Message::builder()
+        .from(settings.mailer_from.parse().map_err(|e| {
+            SyncError::EmailError(format!("Invalid sender email '{:?}': {}", settings.mailer_from, e))
+        })?)
+        .to(settings.mailer_to.parse().map_err(|e| {
+            SyncError::EmailError(format!("Invalid recipient email '{:?}': {}", settings.mailer_to, e))
+        })?)
+        .subject("Monthly Expense Trackr")
+        .header(ContentType::TEXT_HTML)
+        .body(email_html)
+        .map_err(|e| SyncError::EmailError(format!("Failed to build email: {}", e)))?;
+
+    // Create SMTP credentials and transport.
+    let creds = Credentials::new(
+        settings.mailer_user.clone(),
+        settings.mailer_password.clone(),
+    );
+
+    let mailer = AsyncSmtpTransport::<Tokio1Executor>::relay(&settings.mailer_host)
+        .map_err(|e| SyncError::EmailError(format!("Failed to create SMTP transport: {}", e)))?
+        .credentials(creds)
+        .build();
+
+    // Send the email and report the outcome.
+    match mailer.send(email).await {
+        Ok(_) => {
+            println!("Email sent successfully");
+            Ok(())
+        }
+        Err(e) => Err(SyncError::EmailError(format!(
+            "Failed to send email: {}",
+            e
+        ))),
+    }
+}
+

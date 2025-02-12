@@ -1,0 +1,80 @@
+<mjml>
+    <mj-head>
+        <mj-attributes>
+            <mj-all font-family="Arial, sans-serif" />
+            <mj-text font-size="16px" color="#2a2a2a" line-height="1.5" />
+            <mj-section padding="20px" border-radius="16px" />
+        </mj-attributes>
+        <mj-style>
+            .rounded-table {
+                border-radius: 16px;
+                overflow: hidden;
+                box-shadow: 0 3px 6px rgba(0,0,0,0.1);
+            }
+            .table-row {
+                transition: background-color 0.2s ease;
+            }
+        </mj-style>
+    </mj-head>
+    <mj-body background-color="#f0f7f4">
+        <!-- Header Section -->
+        <mj-section padding-bottom="20px" background-color="#ffffff" margin="20px">
+            <mj-column>
+                <mj-raw>
+                    <svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                      <!-- House Outline with Roof -->
+                      <path d="M50 100 L100 50 L150 100 V150 H50 V100 Z" fill="#4CAF50" stroke="#388E3C" stroke-width="3" />
+                      
+                      <!-- Bar Chart inside the House -->
+                      <rect x="65" y="115" width="15" height="25" fill="#FFC107" />
+                      <rect x="90" y="105" width="15" height="35" fill="#FF9800" />
+                      <rect x="115" y="120" width="15" height="20" fill="#FF5722" />
+                      
+                      <!-- Monthly Indicator -->
+                      <text x="100" y="145" font-size="12" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif">Monthly</text>
+                    </svg>
+                </mj-raw>
+                <mj-text font-size="28px" color="#2e7d32" align="center" font-weight="bold" padding-bottom="20px">
+                    Transaction Summary
+                </mj-text>
+                <mj-text>
+                    {{ text | safe }}
+                </mj-text>
+            </mj-column>
+        </mj-section>
+
+        <!-- Transactions Table Section -->
+        <mj-section background-color="#ffffff" padding="0" border-radius="16px">
+            <mj-column padding="0">
+                <mj-table css-class="rounded-table" cellpadding="8px" padding="0">
+                    <tr style="background-color: #2e7d32; color: white;">
+                        <th style="border-radius: 16px 0 0 0;">Description</th>
+                        <th style="">Amount</th>
+                        <th style="border-radius: 0 16px 0 0;">Date</th>
+                    </tr>
+                    {% for transaction in transactions %}   
+                    <tr class="table-row" style="background-color: {% if loop.index is even %}#f8faf8{% else %}#ffffff{% endif %};">
+                        <td style="border-bottom: 1px solid #e8f5e9;">{{ transaction.description }}</td>
+                        <td style="16px 15px; border-bottom: 1px solid #e8f5e9;">{{ transaction.amount }}</td>
+                        <td style="16px 15px; border-bottom: 1px solid #e8f5e9;">{{ transaction.posted | date(format="%Y-%m-%d %H:%M", timezone="America/Toronto") }}</td>
+                    </tr>
+                    {% endfor %}
+                    <tr>
+                        <td style="border-radius: 0 0 0 16px; padding: 8px;"></td>
+                        <td style="padding: 8px;"></td>
+                        <td style="border-radius: 0 0 16px 0; padding: 8px;"></td>
+                    </tr>
+                </mj-table>
+            </mj-column>
+        </mj-section>
+
+        <!-- Footer Section -->
+        <mj-section background-color="#e8f5e9" margin="20px">
+            <mj-column>
+                <mj-text align="center" color="#4a4a4a" font-size="12px" padding="10px">
+                    This is an automated message. Please do not reply to this email.
+                </mj-text>
+            </mj-column>
+        </mj-section>
+    </mj-body>
+</mjml>

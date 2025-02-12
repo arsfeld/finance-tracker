@@ -16,6 +16,7 @@
     gcc
     cargo-watch
     cargo-edit
+    cargo-machete
     pnpm
     nodePackages.prettier
     nodejs

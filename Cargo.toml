@@ -11,29 +11,27 @@ default-run = "finance-tracker"
 
 [dependencies]
 simplefin-bridge = { path = "./simplefin-bridge" }
+llm = { path = "./llm", features = ["openai", "anthropic", "ollama", "deepseek", "xai", "phind", "google", "groq", "api"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-async-trait = "0.1.86"
 tokio = { version = "1.43.0", default-features = false }
-tracing = "0.1.41"
 chrono = "0.4"
-fluent-templates = { version = "0.13.0", features = ["tera"] }
-unic-langid = "0.9.5"
 dotenv = "0.15.0"
 thiserror = "1.0"
 url = "2.5.4"
-prettytable-rs = "0.10.0"
-rust_decimal = "1.36.0"
-llm = { version = "1.0.7", features = ["openai", "anthropic", "ollama", "deepseek", "xai", "phind", "google", "groq", "api"] }
-reqwest = "0.12.12"
-chrono-tz = "0.10.1"
+reqwest = { version = "0.12", default-features = false, features = ["http2", "json", "rustls-tls"] }
 mrml = "4.0.1"
 tabled = "0.18.0"
 envconfig = "0.11.0"
 indicatif = "0.17"
 console = "0.15"
 anyhow = "1.0"
+tera = "1.20.0"
+clap = { version = "4.4", features = ["derive"] }
+pulldown-cmark = "0.12.2"
+lettre = { version = "0.11.12", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls"] }
+
 
 [[bin]]
 name = "finance-tracker"

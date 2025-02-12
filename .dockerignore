@@ -4,7 +4,6 @@ dockerfile
 .git
 .gitignore
 .env
-supervisor.conf
 
 ui/node_modules
 ui/dist

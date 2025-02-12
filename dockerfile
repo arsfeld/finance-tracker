@@ -1,4 +1,14 @@
-FROM rust:1.82-slim AS builder
+FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
+
+WORKDIR /app
+
+FROM chef AS planner
+
+COPY . .
+
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder 
 
 RUN apt-get update && apt-get install -y \
     pkg-config \
@@ -9,8 +19,12 @@ RUN apt-get update && apt-get install -y \
     libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /usr/src/
+COPY --from=planner /app/recipe.json recipe.json
 
+# Build dependencies - this is the caching Docker layer!
+RUN cargo chef cook --release --recipe-path recipe.json
+
+# Build application
 COPY . .
 
 RUN cargo build --release
@@ -19,7 +33,7 @@ FROM node:20 AS ui-builder
 
 RUN npm install -g pnpm@9.14.4
 
-WORKDIR /usr/src/ui
+WORKDIR /app/ui
 
 COPY ui/package.json .
 COPY ui/pnpm-lock.yaml .
@@ -30,7 +44,7 @@ COPY ui/ .
 
 RUN pnpm build
 
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim AS runner
 
 RUN apt-get update && apt-get install -y \
     openssl ca-certificates supervisor\
@@ -41,10 +55,10 @@ WORKDIR /app
 ENV STORAGE_PATH=/app/data
 ENV LOCO_ENV=production
 
-COPY --from=builder /usr/src/config /app/config
-COPY --from=builder /usr/src/assets /app/assets
-COPY --from=builder /usr/src/target/release/finance_tracker-cli /app/finance_tracker-cli
-COPY --from=ui-builder /usr/src/ui/dist /app/ui/dist
+COPY --from=builder /app/config /app/config
+COPY --from=builder /app/assets /app/assets
+COPY --from=builder /app/target/release/finance_tracker-cli /app/finance_tracker-cli
+COPY --from=ui-builder /app/ui/dist /app/ui/dist
 
 COPY supervisor.conf /etc/supervisor/conf.d/supervisor.conf
 

@@ -143,8 +143,58 @@ pub async fn send_email(
             ));
             Ok(())
         }
-        Err(e) => Err(SyncError::EmailError(format!(
-            "Failed to send email: {e}"
-        ))),
+        Err(e) => Err(SyncError::EmailError(format!("Failed to send email: {e}"))),
+    }
+}
+
+// New function to send notifications via ntfy.sh
+pub async fn send_ntfy_notification(settings: &Settings, text: &str) -> Result<(), SyncError> {
+    let client = reqwest::Client::new();
+
+    // Use settings.ntfy_server if provided, otherwise default to "https://ntfy.sh"
+    let ntfy_server = if settings.ntfy_server.trim().is_empty() {
+        "https://ntfy.sh".to_string()
+    } else {
+        settings.ntfy_server.clone()
+    };
+
+    // Ensure that the ntfy_topic is set in your settings.
+    let ntfy_topic = settings.ntfy_topic.trim();
+    let ntfy_url = format!("{ntfy_server}/{ntfy_topic}");
+
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈")
+            .template("{spinner:.blue} {msg}")
+            .expect("Failed to create spinner template"),
+    );
+    spinner.set_message("Sending notification via ntfy.sh".to_string());
+
+    // Send the POST request with the given text as the notification body
+    match client.post(&ntfy_url).body(text.to_owned()).send().await {
+        Ok(response) => {
+            if response.status().is_success() {
+                spinner.println(format!(
+                    "{} ntfy.sh notification sent successfully",
+                    style("✓").green()
+                ));
+                spinner.finish_and_clear();
+                Ok(())
+            } else {
+                let status = response.status();
+                let error_body = response.text().await.unwrap_or_default();
+                spinner.finish_and_clear();
+                Err(SyncError::NtfyError(format!(
+                    "Failed to send ntfy.sh notification. Status: {status}, Body: {error_body}"
+                )))
+            }
+        }
+        Err(e) => {
+            spinner.finish_and_clear();
+            Err(SyncError::NtfyError(format!(
+                "Error sending ntfy.sh notification: {e}"
+            )))
+        }
     }
 }

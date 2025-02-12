@@ -12,7 +12,7 @@ mod settings;
 mod transactions;
 
 use llm::process_llm;
-use notifications::{send_email, send_twilio_sms};
+use notifications::{send_email, send_ntfy_notification, send_twilio_sms};
 use settings::Settings;
 use transactions::{format_transactions, get_transactions_for_period, validate_billing_period};
 
@@ -20,12 +20,16 @@ use transactions::{format_transactions, get_transactions_for_period, validate_bi
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Skip sending SMS notifications
-    #[arg(long)]
+    #[arg(long, default_value_t = true)]
     skip_sms: bool,
 
     /// Skip sending email notifications
     #[arg(long)]
     skip_email: bool,
+
+    /// Skip sending ntfy notifications
+    #[arg(long)]
+    skip_ntfy: bool,
 }
 
 #[tokio::main]
@@ -57,6 +61,12 @@ async fn main() -> Result<()> {
         Ok(text) => {
             println!("\n{} AI Summary:", style("✨").bold());
             println!("{}", style(text.clone()).cyan());
+
+            if !args.skip_ntfy {
+                send_ntfy_notification(&settings, &text).await?;
+            } else {
+                println!("{} Skipping ntfy notification", style("ℹ️").bold());
+            }
 
             if !args.skip_email {
                 send_email(&settings, &text, transactions.clone()).await?;

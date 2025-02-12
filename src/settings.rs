@@ -30,4 +30,8 @@ pub struct Settings {
     pub mailer_user: String,
     #[envconfig(from = "MAILER_PASSWORD")]
     pub mailer_password: String,
+    #[envconfig(from = "NTFY_SERVER", default = "https://ntfy.sh")]
+    pub ntfy_server: String,
+    #[envconfig(from = "NTFY_TOPIC")]
+    pub ntfy_topic: String,
 }

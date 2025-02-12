@@ -19,4 +19,7 @@ pub enum SyncError {
 
     #[error("Email error: {0}")]
     EmailError(String),
+
+    #[error("Ntfy error: {0}")]
+    NtfyError(String),
 }

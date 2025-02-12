@@ -29,5 +29,5 @@ pub struct Settings {
     #[envconfig(from = "MAILER_USER")]
     pub mailer_user: String,
     #[envconfig(from = "MAILER_PASSWORD")]
-    pub mailer_password: String, 
-} 
+    pub mailer_password: String,
+}

@@ -1,5 +1,5 @@
 //! Example demonstrating how to serve multiple LLM backends through a REST API
-//! 
+//!
 //! This example shows how to chain multiple LLM providers together to:
 //! 1. Use Groq to perform initial calculation
 //! 2. Use Claude to provide analysis and commentary
@@ -17,7 +17,7 @@
 //!     "steps": [
 //!         {
 //!             "provider_id": "anthropic",
-//!             "id": "step1", 
+//!             "id": "step1",
 //!             "template": "Analyze and comment on this calculation: {{initial}}",
 //!             "temperature": 0.7
 //!         },

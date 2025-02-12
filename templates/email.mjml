@@ -52,11 +52,11 @@
                         <th style="">Amount</th>
                         <th style="border-radius: 0 16px 0 0;">Date</th>
                     </tr>
-                    {% for transaction in transactions %}   
+                    {% for transaction in transactions %}
                     <tr class="table-row" style="background-color: {% if loop.index is even %}#f8faf8{% else %}#ffffff{% endif %};">
                         <td style="border-bottom: 1px solid #e8f5e9;">{{ transaction.description }}</td>
                         <td style="16px 15px; border-bottom: 1px solid #e8f5e9;">{{ transaction.amount }}</td>
-                        <td style="16px 15px; border-bottom: 1px solid #e8f5e9;">{{ transaction.posted | date(format="%Y-%m-%d %H:%M", timezone="America/Toronto") }}</td>
+                        <td style="16px 15px; border-bottom: 1px solid #e8f5e9;">{{ transaction.transacted_at | default(transaction.posted) | date(format="%Y-%m-%d %H:%M", timezone="America/Toronto") }}</td>
                     </tr>
                     {% endfor %}
                     <tr>

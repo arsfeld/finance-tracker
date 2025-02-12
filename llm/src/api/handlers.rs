@@ -7,8 +7,8 @@ use uuid::Uuid;
 
 use super::types::{ChatRequest, ChatResponse, Choice, Message};
 use super::ServerState;
+use crate::chain::{MultiChainStepBuilder, MultiChainStepMode, MultiPromptChain};
 use crate::chat::{ChatMessage, ChatRole};
-use crate::chain::{MultiPromptChain, MultiChainStepBuilder, MultiChainStepMode};
 
 /// Handles chat completion requests to the API server
 ///
@@ -74,7 +74,8 @@ pub async fn handle_chat(
         })
         .collect();
 
-    let (provider_id, model_name) = req.model
+    let (provider_id, model_name) = req
+        .model
         .as_ref()
         .ok_or((StatusCode::BAD_REQUEST, "Model is required".to_string()))?
         .split_once(':')
@@ -85,29 +86,28 @@ pub async fn handle_chat(
         format!("Unknown provider: {}", provider_id),
     ))?;
 
-        let response = provider
-            .chat(&messages)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let response = provider
+        .chat(&messages)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-        return Ok(Json(ChatResponse {
-            id: format!("chatcmpl-{}", Uuid::new_v4()),
-            object: "chat.completion".to_string(),
-            created: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            model: model_name.to_string(),
-            choices: vec![Choice {
-                index: 0,
-                message: Message {
-                    role: "assistant".to_string(),
-                    content: response,
-                },
-                finish_reason: "stop".to_string(),
-            }],
-        }));
-
+    return Ok(Json(ChatResponse {
+        id: format!("chatcmpl-{}", Uuid::new_v4()),
+        object: "chat.completion".to_string(),
+        created: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+        model: model_name.to_string(),
+        choices: vec![Choice {
+            index: 0,
+            message: Message {
+                role: "assistant".to_string(),
+                content: response,
+            },
+            finish_reason: "stop".to_string(),
+        }],
+    }));
 }
 
 /// Handles multi-step chain requests
@@ -120,7 +120,8 @@ async fn handle_chain_request(
 
     let transform_response = |resp: String, transform: &str| -> String {
         match transform {
-            "extract_think" => resp.lines()
+            "extract_think" => resp
+                .lines()
                 .skip_while(|line| !line.contains("<think>"))
                 .take_while(|line| !line.contains("</think>"))
                 .map(|line| line.replace("<think>", "").trim().to_string())
@@ -128,19 +129,18 @@ async fn handle_chain_request(
                 .collect::<Vec<_>>()
                 .join("\n"),
             "trim_whitespace" => resp.trim().to_string(),
-            _ => resp.to_string()
+            _ => resp.to_string(),
         }
     };
 
     if let Some(model) = req.model {
-        let (provider_id, _) = model.split_once(':').ok_or((
-            StatusCode::BAD_REQUEST,
-            "Invalid model format".to_string(),
-        ))?;
-        
+        let (provider_id, _) = model
+            .split_once(':')
+            .ok_or((StatusCode::BAD_REQUEST, "Invalid model format".to_string()))?;
+
         provider_ids.push(provider_id.to_string());
         let messages = req.messages.unwrap_or(vec![]);
-        
+
         chain = chain.step(
             MultiChainStepBuilder::new(MultiChainStepMode::Chat)
                 .provider_id(provider_id.to_string())
@@ -153,28 +153,38 @@ async fn handle_chain_request(
                     move |resp| transform_response(resp, &transform)
                 })
                 .build()
-                .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?
+                .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?,
         );
     }
 
-    chain = chain.chain(req.steps.into_iter().map(|step| {
-        provider_ids.push(step.provider_id.clone());
-        let transform = step.response_transform.unwrap_or_default();
-        MultiChainStepBuilder::new(MultiChainStepMode::Chat)
-            .provider_id(step.provider_id)
-            .id(step.id)
-            .template(step.template)
-            .temperature(step.temperature.unwrap_or(0.7))
-            .max_tokens(step.max_tokens.unwrap_or(1000))
-            .response_transform(move |resp| transform_response(resp, &transform))
-            .build()
-    }).collect::<Result<Vec<_>, _>>()
-    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?);
+    chain = chain.chain(
+        req.steps
+            .into_iter()
+            .map(|step| {
+                provider_ids.push(step.provider_id.clone());
+                let transform = step.response_transform.unwrap_or_default();
+                MultiChainStepBuilder::new(MultiChainStepMode::Chat)
+                    .provider_id(step.provider_id)
+                    .id(step.id)
+                    .template(step.template)
+                    .temperature(step.temperature.unwrap_or(0.7))
+                    .max_tokens(step.max_tokens.unwrap_or(1000))
+                    .response_transform(move |resp| transform_response(resp, &transform))
+                    .build()
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?,
+    );
 
-    let chain_result = chain.run().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let chain_result = chain
+        .run()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let final_response = chain_result.values().last()
-        .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No response generated".to_string()))?;
+    let final_response = chain_result.values().last().ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "No response generated".to_string(),
+    ))?;
 
     Ok(Json(ChatResponse {
         id: format!("chatcmpl-{}", Uuid::new_v4()),

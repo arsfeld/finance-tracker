@@ -1,5 +1,5 @@
 //! Server module for exposing LLM functionality via REST API
-//! 
+//!
 //! Provides a REST API server that exposes LLM functionality through standardized endpoints.
 //! Supports authentication, CORS, and handles chat completion requests.
 

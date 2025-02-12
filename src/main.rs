@@ -1,21 +1,20 @@
+use anyhow::Result;
 use chrono::{Datelike, Local, NaiveDate};
 use clap::Parser;
 use console::style;
 use dotenv::dotenv;
-use anyhow::Result;
 use envconfig::Envconfig;
 
 mod error;
+mod llm;
+mod notifications;
 mod settings;
 mod transactions;
-mod notifications;
-mod llm;
 
-use error::SyncError;
-use settings::Settings;
-use transactions::{get_transactions_for_period, format_transactions, validate_billing_period};
-use notifications::{send_twilio_sms, send_email};
 use llm::process_llm;
+use notifications::{send_email, send_twilio_sms};
+use settings::Settings;
+use transactions::{format_transactions, get_transactions_for_period, validate_billing_period};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -40,7 +39,7 @@ async fn main() -> Result<()> {
     let today = now_local.date_naive();
     let start_date = NaiveDate::from_ymd_opt(today.year(), today.month(), 1).unwrap();
     let billing_period = (start_date, today);
-    
+
     validate_billing_period(billing_period.0, billing_period.1)?;
 
     println!("{} Fetching transactions...", style("📊").bold());
@@ -64,7 +63,7 @@ async fn main() -> Result<()> {
             } else {
                 println!("{} Skipping email notification", style("ℹ️").bold());
             }
-            
+
             if !args.skip_sms {
                 println!("\n{} Sending SMS notifications...", style("📱").bold());
                 if let Err(e) = send_twilio_sms(&settings, &text).await {

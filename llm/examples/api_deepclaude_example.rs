@@ -1,5 +1,5 @@
 //! Example demonstrating how to serve multiple LLM backends through a REST API
-//! 
+//!
 //! This example shows how to chain multiple LLM providers together to:
 //! 1. Use Groq to generate creative system identification approaches
 //! 2. Use Claude to convert those ideas into executable commands
@@ -18,7 +18,7 @@
 //!             "temperature": 0.7
 //!         },
 //!         {
-//!             "provider_id": "anthropic", 
+//!             "provider_id": "anthropic",
 //!             "id": "step2",
 //!             "template": "Take the following command reasoning and generate a command to execute it on the system: {{thinking}}\n\nGenerate a command to execute it on the system. return only the command.",
 //!             "max_tokens": 5000

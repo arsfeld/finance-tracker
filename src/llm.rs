@@ -18,7 +18,7 @@ pub async fn process_llm(
         ProgressStyle::default_spinner()
             .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈")
             .template("{spinner:.blue} {msg}")
-            .expect("Failed to create spinner template")
+            .expect("Failed to create spinner template"),
     );
     spinner.set_message("Analyzing transactions...");
 

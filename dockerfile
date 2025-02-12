@@ -33,7 +33,7 @@ RUN pnpm build
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y \
-    openssl ca-certificates \
+    openssl ca-certificates supervisor\
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -46,6 +46,8 @@ COPY --from=builder /usr/src/assets /app/assets
 COPY --from=builder /usr/src/target/release/finance_tracker-cli /app/finance_tracker-cli
 COPY --from=ui-builder /usr/src/ui/dist /app/ui/dist
 
+COPY supervisor.conf /etc/supervisor/conf.d/supervisor.conf
+
 VOLUME /app/data
 
-ENTRYPOINT ["/app/finance_tracker-cli"]
+CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisor.conf"]

@@ -32,18 +32,21 @@ struct Args {
     skip_ntfy: bool,
 }
 
-#[must_use] pub const fn has_twilio_settings(settings: &Settings) -> bool {
+#[must_use]
+pub const fn has_twilio_settings(settings: &Settings) -> bool {
     settings.twilio_to_phones.is_some()
         && settings.twilio_account_sid.is_some()
         && settings.twilio_auth_token.is_some()
         && settings.twilio_from_phone.is_some()
 }
 
-#[must_use] pub const fn has_mailer_settings(settings: &Settings) -> bool {
+#[must_use]
+pub const fn has_mailer_settings(settings: &Settings) -> bool {
     settings.mailer_to.is_some() && settings.mailer_url.is_some() && settings.mailer_from.is_some()
 }
 
-#[must_use] pub const fn has_ntfy_settings(settings: &Settings) -> bool {
+#[must_use]
+pub const fn has_ntfy_settings(settings: &Settings) -> bool {
     settings.ntfy_topic.is_some()
 }
 

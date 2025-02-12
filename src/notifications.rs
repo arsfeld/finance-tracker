@@ -79,6 +79,14 @@ pub async fn send_email(
     text: &str,
     transactions: Vec<Transaction>,
 ) -> Result<(), SyncError> {
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈")
+            .template("{spinner:.green} {msg}")
+            .expect("Failed to create spinner template"),
+    );
+
     let tera = Tera::new("templates/**/*").unwrap();
 
     let parser = pulldown_cmark::Parser::new(text);
@@ -128,7 +136,11 @@ pub async fn send_email(
     // Send the email and report the outcome.
     match mailer.send(email).await {
         Ok(_) => {
-            println!("Email sent successfully");
+            spinner.println(format!(
+                "{} Email sent successfully to {}",
+                style("✓").green(),
+                settings.mailer_to
+            ));
             Ok(())
         }
         Err(e) => Err(SyncError::EmailError(format!(

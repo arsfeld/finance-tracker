@@ -25,7 +25,7 @@ pub struct SimpleFinBridge {
 }
 
 impl SimpleFinBridge {
-    /// Creates a new SimpleFinBridge instance from a URL.
+    /// Creates a new `SimpleFinBridge` instance from a URL.
     pub fn new(url: impl Into<Url>) -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -33,7 +33,7 @@ impl SimpleFinBridge {
         }
     }
 
-    /// Creates a new SimpleFinBridge instance from a base64-encoded token.
+    /// Creates a new `SimpleFinBridge` instance from a base64-encoded token.
     ///
     /// # Errors
     ///
@@ -46,8 +46,6 @@ impl SimpleFinBridge {
         let claim_url = String::from_utf8(BASE64_STANDARD.decode(token)?)?;
         let client = reqwest::Client::new();
         let access_url = client.post(claim_url).send().await?.text().await?;
-
-        println!("access_url: {}", access_url);
 
         let parsed_url = Url::parse(&access_url)?;
         Ok(Self::new(parsed_url))
@@ -71,8 +69,6 @@ impl SimpleFinBridge {
             accounts_url.set_query(Some(&query));
         }
 
-        println!("accounts_url: {}", accounts_url);
-
         Ok(self.client.get(accounts_url).send().await?.json().await?)
     }
 }
@@ -87,31 +83,37 @@ pub struct AccountsParams {
 }
 
 impl AccountsParams {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn start_date(mut self, date: i64) -> Self {
+    #[must_use]
+    pub const fn start_date(mut self, date: i64) -> Self {
         self.start_date = Some(date);
         self
     }
 
-    pub fn end_date(mut self, date: i64) -> Self {
+    #[must_use]
+    pub const fn end_date(mut self, date: i64) -> Self {
         self.end_date = Some(date);
         self
     }
 
-    pub fn pending(mut self, pending: bool) -> Self {
+    #[must_use]
+    pub const fn pending(mut self, pending: bool) -> Self {
         self.pending = Some(pending);
         self
     }
 
+    #[must_use]
     pub fn account_ids(mut self, ids: Vec<String>) -> Self {
         self.account_ids = Some(ids);
         self
     }
 
-    pub fn balances_only(mut self, balances_only: bool) -> Self {
+    #[must_use]
+    pub const fn balances_only(mut self, balances_only: bool) -> Self {
         self.balances_only = Some(balances_only);
         self
     }
@@ -120,10 +122,10 @@ impl AccountsParams {
         let mut params = Vec::new();
 
         if let Some(start_date) = self.start_date {
-            params.push(format!("start-date={}", start_date));
+            params.push(format!("start-date={start_date}"));
         }
         if let Some(end_date) = self.end_date {
-            params.push(format!("end-date={}", end_date));
+            params.push(format!("end-date={end_date}"));
         }
         if let Some(pending) = self.pending {
             if pending {
@@ -132,7 +134,7 @@ impl AccountsParams {
         }
         if let Some(account_ids) = &self.account_ids {
             for id in account_ids {
-                params.push(format!("account={}", id));
+                params.push(format!("account={id}"));
             }
         }
         if let Some(balances_only) = self.balances_only {

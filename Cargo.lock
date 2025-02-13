@@ -691,6 +691,7 @@ dependencies = [
  "mrml",
  "pulldown-cmark",
  "reqwest",
+ "rust_decimal",
  "serde",
  "serde_json",
  "simplefin-bridge",

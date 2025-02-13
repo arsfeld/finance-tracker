@@ -1,10 +1,12 @@
+use crate::settings::NotificationType;
 use crate::{error::SyncError, settings::Settings};
+use anyhow::Result;
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 use lettre::message::{header::ContentType, Message};
 use lettre::{transport::smtp::AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
 use simplefin_bridge::models::Transaction;
-use tera::{Context, Tera};
+use tera::{Context, Tera}; // Assuming transactions::Transaction is defined here
 
 // Update the SMS sending function to handle rate limiting and provide better feedback
 pub async fn send_twilio_sms(settings: &Settings, text: &str) -> Result<(), SyncError> {
@@ -149,8 +151,18 @@ pub async fn send_email(
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum NtfyNotificationType {
+    Info,
+    Warning,
+}
+
 // New function to send notifications via ntfy.sh
-pub async fn send_ntfy_notification(settings: &Settings, text: &str) -> Result<(), SyncError> {
+pub async fn send_ntfy_notification(
+    settings: &Settings,
+    text: &str,
+    notification_type: NtfyNotificationType,
+) -> Result<(), SyncError> {
     let client = reqwest::Client::new();
 
     // Use settings.ntfy_server if provided, otherwise default to "https://ntfy.sh"
@@ -161,7 +173,12 @@ pub async fn send_ntfy_notification(settings: &Settings, text: &str) -> Result<(
     };
 
     // Ensure that the ntfy_topic is set in your settings.
-    let ntfy_topic = settings.ntfy_topic.as_ref().unwrap().trim();
+    let ntfy_topic = match notification_type {
+        NtfyNotificationType::Info => settings.ntfy_topic.as_ref().unwrap().trim().to_string(),
+        NtfyNotificationType::Warning => {
+            format!("{}-warning", settings.ntfy_topic.as_ref().unwrap().trim())
+        }
+    };
     let ntfy_url = format!("{ntfy_server}/{ntfy_topic}");
 
     let spinner = ProgressBar::new_spinner();
@@ -199,4 +216,57 @@ pub async fn send_ntfy_notification(settings: &Settings, text: &str) -> Result<(
             )))
         }
     }
+}
+
+// New helper functions moved from main.rs:
+pub const fn has_twilio_settings(settings: &Settings) -> bool {
+    settings.twilio_to_phones.is_some()
+        && settings.twilio_account_sid.is_some()
+        && settings.twilio_auth_token.is_some()
+        && settings.twilio_from_phone.is_some()
+}
+
+pub const fn has_mailer_settings(settings: &Settings) -> bool {
+    settings.mailer_to.is_some() && settings.mailer_url.is_some() && settings.mailer_from.is_some()
+}
+
+pub const fn has_ntfy_settings(settings: &Settings) -> bool {
+    settings.ntfy_topic.is_some()
+}
+
+// New function to dispatch all notifications:
+pub async fn dispatch_notifications(
+    settings: &Settings,
+    summary: &str,
+    transactions: &Vec<Transaction>,
+    notification_types: &[NotificationType],
+) -> Result<()> {
+    for notification_type in notification_types {
+        match notification_type {
+            NotificationType::Ntfy => {
+                if has_ntfy_settings(settings) {
+                    send_ntfy_notification(settings, summary, NtfyNotificationType::Info).await?;
+                } else {
+                    println!("{} Skipping ntfy notification", style("ℹ️").bold());
+                }
+            }
+            NotificationType::Email => {
+                if has_mailer_settings(settings) {
+                    // Note: send_email expects to receive the transactions list.
+                    // We clone here if needed.
+                    send_email(settings, summary, transactions.clone()).await?;
+                } else {
+                    println!("{} Skipping email notification", style("ℹ️").bold());
+                }
+            }
+            NotificationType::Sms => {
+                if has_twilio_settings(settings) {
+                    send_twilio_sms(settings, summary).await?;
+                } else {
+                    println!("{} Skipping SMS notification", style("ℹ️").bold());
+                }
+            }
+        }
+    }
+    Ok(())
 }

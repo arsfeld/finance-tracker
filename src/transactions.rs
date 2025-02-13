@@ -1,13 +1,13 @@
 use crate::{error::SyncError, settings::Settings};
 use chrono::{DateTime, NaiveDate};
 use console::style;
-use simplefin_bridge::models::Transaction;
+use simplefin_bridge::models::{Account, Transaction};
 use tabled::{builder::Builder, settings::Style};
 
 pub async fn get_transactions_for_period(
     settings: &Settings,
     billing_period: (NaiveDate, NaiveDate),
-) -> Result<Vec<Transaction>, SyncError> {
+) -> Result<Vec<Account>, SyncError> {
     let url_parsed =
         url::Url::parse(&settings.simplefin_bridge_url).map_err(SyncError::UrlError)?;
 
@@ -50,13 +50,7 @@ pub async fn get_transactions_for_period(
         .await
         .map_err(|e| SyncError::SimpleFinError(e.to_string()))?;
 
-    let transactions = accounts
-        .accounts
-        .iter()
-        .flat_map(|account| account.transactions.clone().unwrap_or_default())
-        .collect();
-
-    Ok(transactions)
+    Ok(accounts.accounts)
 }
 
 pub async fn format_transactions(transactions: Vec<Transaction>) -> Result<String, SyncError> {

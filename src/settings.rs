@@ -1,4 +1,6 @@
+use clap::{Parser, ValueEnum};
 use envconfig::Envconfig;
+use std::str::FromStr;
 
 #[derive(Envconfig)]
 pub struct Settings {
@@ -28,4 +30,34 @@ pub struct Settings {
     pub ntfy_server: String,
     #[envconfig(from = "NTFY_TOPIC")]
     pub ntfy_topic: Option<String>,
+}
+
+#[derive(Parser, Clone, Copy, ValueEnum)]
+pub enum NotificationType {
+    Sms,
+    Email,
+    Ntfy,
+}
+
+impl FromStr for NotificationType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "sms" => Self::Sms,
+            "email" => Self::Email,
+            "ntfy" => Self::Ntfy,
+            _ => return Err(format!("Invalid notification type: {s}")),
+        })
+    }
+}
+
+impl ToString for NotificationType {
+    fn to_string(&self) -> String {
+        match self {
+            Self::Sms => "sms".to_string(),
+            Self::Email => "email".to_string(),
+            Self::Ntfy => "ntfy".to_string(),
+        }
+    }
 }

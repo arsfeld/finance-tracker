@@ -14,8 +14,8 @@ pub struct Settings {
     pub twilio_from_phone: Option<String>,
     #[envconfig(from = "TWILIO_TO_PHONES")]
     pub twilio_to_phones: Option<String>,
-    #[envconfig(from = "OPENAI_BACKEND", default = "anthropic")]
-    pub openai_backend: String,
+    #[envconfig(from = "OPENAI_URL")]
+    pub openai_url: String,
     #[envconfig(from = "OPENAI_API_KEY")]
     pub openai_api_key: String,
     #[envconfig(from = "OPENAI_MODEL", default = "claude-3-5-sonnet-latest")]

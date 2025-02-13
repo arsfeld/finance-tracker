@@ -1,7 +1,10 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum SyncError {
+pub enum TrackerError {
+    #[error("Environment configuration error: {0}")]
+    EnvConfigError(String),
+
     #[error("URL error: {0}")]
     UrlError(#[from] url::ParseError),
 
@@ -22,4 +25,10 @@ pub enum SyncError {
 
     #[error("Ntfy error: {0}")]
     NtfyError(String),
+
+    #[error("No transactions found")]
+    NoTransactionsFound,
+
+    #[error("Notification error: {0}")]
+    NotificationError(String),
 }

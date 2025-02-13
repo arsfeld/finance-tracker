@@ -11,7 +11,6 @@ default-run = "finance-tracker"
 
 [dependencies]
 simplefin-bridge = { path = "./simplefin-bridge" }
-llm = { path = "./llm", features = ["openai", "anthropic", "ollama", "deepseek", "xai", "phind", "google", "groq", "api"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

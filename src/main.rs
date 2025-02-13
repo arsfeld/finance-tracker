@@ -4,15 +4,18 @@ use clap::Parser;
 use console::style;
 use dotenv::dotenv;
 use envconfig::Envconfig;
+use error::TrackerError;
 use rust_decimal::Decimal;
 use simplefin_bridge::models::{Account, Transaction};
+
 mod error;
 mod llm;
+mod llm_response;
 mod notifications;
 mod settings;
 mod transactions;
 
-use llm::process_llm;
+use llm::{get_llm_prompt, get_llm_response};
 use notifications::NtfyNotificationType;
 use settings::{NotificationType, Settings};
 use transactions::{format_transactions, get_transactions_for_period, validate_billing_period};
@@ -29,10 +32,11 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), TrackerError> {
     println!("{} Loading configuration...", style("🔧").bold());
     dotenv().ok();
-    let settings = Settings::init_from_env()?;
+    let settings =
+        Settings::init_from_env().map_err(|e| TrackerError::EnvConfigError(e.to_string()))?;
     let args = Args::parse();
 
     let now_local = Local::now();
@@ -82,20 +86,15 @@ async fn main() -> Result<()> {
 
     if transactions.is_empty() {
         println!("{} No transactions found", style("ℹ️").bold());
-        return Ok(());
+        return Err(TrackerError::NoTransactionsFound);
     }
 
     let transactions_formatted = format_transactions(transactions.clone()).await?;
 
+    let prompt = get_llm_prompt(billing_period, &accounts, &transactions_formatted).await?;
+
     println!("{} Analyzing transactions with AI...", style("🤖").bold());
-    match process_llm(
-        &settings,
-        billing_period,
-        &accounts,
-        &transactions_formatted,
-    )
-    .await
-    {
+    match get_llm_response(&settings, prompt).await {
         Ok(text) => {
             println!("\n{} AI Summary:", style("✨").bold());
             println!("{}", style(text.clone()).cyan());
@@ -107,12 +106,16 @@ async fn main() -> Result<()> {
                     &transactions,
                     &args.notifications,
                 )
-                .await?;
+                .await
+                .map_err(|e| TrackerError::NotificationError(e.to_string()))?;
             } else {
                 println!("{} Notifications disabled", style("ℹ️").bold());
             }
         }
-        Err(e) => eprintln!("{} Chat error: {}", style("❌").bold(), e),
+        Err(e) => {
+            eprintln!("{} Chat error: {}", style("❌").bold(), e);
+            return Err(TrackerError::LLMError(e.to_string()));
+        }
     }
 
     Ok(())

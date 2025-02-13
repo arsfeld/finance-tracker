@@ -1,4 +1,4 @@
-use crate::{error::SyncError, settings::Settings};
+use crate::{error::TrackerError, settings::Settings};
 use chrono::{DateTime, NaiveDate};
 use console::style;
 use simplefin_bridge::models::{Account, Transaction};
@@ -7,16 +7,16 @@ use tabled::{builder::Builder, settings::Style};
 pub async fn get_transactions_for_period(
     settings: &Settings,
     billing_period: (NaiveDate, NaiveDate),
-) -> Result<Vec<Account>, SyncError> {
+) -> Result<Vec<Account>, TrackerError> {
     let url_parsed =
-        url::Url::parse(&settings.simplefin_bridge_url).map_err(SyncError::UrlError)?;
+        url::Url::parse(&settings.simplefin_bridge_url).map_err(TrackerError::UrlError)?;
 
     let bridge = simplefin_bridge::SimpleFinBridge::new(url_parsed);
 
     let info = bridge
         .info()
         .await
-        .map_err(|e| SyncError::SimpleFinError(e.to_string()))?;
+        .map_err(|e| TrackerError::SimpleFinError(e.to_string()))?;
     println!(
         "{} Connected to SimpleFin Bridge {}",
         style("✓").green(),
@@ -48,12 +48,12 @@ pub async fn get_transactions_for_period(
     let accounts = bridge
         .accounts(Some(params))
         .await
-        .map_err(|e| SyncError::SimpleFinError(e.to_string()))?;
+        .map_err(|e| TrackerError::SimpleFinError(e.to_string()))?;
 
     Ok(accounts.accounts)
 }
 
-pub async fn format_transactions(transactions: Vec<Transaction>) -> Result<String, SyncError> {
+pub async fn format_transactions(transactions: Vec<Transaction>) -> Result<String, TrackerError> {
     let mut builder = Builder::default();
     builder.push_record(["Description", "Amount", "Date"]);
 
@@ -75,16 +75,16 @@ pub async fn format_transactions(transactions: Vec<Transaction>) -> Result<Strin
 }
 
 // Add validation for the billing period
-pub fn validate_billing_period(start: NaiveDate, end: NaiveDate) -> Result<(), SyncError> {
+pub fn validate_billing_period(start: NaiveDate, end: NaiveDate) -> Result<(), TrackerError> {
     if start > end {
-        return Err(SyncError::ValidationError(
+        return Err(TrackerError::ValidationError(
             "Start date cannot be after end date".to_string(),
         ));
     }
 
     let duration = end.signed_duration_since(start);
     if duration.num_days() > 90 {
-        return Err(SyncError::ValidationError(
+        return Err(TrackerError::ValidationError(
             "Billing period cannot exceed 90 days".to_string(),
         ));
     }

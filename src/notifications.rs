@@ -1,5 +1,5 @@
 use crate::settings::NotificationType;
-use crate::{error::SyncError, settings::Settings};
+use crate::{error::TrackerError, settings::Settings};
 use anyhow::Result;
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -9,7 +9,7 @@ use simplefin_bridge::models::Transaction;
 use tera::{Context, Tera}; // Assuming transactions::Transaction is defined here
 
 // Update the SMS sending function to handle rate limiting and provide better feedback
-pub async fn send_twilio_sms(settings: &Settings, text: &str) -> Result<(), SyncError> {
+pub async fn send_twilio_sms(settings: &Settings, text: &str) -> Result<(), TrackerError> {
     let client = reqwest::Client::new();
     let twilio_url = format!(
         "https://api.twilio.com/2010-04-01/Accounts/{}/Messages.json",
@@ -36,7 +36,7 @@ pub async fn send_twilio_sms(settings: &Settings, text: &str) -> Result<(), Sync
                 settings.twilio_from_phone.as_ref().unwrap().to_string(),
             ),
             ("To", to_phone.trim().to_string()), // Trim whitespace from phone numbers
-            ("Body", text.to_owned()),
+            ("Body", text.replace("**", "")),
         ];
 
         match client
@@ -59,13 +59,13 @@ pub async fn send_twilio_sms(settings: &Settings, text: &str) -> Result<(), Sync
                 } else {
                     let status = response.status();
                     let error_body = response.text().await.unwrap_or_default();
-                    return Err(SyncError::TwilioError(format!(
+                    return Err(TrackerError::TwilioError(format!(
                         "Failed to send SMS to {to_phone}. Status: {status}, Body: {error_body}"
                     )));
                 }
             }
             Err(e) => {
-                return Err(SyncError::TwilioError(format!(
+                return Err(TrackerError::TwilioError(format!(
                     "Error sending SMS to {to_phone}: {e}"
                 )));
             }
@@ -80,7 +80,7 @@ pub async fn send_email(
     settings: &Settings,
     text: &str,
     transactions: Vec<Transaction>,
-) -> Result<(), SyncError> {
+) -> Result<(), TrackerError> {
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
         ProgressStyle::default_spinner()
@@ -114,14 +114,14 @@ pub async fn send_email(
                 .unwrap()
                 .parse()
                 .map_err(|e| {
-                    SyncError::EmailError(format!(
+                    TrackerError::EmailError(format!(
                         "Invalid sender email '{:?}': {}",
                         settings.mailer_from, e
                     ))
                 })?,
         )
         .to(settings.mailer_to.as_ref().unwrap().parse().map_err(|e| {
-            SyncError::EmailError(format!(
+            TrackerError::EmailError(format!(
                 "Invalid recipient email '{:?}': {}",
                 settings.mailer_to, e
             ))
@@ -129,12 +129,12 @@ pub async fn send_email(
         .subject("Monthly Expense Trackr")
         .header(ContentType::TEXT_HTML)
         .body(email_html)
-        .map_err(|e| SyncError::EmailError(format!("Failed to build email: {e}")))?;
+        .map_err(|e| TrackerError::EmailError(format!("Failed to build email: {e}")))?;
 
     let mailer_url = settings.mailer_url.clone().unwrap();
 
     let mailer = AsyncSmtpTransport::<Tokio1Executor>::from_url(&mailer_url)
-        .map_err(|e| SyncError::EmailError(format!("Failed to create SMTP transport: {e}")))?
+        .map_err(|e| TrackerError::EmailError(format!("Failed to create SMTP transport: {e}")))?
         .build();
 
     // Send the email and report the outcome.
@@ -147,7 +147,9 @@ pub async fn send_email(
             ));
             Ok(())
         }
-        Err(e) => Err(SyncError::EmailError(format!("Failed to send email: {e}"))),
+        Err(e) => Err(TrackerError::EmailError(format!(
+            "Failed to send email: {e}"
+        ))),
     }
 }
 
@@ -162,7 +164,7 @@ pub async fn send_ntfy_notification(
     settings: &Settings,
     text: &str,
     notification_type: NtfyNotificationType,
-) -> Result<(), SyncError> {
+) -> Result<(), TrackerError> {
     let client = reqwest::Client::new();
 
     // Use settings.ntfy_server if provided, otherwise default to "https://ntfy.sh"
@@ -204,14 +206,14 @@ pub async fn send_ntfy_notification(
                 let status = response.status();
                 let error_body = response.text().await.unwrap_or_default();
                 spinner.finish_and_clear();
-                Err(SyncError::NtfyError(format!(
+                Err(TrackerError::NtfyError(format!(
                     "Failed to send ntfy.sh notification. Status: {status}, Body: {error_body}"
                 )))
             }
         }
         Err(e) => {
             spinner.finish_and_clear();
-            Err(SyncError::NtfyError(format!(
+            Err(TrackerError::NtfyError(format!(
                 "Error sending ntfy.sh notification: {e}"
             )))
         }
@@ -241,6 +243,8 @@ pub async fn dispatch_notifications(
     transactions: &Vec<Transaction>,
     notification_types: &[NotificationType],
 ) -> Result<()> {
+    println!("{} Dispatching notifications", style("🔔").bold());
+
     for notification_type in notification_types {
         match notification_type {
             NotificationType::Ntfy => {

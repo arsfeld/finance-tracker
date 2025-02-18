@@ -31,4 +31,7 @@ pub enum TrackerError {
 
     #[error("Notification error: {0}")]
     NotificationError(String),
+
+    #[error("Cache error: {0}")]
+    CacheError(String),
 }

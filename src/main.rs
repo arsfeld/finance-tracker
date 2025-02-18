@@ -1,4 +1,5 @@
 use anyhow::Result;
+use cache::AccountBalance;
 use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 use clap::Parser;
 use console::style;
@@ -7,14 +8,13 @@ use envconfig::Envconfig;
 use error::TrackerError;
 use rust_decimal::Decimal;
 use simplefin_bridge::models::{Account, Transaction};
-
+mod cache;
 mod error;
 mod llm;
 mod llm_response;
 mod notifications;
 mod settings;
 mod transactions;
-
 use llm::{get_llm_prompt, get_llm_response};
 use notifications::NtfyNotificationType;
 use settings::{NotificationType, Settings};
@@ -61,6 +61,9 @@ async fn main() -> Result<(), TrackerError> {
 
     // Pretty print accounts and transactions
     println!("{} Accounts:", style("💳").bold());
+
+    let mut has_updated_accounts = false;
+
     for account in &accounts {
         println!("{} {} ({})", style("•").green(), account.name, account.id);
 
@@ -82,10 +85,33 @@ async fn main() -> Result<(), TrackerError> {
             )
             .await?;
         }
+
+        let cached_balance = cache::read_from_cache(&account.id).unwrap_or(AccountBalance {
+            balance: account.balance,
+            balance_date: account.balance_date,
+        });
+
+        if cached_balance.balance != account.balance {
+            has_updated_accounts = true;
+        }
+
+        cache::write_to_cache(
+            &account.id,
+            &AccountBalance {
+                balance: account.balance,
+                balance_date: account.balance_date,
+            },
+        )
+        .unwrap();
+    }
+
+    if !has_updated_accounts {
+        println!("{} No updated accounts", style("🔴").bold());
+        return Ok(());
     }
 
     if transactions.is_empty() {
-        println!("{} No transactions found", style("ℹ️").bold());
+        println!("{} No transactions found", style("🔴").bold());
         return Err(TrackerError::NoTransactionsFound);
     }
 

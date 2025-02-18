@@ -1,5 +1,6 @@
 use crate::{error::TrackerError, settings::Settings};
-use chrono::NaiveDate;
+use chrono::Utc;
+use chrono::{DateTime, NaiveDate};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::json;
 use simplefin_bridge::models::Account;
@@ -15,9 +16,14 @@ pub async fn get_llm_prompt(
 ) -> Result<String, TrackerError> {
     let mut accounts_formatted = String::new();
     for account in accounts {
+        // Format balance_date to a readable string: "YYYY-MM-DD HH:MM:SS"
+        let formatted_date = DateTime::<Utc>::from_timestamp(account.balance_date, 0)
+            .unwrap()
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
         accounts_formatted.push_str(&format!(
             " - {}, balance: {}, last synced: {}\n",
-            account.name, account.balance, account.balance_date
+            account.name, account.balance, formatted_date
         ));
     }
 

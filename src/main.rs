@@ -1,5 +1,4 @@
 use anyhow::Result;
-use cache::AccountBalance;
 use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 use clap::Parser;
 use console::style;
@@ -8,6 +7,7 @@ use envconfig::Envconfig;
 use error::TrackerError;
 use rust_decimal::Decimal;
 use simplefin_bridge::models::{Account, Transaction};
+
 mod cache;
 mod error;
 mod llm;
@@ -15,10 +15,14 @@ mod llm_response;
 mod notifications;
 mod settings;
 mod transactions;
+
 use llm::{get_llm_prompt, get_llm_response};
 use notifications::NtfyNotificationType;
 use settings::{NotificationType, Settings};
 use transactions::{format_transactions, get_transactions_for_period, validate_billing_period};
+
+// Constants
+const TWO_DAYS_IN_SECONDS: i64 = 2 * 24 * 60 * 60;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -29,6 +33,9 @@ struct Args {
 
     #[arg(short, long, default_value_t = false)]
     disable_notifications: bool,
+
+    #[arg(long, default_value_t = false)]
+    disable_cache: bool,
 }
 
 #[tokio::main]
@@ -39,13 +46,14 @@ async fn main() -> Result<(), TrackerError> {
         Settings::init_from_env().map_err(|e| TrackerError::EnvConfigError(e.to_string()))?;
     let args = Args::parse();
 
+    // Setup billing period (current month)
     let now_local = Local::now();
     let today = now_local.date_naive();
     let start_date = NaiveDate::from_ymd_opt(today.year(), today.month(), 1).unwrap();
     let billing_period = (start_date, today);
-
     validate_billing_period(billing_period.0, billing_period.1)?;
 
+    // Fetch and filter accounts
     println!("{} Fetching transactions...", style("📊").bold());
     let accounts: Vec<Account> = get_transactions_for_period(&settings, billing_period)
         .await?
@@ -59,25 +67,32 @@ async fn main() -> Result<(), TrackerError> {
         .flat_map(|account| account.transactions.clone().unwrap_or_default())
         .collect();
 
-    // Pretty print accounts and transactions
-    println!("{} Accounts:", style("💳").bold());
+    // Handle cache
+    let cache = if !args.disable_cache {
+        cache::read_cache().unwrap_or_default()
+    } else {
+        cache::Cache::default()
+    };
 
+    println!("{} Cache: {:?}", style("🔍").bold(), cache);
+
+    let mut updated_accounts = cache.accounts.clone().unwrap_or_default();
     let mut has_updated_accounts = false;
 
+    // Process accounts
+    println!("{} Accounts:", style("💳").bold());
     for account in &accounts {
         println!("{} {} ({})", style("•").green(), account.name, account.id);
 
-        // Last synced at
-        println!(
-            "{} Last synced at: {}",
-            style("└").dim(),
-            DateTime::from_timestamp(account.balance_date, 0)
-                .expect("Balance date timestamp is invalid")
-                .format("%Y-%m-%d %H:%M:%S")
-        );
+        // Format and display last sync time
+        let sync_time = DateTime::from_timestamp(account.balance_date, 0)
+            .expect("Balance date timestamp is invalid")
+            .format("%Y-%m-%d %H:%M:%S");
 
-        // If last synced at is more than 2 days ago, send a warning
-        if account.balance_date < (Utc::now().timestamp() - 2 * 24 * 60 * 60) {
+        println!("{} Last synced at: {}", style("└").dim(), sync_time);
+
+        // Check if sync is too old
+        if account.balance_date < (Utc::now().timestamp() - TWO_DAYS_IN_SECONDS) {
             notifications::send_ntfy_notification(
                 &settings,
                 &format!("Account {} is not synced", account.name),
@@ -86,25 +101,27 @@ async fn main() -> Result<(), TrackerError> {
             .await?;
         }
 
-        let cached_balance = cache::read_from_cache(&account.id).unwrap_or(AccountBalance {
-            balance: account.balance,
-            balance_date: account.balance_date,
-        });
+        // Check if account has been updated since last cache
+        let is_updated = match updated_accounts.get(&account.id) {
+            Some(cached_account) => cached_account.balance_date != account.balance_date,
+            None => true, // New account
+        };
 
-        if cached_balance.balance != account.balance {
+        if is_updated {
             has_updated_accounts = true;
         }
 
-        cache::write_to_cache(
-            &account.id,
-            &AccountBalance {
+        // Update the cache with current account data
+        updated_accounts.insert(
+            account.id.clone(),
+            cache::Account {
                 balance: account.balance,
                 balance_date: account.balance_date,
             },
-        )
-        .unwrap();
+        );
     }
 
+    // Early return conditions
     if !has_updated_accounts {
         println!("{} No updated accounts", style("🔴").bold());
         return Ok(());
@@ -115,8 +132,23 @@ async fn main() -> Result<(), TrackerError> {
         return Err(TrackerError::NoTransactionsFound);
     }
 
-    let transactions_formatted = format_transactions(transactions.clone()).await?;
+    // Check if we can send a message now
+    let last_msg_time = cache.last_successful_message.unwrap_or(0);
+    if (Utc::now().timestamp() - last_msg_time) < TWO_DAYS_IN_SECONDS {
+        let formatted_time = DateTime::from_timestamp(last_msg_time, 0)
+            .unwrap()
+            .format("%Y-%m-%d %H:%M:%S");
 
+        println!(
+            "{} Last message was sent too recently (at {})",
+            style("🔴").bold(),
+            formatted_time
+        );
+        return Err(TrackerError::LastMessageTooSoon);
+    }
+
+    // Process transactions with AI
+    let transactions_formatted = format_transactions(transactions.clone()).await?;
     let prompt = get_llm_prompt(billing_period, &accounts, &transactions_formatted).await?;
 
     println!("{} Analyzing transactions with AI...", style("🤖").bold());
@@ -134,6 +166,13 @@ async fn main() -> Result<(), TrackerError> {
                 )
                 .await
                 .map_err(|e| TrackerError::NotificationError(e.to_string()))?;
+
+                // Update cache with successful message timestamp
+                cache::write_cache(&cache::Cache {
+                    accounts: Some(updated_accounts),
+                    last_successful_message: Some(Utc::now().timestamp()),
+                })
+                .unwrap();
             } else {
                 println!("{} Notifications disabled", style("ℹ️").bold());
             }

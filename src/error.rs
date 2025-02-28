@@ -34,4 +34,7 @@ pub enum TrackerError {
 
     #[error("Cache error: {0}")]
     CacheError(String),
+
+    #[error("Last message was sent too recently")]
+    LastMessageTooSoon,
 }

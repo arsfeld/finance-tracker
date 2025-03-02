@@ -13,8 +13,11 @@ env:
 
 jobs:
   build:
-    name: Build Binary
+    name: Build Binary (${{ matrix.target }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu]
 
     permissions:
       contents: read
@@ -26,21 +29,25 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
       
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
       
       - name: Build release binary
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release
+          args: --release --target ${{ matrix.target }}
       
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: binary
-          path: target/release/*
+          name: finance-tracker-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/finance-tracker
+          retention-days: 1
 
   tag-release:
     name: Create New Version Tag
@@ -101,16 +108,25 @@ jobs:
       - name: Checkout the code
         uses: actions/checkout@v4
       
-      - name: Download build artifacts
+      - name: Download x86_64 binary
         uses: actions/download-artifact@v4
         with:
-          name: binary
+          name: finance-tracker-x86_64-unknown-linux-gnu
           path: release-bins
-          merge-multiple: false
+      
+      - name: Download aarch64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: finance-tracker-aarch64-unknown-linux-gnu
+          path: release-bins
+      
+      - name: Rename binaries with architecture suffix
+        run: |
+          mv release-bins/finance-tracker release-bins/finance-tracker-x86_64
+          mv release-bins/finance-tracker release-bins/finance-tracker-aarch64
+          chmod +x release-bins/finance-tracker-*
+          ls -la release-bins/
 
-      - name: List files
-        run: ls -la release-bins/
-        
       - name: Create Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -121,4 +137,5 @@ jobs:
           gh release create "$new_tag" \
             --title "$new_tag" \
             --generate-notes \
-            "release-bins/finance-tracker"  # Only upload the binary file 
+            "release-bins/finance-tracker-x86_64" \
+            "release-bins/finance-tracker-aarch64" 

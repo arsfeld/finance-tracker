@@ -1,5 +1,5 @@
 use crate::{error::TrackerError, settings::Settings};
-use chrono::{DateTime, NaiveDate};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use console::style;
 use simplefin_bridge::models::{Account, Transaction};
 use tabled::{builder::Builder, settings::Style};
@@ -23,58 +23,49 @@ pub async fn get_transactions_for_period(
         info.versions.join(", ")
     );
 
+    // Helper function to convert NaiveDate to timestamp
+    let to_timestamp = |date: NaiveDate, hour: u32, min: u32, sec: u32| -> i64 {
+        date.and_hms_opt(hour, min, sec)
+            .unwrap()
+            .and_utc()
+            .timestamp()
+    };
+
     let params = simplefin_bridge::AccountsParams {
-        start_date: Some(
-            billing_period
-                .0
-                .and_hms_opt(0, 0, 0)
-                .unwrap()
-                .and_utc()
-                .timestamp(),
-        ),
-        end_date: Some(
-            billing_period
-                .1
-                .and_hms_opt(23, 59, 59)
-                .unwrap()
-                .and_utc()
-                .timestamp(),
-        ),
+        start_date: Some(to_timestamp(billing_period.0, 0, 0, 0)),
+        end_date: Some(to_timestamp(billing_period.1, 23, 59, 59)),
         account_ids: None,
         balances_only: None,
         pending: None,
     };
 
-    let accounts = bridge
+    bridge
         .accounts(Some(params))
         .await
-        .map_err(|e| TrackerError::SimpleFinError(e.to_string()))?;
-
-    Ok(accounts.accounts)
+        .map_err(|e| TrackerError::SimpleFinError(e.to_string()))
+        .map(|accounts| accounts.accounts)
 }
 
 pub async fn format_transactions(transactions: Vec<Transaction>) -> Result<String, TrackerError> {
     let mut builder = Builder::default();
     builder.push_record(["Description", "Amount", "Date"]);
 
-    for transaction in transactions {
-        let datetime =
-            DateTime::from_timestamp(transaction.transacted_at.unwrap_or(transaction.posted), 0)
-                .expect("Transacted at timestamp is invalid");
-        builder.push_record([
-            transaction.description,
-            transaction.amount.to_string(),
-            datetime.format("%Y-%m-%d").to_string(),
-        ]);
+    for txn in transactions {
+        let timestamp = txn.transacted_at.unwrap_or(txn.posted);
+        let date = DateTime::from_timestamp(timestamp, 0)
+            .expect("Invalid timestamp")
+            .format("%Y-%m-%d")
+            .to_string();
+
+        builder.push_record([txn.description, txn.amount.to_string(), date]);
     }
 
-    let mut table = builder.build();
-    table.with(Style::modern_rounded().remove_horizontal());
-
-    Ok(table.to_string())
+    Ok(builder
+        .build()
+        .with(Style::modern_rounded().remove_horizontal())
+        .to_string())
 }
 
-// Add validation for the billing period
 pub fn validate_billing_period(start: NaiveDate, end: NaiveDate) -> Result<(), TrackerError> {
     if start > end {
         return Err(TrackerError::ValidationError(
@@ -82,8 +73,7 @@ pub fn validate_billing_period(start: NaiveDate, end: NaiveDate) -> Result<(), T
         ));
     }
 
-    let duration = end.signed_duration_since(start);
-    if duration.num_days() > 90 {
+    if end.signed_duration_since(start).num_days() > 90 {
         return Err(TrackerError::ValidationError(
             "Billing period cannot exceed 90 days".to_string(),
         ));

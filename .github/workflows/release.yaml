@@ -98,6 +98,9 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout the code
+        uses: actions/checkout@v4
+      
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -112,7 +115,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          new_tag=${{ needs.tag-release.outputs.new_tag }}
+          new_tag="${{ needs.tag-release.outputs.new_tag }}"
           
           # Create a new release
           gh release create "$new_tag" \

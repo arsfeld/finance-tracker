@@ -67,16 +67,23 @@ jobs:
           if [ -z "$latest_tag" ]; then
             echo "version=v0.1.0" >> "$GITHUB_OUTPUT"
           else
+            # Split version into parts
+            major=$(echo "$latest_tag" | cut -d. -f1)
+            minor=$(echo "$latest_tag" | cut -d. -f2)
+            patch=$(echo "$latest_tag" | cut -d. -f3)
+            
             # Increment patch version
-            version=$(echo "$latest_tag" | awk -F. '{$NF+=1; OFS="."; print $0}')
-            echo "version=$version" >> "$GITHUB_OUTPUT"
+            new_patch=$((patch + 1))
+            new_version="${major}.${minor}.${new_patch}"
+            
+            echo "version=$new_version" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create and push tag
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          new_tag=${{ steps.get_latest_tag.outputs.version }}
+          new_tag="${{ steps.get_latest_tag.outputs.version }}"
           git tag "$new_tag"
           git push origin "$new_tag"
           echo "Created and pushed new tag: $new_tag"

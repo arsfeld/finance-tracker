@@ -121,4 +121,4 @@ jobs:
           gh release create "$new_tag" \
             --title "$new_tag" \
             --generate-notes \
-            release-bins/* 
+            "release-bins/finance-tracker"  # Only upload the binary file 

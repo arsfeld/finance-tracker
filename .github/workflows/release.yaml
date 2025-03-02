@@ -122,20 +122,24 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: finance-tracker-x86_64-unknown-linux-gnu
-          path: release-bins
+          path: release-bins/x86_64
       
       - name: Download aarch64 binary
         uses: actions/download-artifact@v4
         with:
           name: finance-tracker-aarch64-unknown-linux-gnu
-          path: release-bins
+          path: release-bins/aarch64
       
-      - name: Rename binaries with architecture suffix
+      - name: Prepare binaries
         run: |
-          mv release-bins/finance-tracker release-bins/finance-tracker-x86_64
-          mv release-bins/finance-tracker release-bins/finance-tracker-aarch64
-          chmod +x release-bins/finance-tracker-*
-          ls -la release-bins/
+          mkdir -p release-bins/final
+          # Check what files were downloaded
+          find release-bins -type f | sort
+          # Move binaries to their final location with architecture suffix
+          cp release-bins/x86_64/finance-tracker release-bins/final/finance-tracker-x86_64 || echo "x86_64 binary not found"
+          cp release-bins/aarch64/finance-tracker release-bins/final/finance-tracker-aarch64 || echo "aarch64 binary not found"
+          chmod +x release-bins/final/finance-tracker-* || echo "No binaries to make executable"
+          ls -la release-bins/final/
 
       - name: Create Release
         env:
@@ -147,5 +151,5 @@ jobs:
           gh release create "$new_tag" \
             --title "$new_tag" \
             --generate-notes \
-            "release-bins/finance-tracker-x86_64" \
-            "release-bins/finance-tracker-aarch64" 
+            "release-bins/final/finance-tracker-x86_64" \
+            "release-bins/final/finance-tracker-aarch64" 

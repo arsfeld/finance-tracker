@@ -12,6 +12,7 @@
     cargo-watch
     cargo-edit
     cargo-machete
+    cargo-bloat
     openssl.dev
     pkg-config
     rustfmt

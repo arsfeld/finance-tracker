@@ -42,6 +42,19 @@ jobs:
         with:
           key: ${{ matrix.target }}
       
+      - name: Configure for size optimization
+        run: |
+          # Create .cargo/config.toml to optimize for small binary size
+          mkdir -p .cargo
+          cat > .cargo/config.toml << EOF
+          [profile.release]
+          opt-level = "z"  # Optimize for size
+          lto = true       # Enable link-time optimization
+          codegen-units = 1 # Use a single codegen unit for better optimization
+          panic = "abort"   # Removes panic unwinding code
+          strip = true      # Strip symbols from binary
+          EOF
+      
       - name: Build release binary
         uses: actions-rs/cargo@v1
         with:
@@ -51,6 +64,15 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
           CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
+          RUSTFLAGS: "-C strip=symbols"
+      
+      - name: Strip binary
+        run: |
+          if [ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]; then
+            strip "target/${{ matrix.target }}/release/finance-tracker"
+          else
+            aarch64-linux-gnu-strip "target/${{ matrix.target }}/release/finance-tracker"
+          fi
       
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
@@ -133,12 +155,11 @@ jobs:
       - name: Prepare binaries
         run: |
           mkdir -p release-bins/final
-          # Check what files were downloaded
-          find release-bins -type f | sort
-          # Move binaries to their final location with architecture suffix
-          cp release-bins/x86_64/finance-tracker release-bins/final/finance-tracker-x86_64 || echo "x86_64 binary not found"
-          cp release-bins/aarch64/finance-tracker release-bins/final/finance-tracker-aarch64 || echo "aarch64 binary not found"
-          chmod +x release-bins/final/finance-tracker-* || echo "No binaries to make executable"
+          # Copy binaries to final location with architecture suffix
+          cp release-bins/x86_64/finance-tracker release-bins/final/finance-tracker-x86_64
+          cp release-bins/aarch64/finance-tracker release-bins/final/finance-tracker-aarch64
+          chmod +x release-bins/final/finance-tracker-*
+          # Check final binary sizes
           ls -la release-bins/final/
 
       - name: Create Release

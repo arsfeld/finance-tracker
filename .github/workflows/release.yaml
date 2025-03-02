@@ -10,6 +10,8 @@ on:
 env:
   RUST_TOOLCHAIN: stable
   TOOLCHAIN_PROFILE: minimal
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build:

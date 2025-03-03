@@ -53,7 +53,11 @@ Transactions:
     Ok(prompt)
 }
 
-pub async fn get_llm_response(settings: &Settings, prompt: String) -> Result<String, TrackerError> {
+pub async fn get_llm_response(
+    settings: &Settings,
+    prompt: String,
+    verbose: bool,
+) -> Result<String, TrackerError> {
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
         ProgressStyle::default_spinner()
@@ -128,7 +132,9 @@ pub async fn get_llm_response(settings: &Settings, prompt: String) -> Result<Str
     };
 
     // Pretty print the LLM response
-    println!("LLM Response: {llm_response:#?}");
+    if verbose {
+        println!("LLM Response: {llm_response:#?}");
+    }
 
     if let Some(choice) = llm_response.choices.first() {
         return Ok(choice.message.content.clone());

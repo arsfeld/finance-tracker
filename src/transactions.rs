@@ -1,5 +1,5 @@
 use crate::{error::TrackerError, settings::Settings};
-use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
+use chrono::{DateTime, NaiveDate};
 use console::style;
 use simplefin_bridge::models::{Account, Transaction};
 use tabled::{builder::Builder, settings::Style};

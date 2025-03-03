@@ -36,6 +36,9 @@ struct Args {
 
     #[arg(long, default_value_t = false)]
     disable_cache: bool,
+
+    #[arg(long, default_value_t = false)]
+    verbose: bool,
 }
 
 #[tokio::main]
@@ -62,6 +65,10 @@ async fn main() -> Result<(), TrackerError> {
         .cloned()
         .collect();
 
+    if args.verbose {
+        println!("{} Accounts: {:?}", style("🔍").bold(), accounts);
+    }
+
     let transactions: Vec<Transaction> = accounts
         .iter()
         .flat_map(|account| account.transactions.clone().unwrap_or_default())
@@ -74,7 +81,9 @@ async fn main() -> Result<(), TrackerError> {
         cache::Cache::default()
     };
 
-    println!("{} Cache: {:?}", style("🔍").bold(), cache);
+    if args.verbose {
+        println!("{} Cache: {:?}", style("🔍").bold(), cache);
+    }
 
     let mut updated_accounts = cache.accounts.clone().unwrap_or_default();
     let mut has_updated_accounts = false;
@@ -152,7 +161,7 @@ async fn main() -> Result<(), TrackerError> {
     let prompt = get_llm_prompt(billing_period, &accounts, &transactions_formatted).await?;
 
     println!("{} Analyzing transactions with AI...", style("🤖").bold());
-    match get_llm_response(&settings, prompt).await {
+    match get_llm_response(&settings, prompt, args.verbose).await {
         Ok(text) => {
             println!("\n{} AI Summary:", style("✨").bold());
             println!("{}", style(text.clone()).cyan());

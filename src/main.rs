@@ -1,6 +1,5 @@
 use anyhow::Result;
-use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
-use clap::Parser;
+use chrono::{DateTime, Utc};
 use console::style;
 use dotenv::dotenv;
 use envconfig::Envconfig;
@@ -8,6 +7,7 @@ use error::TrackerError;
 use rust_decimal::Decimal;
 use simplefin_bridge::models::{Account, Transaction};
 
+mod args;
 mod cache;
 mod error;
 mod llm;
@@ -16,30 +16,15 @@ mod notifications;
 mod settings;
 mod transactions;
 
+use args::{calculate_date_range, Args};
+use clap::Parser;
 use llm::{get_llm_prompt, get_llm_response};
 use notifications::NtfyNotificationType;
-use settings::{NotificationType, Settings};
+use settings::Settings;
 use transactions::{format_transactions, get_transactions_for_period, validate_billing_period};
 
 // Constants
 const TWO_DAYS_IN_SECONDS: i64 = 2 * 24 * 60 * 60;
-
-#[derive(Parser)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    // Notification types
-    #[arg(short, long, value_delimiter = ',', default_value = "sms,email,ntfy")]
-    notifications: Vec<NotificationType>,
-
-    #[arg(short, long, default_value_t = false)]
-    disable_notifications: bool,
-
-    #[arg(long, default_value_t = false)]
-    disable_cache: bool,
-
-    #[arg(long, default_value_t = false)]
-    verbose: bool,
-}
 
 #[tokio::main]
 async fn main() -> Result<(), TrackerError> {
@@ -47,13 +32,16 @@ async fn main() -> Result<(), TrackerError> {
     dotenv().ok();
     let settings =
         Settings::init_from_env().map_err(|e| TrackerError::EnvConfigError(e.to_string()))?;
-    let args = Args::parse();
+    let mut args = Args::parse();
 
-    // Setup billing period (current month)
-    let now_local = Local::now();
-    let today = now_local.date_naive();
-    let start_date = NaiveDate::from_ymd_opt(today.year(), today.month(), 1).unwrap();
-    let billing_period = (start_date, today);
+    // Force disable_cache to true if date_range is not CurrentMonth
+    if args.date_range != args::DateRangeType::CurrentMonth {
+        args.disable_cache = true;
+    }
+
+    // Setup billing period using the new function
+    let billing_period =
+        calculate_date_range(args.date_range.clone(), args.start_date, args.end_date)?;
     validate_billing_period(billing_period.0, billing_period.1)?;
 
     // Fetch and filter accounts

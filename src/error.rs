@@ -37,4 +37,7 @@ pub enum TrackerError {
 
     #[error("Last message was sent too recently")]
     LastMessageTooSoon,
+
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(String),
 }

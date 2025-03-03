@@ -29,20 +29,34 @@ pub async fn get_llm_prompt(
 
     let prompt = format!(
         "
-Analyze these financial transactions and create a concise summary (max 100 words) with the following sections:
-
-Human friendly summary (do not label this section)
-
-1. Total Expenses: Sum of all purchases (exclude payments, credits, and refunds)
-2. Major Categories: Group expenses by category with totals
-3. Largest Expenses: List the top 3 individual expenses
-4. Accounts: List the accounts, their balances and last time synced
-
-Note: Ignore all payments, credits, and refunds in the analysis.
-
+## Financial Transaction Analysis
 Billing Period: {} to {}
 
-Accounts: 
+I need a structured analysis of the provided financial transactions. Please create a concise report (max 150 words total) with the following sections:
+
+### Summary
+Provide a human-friendly overview of spending patterns during this period. Be specific about trends and notable observations.
+
+### Analysis Breakdown
+1. **Total Expenses**: ${{total}} (Sum of all purchases, excluding payments, credits, and refunds)
+2. **Major Categories**: List the top 4-5 spending categories with their totals
+   - Category 1: ${{amount}}
+   - Category 2: ${{amount}}
+   - ...
+3. **Largest Expenses**: 
+   - ${{expense 1}}: ${{amount}} at ${{merchant}} on ${{date}}
+   - ${{expense 2}}: ${{amount}} at ${{merchant}} on ${{date}}
+   - ${{expense 3}}: ${{amount}} at ${{merchant}} on ${{date}}
+4. **Account Status**:
+   - ${{account name}}: Balance ${{amount}}, Last synced ${{date}}
+   - ...
+
+Notes:
+- Consider only outgoing expenses in your analysis (ignore incoming payments, credits, refunds)
+- Format all monetary values consistently (e.g., $1,234.56)
+- If a category has no transactions, indicate 'No spending in this category'
+
+Accounts Information: 
 {}
 
 Transactions: 

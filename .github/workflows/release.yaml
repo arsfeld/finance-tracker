@@ -163,8 +163,8 @@ jobs:
         run: |
           mkdir -p release-bins/final
           # Copy binaries to final location with architecture suffix
-          cp release-bins/x86_64/finance-tracker release-bins/final/finance-tracker-x86_64
-          cp release-bins/aarch64/finance-tracker release-bins/final/finance-tracker-aarch64
+          cp release-bins/x86_64/finance-tracker release-bins/final/finance-tracker-linux-x86_64
+          cp release-bins/aarch64/finance-tracker release-bins/final/finance-tracker-linux-aarch64
           chmod +x release-bins/final/finance-tracker-*
           # Check final binary sizes
           ls -la release-bins/final/
@@ -179,8 +179,8 @@ jobs:
           gh release create "$new_tag" \
             --title "$new_tag" \
             --generate-notes \
-            "release-bins/final/finance-tracker-x86_64" \
-            "release-bins/final/finance-tracker-aarch64" 
+            "release-bins/final/finance-tracker-linux-x86_64" \
+            "release-bins/final/finance-tracker-linux-aarch64" 
 
   docker:
     name: Build and push Docker image

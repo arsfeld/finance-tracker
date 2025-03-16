@@ -240,6 +240,7 @@ pub async fn dispatch_notifications(
     for notification_type in notification_types {
         match notification_type {
             NotificationType::Ntfy => {
+                println!("{} Dispatching ntfy notification", style("🔔").bold());
                 if has_ntfy_settings(settings) {
                     send_ntfy_notification(settings, summary, NtfyNotificationType::Info).await?;
                 } else {
@@ -247,6 +248,7 @@ pub async fn dispatch_notifications(
                 }
             }
             NotificationType::Email => {
+                println!("{} Dispatching email notification", style("🔔").bold());
                 if has_mailer_settings(settings) {
                     // Note: send_email expects to receive the transactions list.
                     // We clone here if needed.
@@ -256,6 +258,7 @@ pub async fn dispatch_notifications(
                 }
             }
             NotificationType::Sms => {
+                println!("{} Dispatching SMS notification", style("🔔").bold());
                 if has_twilio_settings(settings) {
                     send_twilio_sms(settings, summary).await?;
                 } else {

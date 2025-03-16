@@ -6,7 +6,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use lettre::message::{header::ContentType, Message};
 use lettre::{transport::smtp::AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
 use simplefin_bridge::models::Transaction;
-use tera::{Context, Tera}; // Assuming transactions::Transaction is defined here
+use tera::{Context, Tera};
 
 // Helper function to create a consistent spinner style
 fn create_spinner(msg: &str) -> ProgressBar {
@@ -106,6 +106,7 @@ pub async fn send_email(
     let root = mrml::parse(&email_html)
         .map_err(|e| TrackerError::EmailError(format!("Failed to parse MJML: {e}")))?;
     let email_html = root
+        .element
         .render(&mrml::prelude::render::RenderOptions::default())
         .map_err(|e| TrackerError::EmailError(format!("Failed to render MJML: {e}")))?;
 

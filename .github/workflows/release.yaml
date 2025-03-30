@@ -12,8 +12,6 @@ on:
       - 'v*'  # Trigger on version tags
 
 env:
-  RUST_TOOLCHAIN: stable
-  TOOLCHAIN_PROFILE: minimal
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
@@ -25,7 +23,12 @@ jobs:
     if: github.event.workflow_run.conclusion == 'success' || startsWith(github.ref, 'refs/tags/v')
     strategy:
       matrix:
-        target: [x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu]
+        target: [linux/amd64, linux/arm64]
+        include:
+          - target: linux/amd64
+            goarch: amd64
+          - target: linux/arm64
+            goarch: arm64
 
     permissions:
       contents: read
@@ -34,59 +37,30 @@ jobs:
       - name: Checkout the code
         uses: actions/checkout@v4
       
-      - name: Install cross-compilation tools
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-      
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-go@v5
         with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-          targets: ${{ matrix.target }}
+          go-version: '1.22'
       
-      - name: Setup Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
-      
-      - name: Configure for size optimization
+      - name: Configure Go for cross-compilation
         run: |
-          # Create .cargo/config.toml to optimize for small binary size
-          mkdir -p .cargo
-          cat > .cargo/config.toml << EOF
-          [profile.release]
-          opt-level = "z"  # Optimize for size
-          lto = true       # Enable link-time optimization
-          codegen-units = 1 # Use a single codegen unit for better optimization
-          panic = "abort"   # Removes panic unwinding code
-          strip = true      # Strip symbols from binary
+          mkdir -p .go
+          cat > .go/config << EOF
+          GOOS=linux
+          GOARCH=${{ matrix.goarch }}
+          CGO_ENABLED=0
+          -ldflags="-s -w"
+          -trimpath
           EOF
       
       - name: Build release binary
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release --target ${{ matrix.target }}
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
-          RUSTFLAGS: "-C strip=symbols"
-      
-      - name: Strip binary
         run: |
-          if [ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]; then
-            strip "target/${{ matrix.target }}/release/finance-tracker"
-          else
-            aarch64-linux-gnu-strip "target/${{ matrix.target }}/release/finance-tracker"
-          fi
+          go build -o finance-tracker
       
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: finance-tracker-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/finance-tracker
+          path: finance-tracker
           retention-days: 1
 
   tag-release:
@@ -150,21 +124,21 @@ jobs:
       - name: Download x86_64 binary
         uses: actions/download-artifact@v4
         with:
-          name: finance-tracker-x86_64-unknown-linux-gnu
+          name: finance-tracker-linux/amd64
           path: release-bins/x86_64
       
-      - name: Download aarch64 binary
+      - name: Download arm64 binary
         uses: actions/download-artifact@v4
         with:
-          name: finance-tracker-aarch64-unknown-linux-gnu
-          path: release-bins/aarch64
+          name: finance-tracker-linux/arm64
+          path: release-bins/arm64
       
       - name: Prepare binaries
         run: |
           mkdir -p release-bins/final
           # Copy binaries to final location with architecture suffix
           cp release-bins/x86_64/finance-tracker release-bins/final/finance-tracker-linux-x86_64
-          cp release-bins/aarch64/finance-tracker release-bins/final/finance-tracker-linux-aarch64
+          cp release-bins/arm64/finance-tracker release-bins/final/finance-tracker-linux-arm64
           chmod +x release-bins/final/finance-tracker-*
           # Check final binary sizes
           ls -la release-bins/final/
@@ -180,7 +154,7 @@ jobs:
             --title "$new_tag" \
             --generate-notes \
             "release-bins/final/finance-tracker-linux-x86_64" \
-            "release-bins/final/finance-tracker-linux-aarch64" 
+            "release-bins/final/finance-tracker-linux-arm64" 
 
   docker:
     name: Build and push Docker image

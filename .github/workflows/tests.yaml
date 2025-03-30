@@ -1,4 +1,4 @@
-name: Tests
+name: Go Formatting
 
 # Run on push to any branch and on pull requests
 on:
@@ -7,13 +7,9 @@ on:
   pull_request:
   workflow_dispatch:  # Allow manual triggering
 
-env:
-  RUST_TOOLCHAIN: stable
-  TOOLCHAIN_PROFILE: minimal
-
 jobs:
-  rustfmt:
-    name: Check Style
+  gofmt:
+    name: Check Go Style
     runs-on: ubuntu-latest
 
     permissions:
@@ -22,55 +18,14 @@ jobs:
     steps:
       - name: Checkout the code
         uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-          components: rustfmt
-      - name: Run cargo fmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
-
-  clippy:
-    name: Run Clippy
-    runs-on: ubuntu-latest
-
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout the code
-        uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - name: Setup Rust cache
-        uses: Swatinem/rust-cache@v2
-      - name: Run cargo clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --all-features
-
-  test:
-    name: Run Tests
-    runs-on: ubuntu-latest
-
-    permissions:
-      contents: read
-    
-    steps:
-      - name: Checkout the code
-        uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - name: Setup Rust cache
-        uses: Swatinem/rust-cache@v2
-      - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --all-features --all
-          
+          go-version: '1.21'
+      - name: Run gofmt
+        run: |
+          if [ "$(gofmt -l . | wc -l)" -gt 0 ]; then
+            echo "The following files are not formatted:"
+            gofmt -l .
+            exit 1
+          fi

@@ -72,13 +72,13 @@ func getTransactionsForPeriod(settings *Settings, startDate, endDate time.Time) 
 			"balance":      account.Balance.String(),
 			"balance_date": time.Unix(account.BalanceDate, 0).Format("2006-01-02 15:04:05"),
 		}
-		
+
 		if account.Currency != nil {
 			logFields["currency"] = *account.Currency
 		}
-		
+
 		logger.WithFields(logFields).Debug("Account details")
-		
+
 		if account.AvailableBalance != nil {
 			logger.WithField("available_balance", account.AvailableBalance.String()).Debug("Available Balance")
 		}

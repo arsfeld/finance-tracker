@@ -59,7 +59,7 @@ jobs:
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: finance-tracker-${{ matrix.target }}
+          name: finance-tracker-${{ matrix.goarch }}
           path: finance-tracker
           retention-days: 1
 
@@ -124,13 +124,13 @@ jobs:
       - name: Download x86_64 binary
         uses: actions/download-artifact@v4
         with:
-          name: finance-tracker-linux/amd64
+          name: finance-tracker-amd64
           path: release-bins/x86_64
       
       - name: Download arm64 binary
         uses: actions/download-artifact@v4
         with:
-          name: finance-tracker-linux/arm64
+          name: finance-tracker-arm64
           path: release-bins/arm64
       
       - name: Prepare binaries

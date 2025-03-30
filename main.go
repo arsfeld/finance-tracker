@@ -135,6 +135,7 @@ type Settings struct {
 	MailerTo           *string `json:"mailer_to,omitempty"`
 	NtfyServer         string  `json:"ntfy_server"`
 	NtfyTopic          *string `json:"ntfy_topic,omitempty"`
+	NtfyTopicWarning   *string `json:"ntfy_topic_warning,omitempty"`
 }
 
 type Cache struct {

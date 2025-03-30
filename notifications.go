@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,28 +13,20 @@ type NtfyMessage struct {
 	Priority string `json:"priority,omitempty"`
 }
 
-func sendNtfyNotification(settings *Settings, message string, notificationType string) error {
+func sendNtfyNotification(settings *Settings, message string, notificationTopic string) error {
 	if settings.NtfyTopic == nil || *settings.NtfyTopic == "" {
 		return nil
 	}
 
-	priority := "default"
-	if notificationType == "warning" {
-		priority = "high"
+	switch notificationTopic {
+	case "info":
+		notificationTopic = *settings.NtfyTopic
+	case "warning":
+		notificationTopic = *settings.NtfyTopicWarning
 	}
 
-	ntfyMsg := NtfyMessage{
-		Message:  message,
-		Priority: priority,
-	}
-
-	jsonData, err := json.Marshal(ntfyMsg)
-	if err != nil {
-		return fmt.Errorf("error marshaling ntfy message: %w", err)
-	}
-
-	url := fmt.Sprintf("%s/%s", settings.NtfyServer, *settings.NtfyTopic)
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	url := fmt.Sprintf("%s/%s", settings.NtfyServer, notificationTopic)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer([]byte(message)))
 	if err != nil {
 		return fmt.Errorf("error creating request: %w", err)
 	}
@@ -60,14 +51,13 @@ func sendNtfyNotification(settings *Settings, message string, notificationType s
 	return nil
 }
 
-func sendNotification(settings *Settings, message string, notificationType string, notificationTypes []string) error {
+func sendNotification(settings *Settings, message string, notificationTopic string, notificationTypes []string) error {
 	for _, nt := range notificationTypes {
 		switch nt {
 		case string(NotificationTypeNtfy):
-			if err := sendNtfyNotification(settings, message, notificationType); err != nil {
+			if err := sendNtfyNotification(settings, message, notificationTopic); err != nil {
 				return fmt.Errorf("error sending ntfy notification: %w", err)
 			}
-			// Add other notification types here (SMS, email)
 		}
 	}
 	return nil

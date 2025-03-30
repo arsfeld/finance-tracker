@@ -7,9 +7,14 @@ import (
 	"time"
 )
 
-var cacheFile = filepath.Join(os.Getenv("HOME"), ".finance_tracker_cache.json")
+// getCacheFilePath returns the path to the cache file
+func getCacheFilePath() string {
+	return filepath.Join(os.Getenv("HOME"), ".finance_tracker_cache.json")
+}
 
+// Load loads the cache from the cache file
 func (c *Cache) Load() error {
+	cacheFile := getCacheFilePath()
 	data, err := os.ReadFile(cacheFile)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -21,7 +26,9 @@ func (c *Cache) Load() error {
 	return json.Unmarshal(data, c)
 }
 
+// Save saves the cache to the cache file
 func (c *Cache) Save() error {
+	cacheFile := getCacheFilePath()
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
@@ -30,6 +37,7 @@ func (c *Cache) Save() error {
 	return os.WriteFile(cacheFile, data, 0644)
 }
 
+// UpdateAccount updates the account information in the cache
 func (c *Cache) UpdateAccount(accountID string, balance Balance, balanceDate int64) {
 	if c.Accounts == nil {
 		c.Accounts = make(map[string]map[string]interface{})
@@ -41,6 +49,8 @@ func (c *Cache) UpdateAccount(accountID string, balance Balance, balanceDate int
 	}
 }
 
+// IsAccountUpdated checks if the account has been updated since the last time
+// it was stored in the cache
 func (c *Cache) IsAccountUpdated(accountID string, balanceDate int64) bool {
 	if c.Accounts == nil {
 		return true
@@ -59,6 +69,7 @@ func (c *Cache) IsAccountUpdated(accountID string, balanceDate int64) bool {
 	return int64(storedDate) != balanceDate
 }
 
+// UpdateLastMessageTime updates the last successful message time to now
 func (c *Cache) UpdateLastMessageTime() {
 	now := time.Now().Unix()
 	c.LastSuccessfulMessage = &now

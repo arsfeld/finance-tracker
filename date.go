@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+// calculateDateRange calculates the start and end dates based on the given date range type
+// and optional custom start and end dates.
 func calculateDateRange(
 	dateRangeType DateRangeType,
 	startDate *time.Time,
@@ -47,22 +49,25 @@ func calculateDateRange(
 
 	case DateRangeTypeCustom:
 		if startDate == nil || endDate == nil {
-			return time.Time{}, time.Time{}, &TrackerError{Message: "Custom date range requires both start_date and end_date"}
+			return time.Time{}, time.Time{}, fmt.Errorf("custom date range requires both start_date and end_date")
 		}
 		return *startDate, *endDate, nil
 
 	default:
-		return time.Time{}, time.Time{}, &TrackerError{Message: fmt.Sprintf("Invalid date range type: %s", dateRangeType)}
+		return time.Time{}, time.Time{}, fmt.Errorf("invalid date range type: %s", dateRangeType)
 	}
 }
 
+// validateBillingPeriod ensures that the provided billing period is valid:
+// - Start date must be before end date
+// - Billing period can't exceed 90 days
 func validateBillingPeriod(start, end time.Time) error {
 	if start.After(end) {
-		return &TrackerError{Message: "Start date cannot be after end date"}
+		return fmt.Errorf("start date cannot be after end date")
 	}
 
 	if end.Sub(start).Hours() > 90*24 {
-		return &TrackerError{Message: "Billing period cannot exceed 90 days"}
+		return fmt.Errorf("billing period cannot exceed 90 days")
 	}
 
 	return nil

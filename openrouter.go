@@ -11,30 +11,36 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// OpenRouterRequest represents a request to the OpenRouter API
 type OpenRouterRequest struct {
 	Model    string    `json:"model"`
 	Messages []Message `json:"messages"`
 }
 
+// Message represents a message in the OpenRouter API request/response
 type Message struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
+// OpenRouterResponse represents a response from the OpenRouter API
 type OpenRouterResponse struct {
 	Choices []Choice `json:"choices"`
 	Error   *Error   `json:"error,omitempty"`
 }
 
+// Choice represents a choice in the OpenRouter API response
 type Choice struct {
 	Message Message `json:"message"`
 }
 
+// Error represents an error in the OpenRouter API response
 type Error struct {
 	Message string `json:"message"`
 	Code    int    `json:"code"`
 }
 
+// getLLMResponse sends a prompt to the OpenRouter API and returns the response
 func getLLMResponse(settings *Settings, prompt string) (string, error) {
 	reqBody := OpenRouterRequest{
 		Model: settings.OpenRouterModel,
@@ -51,7 +57,7 @@ func getLLMResponse(settings *Settings, prompt string) (string, error) {
 		return "", fmt.Errorf("error marshaling request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", settings.OpenRouterURL, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest(http.MethodPost, settings.OpenRouterURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", fmt.Errorf("error creating request: %w", err)
 	}
@@ -59,7 +65,9 @@ func getLLMResponse(settings *Settings, prompt string) (string, error) {
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", settings.OpenRouterAPIKey))
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: 120 * time.Second,
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("error making request: %w", err)
@@ -76,13 +84,13 @@ func getLLMResponse(settings *Settings, prompt string) (string, error) {
 	// Read the response body for logging
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		logrusLogger.WithFields(debugFields).WithError(err).Debug("OpenRouter response (error reading body)")
+		logger.WithFields(debugFields).WithError(err).Debug("OpenRouter response (error reading body)")
 		return "", fmt.Errorf("error reading response body: %w", err)
 	}
 	debugFields["body"] = string(bodyBytes)
 
 	// Log the comprehensive debug message
-	logrusLogger.WithFields(debugFields).Debug("OpenRouter comprehensive response")
+	logger.WithFields(debugFields).Debug("OpenRouter comprehensive response")
 
 	// Create a new reader with the body bytes for further processing
 	resp.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
@@ -96,7 +104,7 @@ func getLLMResponse(settings *Settings, prompt string) (string, error) {
 		return "", fmt.Errorf("error decoding response: %w", err)
 	}
 
-	logrusLogger.WithField("response", openRouterResp).Debug("OpenRouter response")
+	logger.WithField("response", openRouterResp).Debug("OpenRouter response")
 
 	// Check for error in the response
 	if openRouterResp.Error != nil {
@@ -110,6 +118,7 @@ func getLLMResponse(settings *Settings, prompt string) (string, error) {
 	return openRouterResp.Choices[0].Message.Content, nil
 }
 
+// formatTransactions formats the transactions as a markdown table
 func formatTransactions(transactions []Transaction) string {
 	var result string
 	result += "| Description | Amount | Date |\n"
@@ -127,6 +136,7 @@ func formatTransactions(transactions []Transaction) string {
 	return result
 }
 
+// formatAccounts formats the accounts as a markdown table
 func formatAccounts(accounts []Account) string {
 	var result string
 	result += "| Account | Balance | Last Synced |\n"
@@ -139,6 +149,7 @@ func formatAccounts(accounts []Account) string {
 	return result
 }
 
+// generateAnalysisPrompt generates a prompt for the AI to analyze transactions
 func generateAnalysisPrompt(accounts []Account, transactions []Transaction, startDate, endDate time.Time) string {
 	transactionsFormatted := formatTransactions(transactions)
 	accountsFormatted := formatAccounts(accounts)

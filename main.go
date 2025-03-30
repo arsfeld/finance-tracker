@@ -15,17 +15,17 @@ import (
 
 // Global verbose flag and logger
 var verboseMode bool
-var logrusLogger = logrus.New()
+var logger = logrus.New()
 
 // initLogger initializes the Logrus logger with the appropriate level
 func initLogger(verbose bool) {
 	verboseMode = verbose
 	if verbose {
-		logrusLogger.SetLevel(logrus.DebugLevel)
+		logger.SetLevel(logrus.DebugLevel)
 	} else {
-		logrusLogger.SetLevel(logrus.InfoLevel)
+		logger.SetLevel(logrus.InfoLevel)
 	}
-	logrusLogger.SetFormatter(&logrus.TextFormatter{
+	logger.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp: true,
 	})
 }
@@ -33,6 +33,7 @@ func initLogger(verbose bool) {
 // Balance represents a monetary value that can be unmarshaled from either string or float64
 type Balance float64
 
+// UnmarshalJSON implements the json.Unmarshaler interface for Balance
 func (b *Balance) UnmarshalJSON(data []byte) error {
 	// Try to unmarshal as string first (since API specifies numeric string)
 	var s string
@@ -65,17 +66,20 @@ const (
 	twoDaysInSeconds = 2 * 24 * 60 * 60
 )
 
-// Types
+// NotificationType defines the type of notification
 type NotificationType string
 
+// Available notification types
 const (
 	NotificationTypeSMS   NotificationType = "sms"
 	NotificationTypeEmail NotificationType = "email"
 	NotificationTypeNtfy  NotificationType = "ntfy"
 )
 
+// DateRangeType defines the type of date range for analysis
 type DateRangeType string
 
+// Available date range types
 const (
 	DateRangeTypeCurrentMonth DateRangeType = "current_month"
 	DateRangeTypeLastMonth    DateRangeType = "last_month"
@@ -85,6 +89,7 @@ const (
 	DateRangeTypeCustom       DateRangeType = "custom"
 )
 
+// Organization represents a financial institution or organization
 type Organization struct {
 	SfinURL string  `json:"sfin-url"`
 	Domain  *string `json:"domain,omitempty"`
@@ -93,6 +98,7 @@ type Organization struct {
 	ID      *string `json:"id,omitempty"`
 }
 
+// Transaction represents a financial transaction
 type Transaction struct {
 	ID           string                  `json:"id"`
 	Description  string                  `json:"description"`
@@ -103,6 +109,7 @@ type Transaction struct {
 	Extra        *map[string]interface{} `json:"extra,omitempty"`
 }
 
+// Account represents a financial account
 type Account struct {
 	ID               string        `json:"id"`
 	Name             string        `json:"name"`
@@ -115,12 +122,14 @@ type Account struct {
 	Holdings         []interface{} `json:"holdings,omitempty"`
 }
 
+// AccountsResponse represents the response from the SimpleFin API
 type AccountsResponse struct {
 	Accounts    []Account `json:"accounts"`
 	Errors      []string  `json:"errors,omitempty"`
 	XAPIMessage []string  `json:"x-api-message,omitempty"`
 }
 
+// Settings represents the application settings
 type Settings struct {
 	SimplefinBridgeURL string  `json:"simplefin_bridge_url"`
 	TwilioAccountSid   *string `json:"twilio_account_sid,omitempty"`
@@ -138,23 +147,17 @@ type Settings struct {
 	NtfyTopicWarning   *string `json:"ntfy_topic_warning,omitempty"`
 }
 
+// Cache represents the cache for the application
 type Cache struct {
 	Accounts              map[string]map[string]interface{} `json:"accounts,omitempty"`
 	LastSuccessfulMessage *int64                            `json:"last_successful_message,omitempty"`
 }
 
-type TrackerError struct {
-	Message string
-}
-
-func (e *TrackerError) Error() string {
-	return e.Message
-}
-
+// NewSettings creates a new Settings instance from environment variables
 func NewSettings() (*Settings, error) {
 	// Try to load .env file, but don't error if it doesn't exist
 	if err := godotenv.Load(); err != nil {
-		logrusLogger.Debug("No .env file found, using environment variables")
+		logger.Debug("No .env file found, using environment variables")
 	}
 
 	settings := &Settings{
@@ -237,6 +240,7 @@ Example usage:
 	}
 }
 
+// run is the main function that runs the finance tracker
 func run(
 	notifications []string,
 	disableNotifications bool,
@@ -248,20 +252,20 @@ func run(
 ) error {
 	// Initialize logger
 	initLogger(verbose)
-	logrusLogger.Debug("Starting finance tracker with verbose mode: ", verbose)
+	logger.Debug("Starting finance tracker with verbose mode: ", verbose)
 
-	fmt.Println("🔧 Loading configuration...")
+	logger.Info("🔧 Loading configuration...")
 	settings, err := NewSettings()
 	if err != nil {
 		return fmt.Errorf("error loading settings: %w", err)
 	}
-	logrusLogger.Debug("Configuration loaded successfully")
+	logger.Debug("Configuration loaded successfully")
 
 	// Parse date range
 	dateRangeType := DateRangeType(dateRange)
 	if dateRangeType != DateRangeTypeCurrentMonth {
 		disableCache = true
-		logrusLogger.Debug("Using non-current month date range, cache disabled")
+		logger.Debug("Using non-current month date range, cache disabled")
 	}
 
 	// Parse custom dates if provided
@@ -272,7 +276,7 @@ func run(
 			return fmt.Errorf("error parsing start date: %w", err)
 		}
 		parsedStartDate = &parsed
-		logrusLogger.WithField("start_date", parsed.Format("2006-01-02")).Debug("Parsed start date")
+		logger.WithField("start_date", parsed.Format("2006-01-02")).Debug("Parsed start date")
 	}
 	if endDate != "" {
 		parsed, err := time.Parse("2006-01-02", endDate)
@@ -280,7 +284,7 @@ func run(
 			return fmt.Errorf("error parsing end date: %w", err)
 		}
 		parsedEndDate = &parsed
-		logrusLogger.WithField("end_date", parsed.Format("2006-01-02")).Debug("Parsed end date")
+		logger.WithField("end_date", parsed.Format("2006-01-02")).Debug("Parsed end date")
 	}
 
 	// Calculate date range
@@ -288,7 +292,7 @@ func run(
 	if err != nil {
 		return fmt.Errorf("error calculating date range: %w", err)
 	}
-	logrusLogger.WithFields(logrus.Fields{
+	logger.WithFields(logrus.Fields{
 		"start": billingStart.Format("2006-01-02"),
 		"end":   billingEnd.Format("2006-01-02"),
 	}).Debug("Calculated date range")
@@ -297,7 +301,7 @@ func run(
 	if err := validateBillingPeriod(billingStart, billingEnd); err != nil {
 		return fmt.Errorf("error validating billing period: %w", err)
 	}
-	logrusLogger.Debug("Billing period validated successfully")
+	logger.Debug("Billing period validated successfully")
 
 	// Load cache
 	cache := &Cache{}
@@ -305,31 +309,31 @@ func run(
 		if err := cache.Load(); err != nil {
 			return fmt.Errorf("error loading cache: %w", err)
 		}
-		logrusLogger.Debug("Cache loaded successfully")
+		logger.Debug("Cache loaded successfully")
 	} else {
-		logrusLogger.Debug("Cache loading skipped (disabled)")
+		logger.Debug("Cache loading skipped (disabled)")
 	}
 
 	// Fetch transactions
-	fmt.Println("📊 Fetching transactions...")
+	logger.Info("📊 Fetching transactions...")
 	accounts, err := getTransactionsForPeriod(settings, billingStart, billingEnd)
 	if err != nil {
 		return fmt.Errorf("error fetching transactions: %w", err)
 	}
-	logrusLogger.WithField("account_count", len(accounts)).Debug("Fetched accounts")
+	logger.WithField("account_count", len(accounts)).Debug("Fetched accounts")
 
 	if len(accounts) == 0 {
 		return fmt.Errorf("no accounts found")
 	}
 
 	// Process accounts
-	fmt.Println("💳 Accounts:")
+	logger.Info("💳 Accounts:")
 	hasUpdatedAccounts := false
 	for _, account := range accounts {
-		fmt.Printf("• %s (%s)\n", account.Name, account.ID)
+		logger.Infof("• %s (%s)", account.Name, account.ID)
 		syncTime := time.Unix(account.BalanceDate, 0).Format("2006-01-02 15:04:05")
-		fmt.Printf("  └ Last synced at: %s\n", syncTime)
-		logrusLogger.WithFields(logrus.Fields{
+		logger.Infof("  └ Last synced at: %s", syncTime)
+		logger.WithFields(logrus.Fields{
 			"account_name": account.Name,
 			"account_id":   account.ID,
 		}).Debug("Processing account")
@@ -337,16 +341,16 @@ func run(
 		if !disableCache && cache.IsAccountUpdated(account.ID, account.BalanceDate) {
 			hasUpdatedAccounts = true
 			cache.UpdateAccount(account.ID, account.Balance, account.BalanceDate)
-			logrusLogger.WithField("account_id", account.ID).Debug("Account updated in cache")
+			logger.WithField("account_id", account.ID).Debug("Account updated in cache")
 		} else {
-			logrusLogger.WithField("account_id", account.ID).Debug("Account not updated (cache disabled or no changes)")
+			logger.WithField("account_id", account.ID).Debug("Account not updated (cache disabled or no changes)")
 		}
 	}
 
 	// Early return conditions
 	if !hasUpdatedAccounts {
-		logrusLogger.Debug("No accounts were updated, returning early")
-		fmt.Println("🔴 No updated accounts")
+		logger.Debug("No accounts were updated, returning early")
+		logger.Info("🔴 No updated accounts")
 	}
 
 	// Collect all transactions
@@ -354,7 +358,7 @@ func run(
 	for _, account := range accounts {
 		allTransactions = append(allTransactions, account.Transactions...)
 	}
-	logrusLogger.WithField("transaction_count", len(allTransactions)).Debug("Collected total transactions")
+	logger.WithField("transaction_count", len(allTransactions)).Debug("Collected total transactions")
 
 	if len(allTransactions) == 0 {
 		return fmt.Errorf("no transactions found")
@@ -364,33 +368,33 @@ func run(
 	if !disableCache && cache.LastSuccessfulMessage != nil {
 		lastMsgTime := time.Unix(*cache.LastSuccessfulMessage, 0)
 		if time.Since(lastMsgTime).Seconds() < float64(twoDaysInSeconds) {
-			logrusLogger.WithField("last_message_time", lastMsgTime.Format("2006-01-02 15:04:05")).Debug("Last message was sent too recently")
+			logger.WithField("last_message_time", lastMsgTime.Format("2006-01-02 15:04:05")).Debug("Last message was sent too recently")
 			return fmt.Errorf("last message was sent too recently (at %s)", lastMsgTime.Format("2006-01-02 15:04:05"))
 		}
-		logrusLogger.Debug("Last message check passed")
+		logger.Debug("Last message check passed")
 	}
 
 	// Process transactions with AI
-	fmt.Println("🤖 Analyzing transactions with AI...")
+	logger.Info("🤖 Analyzing transactions with AI...")
 	prompt := generateAnalysisPrompt(accounts, allTransactions, billingStart, billingEnd)
-	logrusLogger.WithField("prompt", prompt).Debug("Generated analysis prompt")
+	logger.WithField("prompt", prompt).Debug("Generated analysis prompt")
 
 	analysis, err := getLLMResponse(settings, prompt)
 	if err != nil {
 		return fmt.Errorf("error getting LLM response: %w", err)
 	}
-	logrusLogger.WithField("analysis", analysis).Debug("Received AI analysis")
+	logger.WithField("analysis", analysis).Debug("Received AI analysis")
 
-	fmt.Println("\n✨ AI Summary:")
-	fmt.Println(analysis)
+	logger.Info("✨ AI Summary:")
+	logger.Info(analysis)
 
 	// Send notifications
 	if !disableNotifications {
-		logrusLogger.WithField("notification_channels", notifications).Debug("Sending notifications")
+		logger.WithField("notification_channels", notifications).Debug("Sending notifications")
 		if err := sendNotification(settings, analysis, "info", notifications); err != nil {
 			return fmt.Errorf("error sending notifications: %w", err)
 		}
-		logrusLogger.Debug("Notifications sent successfully")
+		logger.Debug("Notifications sent successfully")
 
 		// Update cache
 		if !disableCache {
@@ -398,13 +402,13 @@ func run(
 			if err := cache.Save(); err != nil {
 				return fmt.Errorf("error saving cache: %w", err)
 			}
-			logrusLogger.Debug("Cache updated with new message time")
+			logger.Debug("Cache updated with new message time")
 		}
 	} else {
-		logrusLogger.Debug("Notifications disabled, skipping")
-		fmt.Println("ℹ️ Notifications disabled")
+		logger.Debug("Notifications disabled, skipping")
+		logger.Info("ℹ️ Notifications disabled")
 	}
 
-	logrusLogger.Debug("Finance tracker completed successfully")
+	logger.Debug("Finance tracker completed successfully")
 	return nil
 }

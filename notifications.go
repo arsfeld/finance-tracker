@@ -8,25 +8,25 @@ import (
 	"time"
 )
 
+// NtfyMessage represents a message to be sent to the ntfy.sh service
 type NtfyMessage struct {
 	Message  string `json:"message"`
 	Priority string `json:"priority,omitempty"`
 }
 
+// sendNtfyNotification sends a notification to the ntfy.sh service with the specified topic
 func sendNtfyNotification(settings *Settings, message string, notificationTopic string) error {
 	if settings.NtfyTopic == nil || *settings.NtfyTopic == "" {
 		return nil
 	}
 
-	switch notificationTopic {
-	case "info":
-		notificationTopic = *settings.NtfyTopic
-	case "warning":
-		notificationTopic = *settings.NtfyTopicWarning
+	topic := *settings.NtfyTopic
+	if notificationTopic == "warning" && settings.NtfyTopicWarning != nil {
+		topic = *settings.NtfyTopicWarning
 	}
 
-	url := fmt.Sprintf("%s/%s", settings.NtfyServer, notificationTopic)
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer([]byte(message)))
+	url := fmt.Sprintf("%s/%s", settings.NtfyServer, topic)
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer([]byte(message)))
 	if err != nil {
 		return fmt.Errorf("error creating request: %w", err)
 	}
@@ -51,10 +51,11 @@ func sendNtfyNotification(settings *Settings, message string, notificationTopic 
 	return nil
 }
 
+// sendNotification sends a notification through the specified notification channels
 func sendNotification(settings *Settings, message string, notificationTopic string, notificationTypes []string) error {
 	for _, nt := range notificationTypes {
-		switch nt {
-		case string(NotificationTypeNtfy):
+		switch NotificationType(nt) {
+		case NotificationTypeNtfy:
 			if err := sendNtfyNotification(settings, message, notificationTopic); err != nil {
 				return fmt.Errorf("error sending ntfy notification: %w", err)
 			}

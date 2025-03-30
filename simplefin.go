@@ -33,7 +33,7 @@ func getTransactionsForPeriod(settings *Settings, startDate, endDate time.Time) 
 	logrusLogger.WithField("url", url).Debug("Fetching transactions from SimpleFin bridge")
 
 	client := &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: 120 * time.Second,
 	}
 
 	req, err := http.NewRequest("GET", url, nil)

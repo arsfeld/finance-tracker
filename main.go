@@ -151,8 +151,9 @@ func (e *TrackerError) Error() string {
 }
 
 func NewSettings() (*Settings, error) {
+	// Try to load .env file, but don't error if it doesn't exist
 	if err := godotenv.Load(); err != nil {
-		return nil, fmt.Errorf("error loading .env file: %w", err)
+		logrusLogger.Debug("No .env file found, using environment variables")
 	}
 
 	settings := &Settings{

@@ -66,4 +66,4 @@ func validateBillingPeriod(start, end time.Time) error {
 	}
 
 	return nil
-} 
+}

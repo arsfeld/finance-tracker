@@ -131,7 +131,7 @@ func formatAccounts(accounts []Account) string {
 	var result string
 	result += "| Account | Balance | Last Synced |\n"
 	result += "|------------|---------|------|\n"
-	
+
 	for _, account := range accounts {
 		result += fmt.Sprintf("| %s | %.2f | %s |\n", account.Name, account.Balance, time.Unix(account.BalanceDate, 0).Format("2006-01-02"))
 	}
@@ -174,4 +174,4 @@ Accounts Information:
 
 Transactions: 
 %s`, startDate.Format("2006-01-02"), endDate.Format("2006-01-02"), accountsFormatted, transactionsFormatted)
-} 
+}

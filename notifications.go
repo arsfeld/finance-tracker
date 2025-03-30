@@ -67,8 +67,8 @@ func sendNotification(settings *Settings, message string, notificationType strin
 			if err := sendNtfyNotification(settings, message, notificationType); err != nil {
 				return fmt.Errorf("error sending ntfy notification: %w", err)
 			}
-		// Add other notification types here (SMS, email)
+			// Add other notification types here (SMS, email)
 		}
 	}
 	return nil
-} 
+}

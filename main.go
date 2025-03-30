@@ -94,31 +94,31 @@ type Organization struct {
 }
 
 type Transaction struct {
-	ID           string   `json:"id"`
-	Description  string   `json:"description"`
-	Amount       Balance  `json:"amount"`
-	Posted       int64    `json:"posted"`
-	TransactedAt *int64   `json:"transacted_at,omitempty"`
-	Pending      *bool    `json:"pending,omitempty"`
+	ID           string                  `json:"id"`
+	Description  string                  `json:"description"`
+	Amount       Balance                 `json:"amount"`
+	Posted       int64                   `json:"posted"`
+	TransactedAt *int64                  `json:"transacted_at,omitempty"`
+	Pending      *bool                   `json:"pending,omitempty"`
 	Extra        *map[string]interface{} `json:"extra,omitempty"`
 }
 
 type Account struct {
-	ID              string        `json:"id"`
-	Name            string        `json:"name"`
-	Balance         Balance       `json:"balance"`
-	BalanceDate     int64         `json:"balance-date"`
-	Org             Organization  `json:"org"`
-	Transactions    []Transaction `json:"transactions,omitempty"`
-	Currency        *string       `json:"currency,omitempty"`
-	AvailableBalance *Balance     `json:"available-balance,omitempty"`
-	Holdings        []interface{} `json:"holdings,omitempty"`
+	ID               string        `json:"id"`
+	Name             string        `json:"name"`
+	Balance          Balance       `json:"balance"`
+	BalanceDate      int64         `json:"balance-date"`
+	Org              Organization  `json:"org"`
+	Transactions     []Transaction `json:"transactions,omitempty"`
+	Currency         *string       `json:"currency,omitempty"`
+	AvailableBalance *Balance      `json:"available-balance,omitempty"`
+	Holdings         []interface{} `json:"holdings,omitempty"`
 }
 
 type AccountsResponse struct {
-	Accounts     []Account  `json:"accounts"`
-	Errors       []string   `json:"errors,omitempty"`
-	XAPIMessage  []string   `json:"x-api-message,omitempty"`
+	Accounts    []Account `json:"accounts"`
+	Errors      []string  `json:"errors,omitempty"`
+	XAPIMessage []string  `json:"x-api-message,omitempty"`
 }
 
 type Settings struct {
@@ -138,8 +138,8 @@ type Settings struct {
 }
 
 type Cache struct {
-	Accounts                map[string]map[string]interface{} `json:"accounts,omitempty"`
-	LastSuccessfulMessage   *int64                           `json:"last_successful_message,omitempty"`
+	Accounts              map[string]map[string]interface{} `json:"accounts,omitempty"`
+	LastSuccessfulMessage *int64                            `json:"last_successful_message,omitempty"`
 }
 
 type TrackerError struct {
@@ -372,7 +372,7 @@ func run(
 	fmt.Println("🤖 Analyzing transactions with AI...")
 	prompt := generateAnalysisPrompt(accounts, allTransactions, billingStart, billingEnd)
 	logrusLogger.WithField("prompt", prompt).Debug("Generated analysis prompt")
-	
+
 	analysis, err := getLLMResponse(settings, prompt)
 	if err != nil {
 		return fmt.Errorf("error getting LLM response: %w", err)
@@ -405,4 +405,4 @@ func run(
 
 	logrusLogger.Debug("Finance tracker completed successfully")
 	return nil
-} 
+}

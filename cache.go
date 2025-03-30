@@ -62,4 +62,4 @@ func (c *Cache) IsAccountUpdated(accountID string, balanceDate int64) bool {
 func (c *Cache) UpdateLastMessageTime() {
 	now := time.Now().Unix()
 	c.LastSuccessfulMessage = &now
-} 
+}

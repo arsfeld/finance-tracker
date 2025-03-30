@@ -51,7 +51,7 @@ func getTransactionsForPeriod(settings *Settings, startDate, endDate time.Time) 
 		body, _ := io.ReadAll(resp.Body)
 		logrusLogger.WithFields(logrus.Fields{
 			"status_code": resp.StatusCode,
-			"body":       string(body),
+			"body":        string(body),
 		}).Debug("API request failed")
 		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
 	}
@@ -80,12 +80,12 @@ func getTransactionsForPeriod(settings *Settings, startDate, endDate time.Time) 
 		if len(account.Transactions) > 0 {
 			for _, tx := range account.Transactions {
 				logrusLogger.WithFields(logrus.Fields{
-					"id":           tx.ID,
-					"amount":       tx.Amount.String(),
-					"status":       getTransactionStatus(tx),
-					"posted":       time.Unix(tx.Posted, 0).Format("2006-01-02 15:04:05"),
-					"transacted":   getTransactionTime(tx),
-					"description":  tx.Description,
+					"id":          tx.ID,
+					"amount":      tx.Amount.String(),
+					"status":      getTransactionStatus(tx),
+					"posted":      time.Unix(tx.Posted, 0).Format("2006-01-02 15:04:05"),
+					"transacted":  getTransactionTime(tx),
+					"description": tx.Description,
 				}).Debug("Transaction details")
 			}
 		} else {
@@ -126,4 +126,4 @@ func getTransactionsForPeriod(settings *Settings, startDate, endDate time.Time) 
 	logrusLogger.WithField("filtered_account_count", len(filteredAccounts)).Debug("Filtered accounts with non-zero balance")
 
 	return filteredAccounts, nil
-} 
+}

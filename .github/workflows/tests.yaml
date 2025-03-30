@@ -9,23 +9,47 @@ on:
 
 jobs:
   gofmt:
-    name: Check Go Style
+    name: Check and Fix Go Style
     runs-on: ubuntu-latest
 
     permissions:
-      contents: read
+      contents: write  # Needed for pushing changes
 
     steps:
       - name: Checkout the code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for proper git operations
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.21'
-      - name: Run gofmt
+      - name: Check formatting
+        id: check-format
         run: |
           if [ "$(gofmt -l . | wc -l)" -gt 0 ]; then
-            echo "The following files are not formatted:"
+            echo "Found files that need formatting"
             gofmt -l .
-            exit 1
+            echo "needs_formatting=true" >> $GITHUB_OUTPUT
+          else
+            echo "All files are properly formatted"
+            echo "needs_formatting=false" >> $GITHUB_OUTPUT
           fi
+      - name: Fix formatting
+        if: steps.check-format.outputs.needs_formatting == 'true' && github.ref == 'refs/heads/main'
+        run: |
+          gofmt -w .
+      - name: Commit and push if changes
+        if: steps.check-format.outputs.needs_formatting == 'true' && github.ref == 'refs/heads/main'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add .
+          git commit -m "🎨 style: format Go code"
+          git push
+      - name: Fail if formatting issues found
+        if: steps.check-format.outputs.needs_formatting == 'true' && github.ref != 'refs/heads/main'
+        run: |
+          echo "The following files are not formatted:"
+          gofmt -l .
+          exit 1

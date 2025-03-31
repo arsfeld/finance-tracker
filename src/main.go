@@ -145,9 +145,9 @@ type Cache struct {
 }
 
 // NewSettings creates a new Settings instance from environment variables
-func NewSettings() (*Settings, error) {
+func NewSettings(env_file string) (*Settings, error) {
 	// Try to load .env file, but don't error if it doesn't exist
-	if err := godotenv.Load(); err != nil {
+	if err := godotenv.Load(".env", env_file); err != nil {
 		log.Debug().Msg("No .env file found, using environment variables")
 	}
 
@@ -204,8 +204,9 @@ Example usage:
 			startDate, _ := cmd.Flags().GetString("start-date")
 			endDate, _ := cmd.Flags().GetString("end-date")
 			force, _ := cmd.Flags().GetBool("force")
+			env_file, _ := cmd.Flags().GetString("env-file")
 
-			return run(notifications, disableNotifications, disableCache, verbose, dateRange, startDate, endDate, force, GetVersion())
+			return run(notifications, disableNotifications, disableCache, verbose, dateRange, startDate, endDate, force, env_file, GetVersion())
 		},
 	}
 
@@ -217,6 +218,7 @@ Example usage:
 	rootCmd.Flags().String("start-date", "", "Start date for custom range (YYYY-MM-DD)")
 	rootCmd.Flags().String("end-date", "", "End date for custom range (YYYY-MM-DD)")
 	rootCmd.Flags().Bool("force", false, "Force analysis even if cache is up to date")
+	rootCmd.Flags().String("env-file", "", "Path to environment file")
 	rootCmd.Flags().Bool("version", false, "Show version information")
 	rootCmd.SetVersionTemplate(GetVersion() + "\n")
 
@@ -235,6 +237,7 @@ func run(
 	startDate string,
 	endDate string,
 	force bool,
+	env_file string,
 	version string,
 ) error {
 	// Initialize logger
@@ -252,7 +255,7 @@ func run(
 		Msg("Starting finance tracker")
 
 	log.Info().Msg("🔧 Loading configuration...")
-	settings, err := NewSettings()
+	settings, err := NewSettings(env_file)
 	if err != nil {
 		return fmt.Errorf("error loading settings: %w", err)
 	}

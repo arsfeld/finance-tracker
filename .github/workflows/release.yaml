@@ -61,9 +61,21 @@ jobs:
           git push origin "$new_tag"
           echo "Created and pushed new tag: $new_tag"
 
+  build-release:
+    name: Build Release
+    needs: [tag-release]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    
+    steps:
+      - name: Call Build Workflow
+        uses: ./.github/workflows/build.yaml
+        with:
+          version: ${{ needs.tag-release.outputs.new_tag }}
+
   create-release:
     name: Create Release from Tag
-    needs: [tag-release]
+    needs: [tag-release, build-release]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
 
@@ -74,29 +86,24 @@ jobs:
       - name: Checkout the code
         uses: actions/checkout@v4
       
-      - name: Call Build Workflow
-        uses: ./.github/workflows/build.yaml
-        with:
-          version: ${{ needs.tag-release.outputs.new_tag }}
-      
       - name: Download x86_64 binary
         uses: actions/download-artifact@v4
         with:
-          name: finance-tracker-amd64
+          name: finance-tracker-amd64-${{ needs.tag-release.outputs.new_tag }}
           path: release-bins/x86_64
       
       - name: Download arm64 binary
         uses: actions/download-artifact@v4
         with:
-          name: finance-tracker-arm64
+          name: finance-tracker-arm64-${{ needs.tag-release.outputs.new_tag }}
           path: release-bins/arm64
       
       - name: Prepare binaries
         run: |
           mkdir -p release-bins/final
           # Copy binaries to final location with architecture suffix
-          cp release-bins/x86_64/finance-tracker release-bins/final/finance-tracker-linux-x86_64
-          cp release-bins/arm64/finance-tracker release-bins/final/finance-tracker-linux-arm64
+          cp release-bins/x86_64/finance-tracker-${{ needs.tag-release.outputs.new_tag }} release-bins/final/finance-tracker-linux-x86_64
+          cp release-bins/arm64/finance-tracker-${{ needs.tag-release.outputs.new_tag }} release-bins/final/finance-tracker-linux-arm64
           chmod +x release-bins/final/finance-tracker-*
           # Check final binary sizes
           ls -la release-bins/final/

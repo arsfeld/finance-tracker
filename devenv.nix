@@ -10,6 +10,7 @@
     git
     gcc
     go
+    just
   ];
 
   languages.go.enable = true;

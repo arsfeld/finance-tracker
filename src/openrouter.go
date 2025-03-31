@@ -14,9 +14,9 @@ import (
 
 // OpenRouterRequest represents a request to the OpenRouter API
 type OpenRouterRequest struct {
-	Model    string    `json:"model"`
-	Models   []string  `json:"models"`
-	Messages []Message `json:"messages"`
+	Model     string    `json:"model"`
+	Models    []string  `json:"models"`
+	Messages  []Message `json:"messages"`
 	Reasoning Reasoning `json:"reasoning"`
 }
 

@@ -56,7 +56,7 @@ func (c *Cache) Load() error {
 // Save saves the cache to the cache file
 func (c *Cache) Save() error {
 	// Ensure version is set to 2
-	c.Version = 2;
+	c.Version = 2
 
 	cacheFile := getCacheFilePath()
 	data, err := json.MarshalIndent(c, "", "  ")

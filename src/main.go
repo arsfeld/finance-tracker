@@ -314,10 +314,8 @@ func run(
 		log.Info().Str("account_name", account.Name).Str("account_id", account.ID).Msg("•")
 		syncTime := time.Unix(account.BalanceDate, 0).Format("2006-01-02 15:04:05")
 		log.Info().Str("sync_time", syncTime).Msg("  └ Last synced at:")
-		log.Debug().
-			Str("account_name", account.Name).
-			Str("account_id", account.ID).
-			Msg("Processing account")
+		log.Info().Str("balance", account.Balance.String()).Msg("  └ Balance:")
+		log.Info().Str("transactions", strconv.Itoa(len(account.Transactions))).Msg("  └ Transactions:")
 
 		if !disableCache && cache.IsAccountUpdated(account.ID, account.BalanceDate) {
 			hasUpdatedAccounts = true

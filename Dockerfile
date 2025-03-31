@@ -12,8 +12,10 @@ RUN go mod download
 # Copy source code
 COPY src/ ./src/
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -o finance-tracker ./src
+# Build the application with version information
+ARG VERSION=dev
+ARG BUILD_TIME
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-X main.Version=$VERSION -X main.BuildTime=$BUILD_TIME" -o finance-tracker ./src
 
 # Final stage
 FROM alpine:latest

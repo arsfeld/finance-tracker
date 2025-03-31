@@ -180,7 +180,7 @@ func main() {
 	var rootCmd = &cobra.Command{
 		Use:   "finance_tracker",
 		Short: "Track your finances with AI-powered analysis",
-		Long: `Finance Tracker is a powerful tool that analyzes your financial transactions using AI.
+		Long: fmt.Sprintf(`Finance Tracker is a powerful tool that analyzes your financial transactions using AI.
 It connects to your SimpleFin account to fetch transactions and uses OpenAI's LLM to provide
 insightful analysis of your spending patterns.
 
@@ -188,11 +188,13 @@ The tool supports multiple notification channels and includes a caching mechanis
 duplicate notifications. It can analyze transactions for various time periods and provides
 detailed breakdowns of your spending habits.
 
+Version: %s
+
 Example usage:
   finance_tracker                    # Analyze current month's transactions
   finance_tracker --date-range last_month  # Analyze last month's transactions
   finance_tracker --notifications ntfy     # Send notifications via ntfy
-  finance_tracker --disable-cache          # Force fresh analysis without caching`,
+  finance_tracker --disable-cache          # Force fresh analysis without caching`, GetVersion()),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			notifications, _ := cmd.Flags().GetStringSlice("notifications")
 			disableNotifications, _ := cmd.Flags().GetBool("disable-notifications")
@@ -203,7 +205,7 @@ Example usage:
 			endDate, _ := cmd.Flags().GetString("end-date")
 			force, _ := cmd.Flags().GetBool("force")
 
-			return run(notifications, disableNotifications, disableCache, verbose, dateRange, startDate, endDate, force)
+			return run(notifications, disableNotifications, disableCache, verbose, dateRange, startDate, endDate, force, GetVersion())
 		},
 	}
 
@@ -215,6 +217,9 @@ Example usage:
 	rootCmd.Flags().String("start-date", "", "Start date for custom range (YYYY-MM-DD)")
 	rootCmd.Flags().String("end-date", "", "End date for custom range (YYYY-MM-DD)")
 	rootCmd.Flags().Bool("force", false, "Force analysis even if cache is up to date")
+	rootCmd.Flags().Bool("version", false, "Show version information")
+	rootCmd.SetVersionTemplate(GetVersion() + "\n")
+
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatal().Err(err).Msg("Error executing root command")
 	}
@@ -230,6 +235,7 @@ func run(
 	startDate string,
 	endDate string,
 	force bool,
+	version string,
 ) error {
 	// Initialize logger
 	initLogger(verbose)
@@ -242,6 +248,7 @@ func run(
 		Str("start_date", startDate).
 		Str("end_date", endDate).
 		Bool("force", force).
+		Str("version", version).
 		Msg("Starting finance tracker")
 
 	log.Info().Msg("🔧 Loading configuration...")

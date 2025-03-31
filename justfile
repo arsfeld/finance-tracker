@@ -6,7 +6,9 @@ default: build
 # Build the project
 build:
     #!/usr/bin/env bash
-    go build -o bin/finance_tracker ./src
+    VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+    BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    go build -ldflags="-X main.Version=$VERSION -X main.BuildTime=$BUILD_TIME" -o bin/finance_tracker ./src
 
 # Run the project
 run: build

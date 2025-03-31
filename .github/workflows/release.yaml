@@ -64,15 +64,10 @@ jobs:
   build-release:
     name: Build Release
     needs: [tag-release]
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    uses: ./.github/workflows/build.yaml
+    with:
+      version: ${{ needs.tag-release.outputs.new_tag }}
     
-    steps:
-      - name: Call Build Workflow
-        uses: ./.github/workflows/build.yaml
-        with:
-          version: ${{ needs.tag-release.outputs.new_tag }}
-
   create-release:
     name: Create Release from Tag
     needs: [tag-release, build-release]

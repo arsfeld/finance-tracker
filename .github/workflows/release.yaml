@@ -97,8 +97,8 @@ jobs:
         run: |
           mkdir -p release-bins/final
           # Copy binaries to final location with architecture suffix
-          cp release-bins/x86_64/finance-tracker-${{ needs.tag-release.outputs.new_tag }} release-bins/final/finance-tracker-linux-x86_64
-          cp release-bins/arm64/finance-tracker-${{ needs.tag-release.outputs.new_tag }} release-bins/final/finance-tracker-linux-arm64
+          cp release-bins/x86_64/finance-tracker release-bins/final/finance-tracker-linux-x86_64
+          cp release-bins/arm64/finance-tracker release-bins/final/finance-tracker-linux-arm64
           chmod +x release-bins/final/finance-tracker-*
           # Check final binary sizes
           ls -la release-bins/final/

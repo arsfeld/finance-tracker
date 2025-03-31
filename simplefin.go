@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"github.com/rs/zerolog/log"
 )
 
 // getTransactionStatus returns the status of a transaction (pending or posted)
@@ -32,7 +32,7 @@ func getTransactionsForPeriod(settings *Settings, startDate, endDate time.Time) 
 	endTS := endDate.Unix()
 
 	url := fmt.Sprintf("%s/accounts?start-date=%d&end-date=%d", settings.SimplefinBridgeURL, startTS, endTS)
-	logger.WithField("url", url).Debug("Fetching transactions from SimpleFin bridge")
+	log.Debug().Str("url", url).Msg("Fetching transactions from SimpleFin bridge")
 
 	client := &http.Client{
 		Timeout: 120 * time.Second,
@@ -51,10 +51,10 @@ func getTransactionsForPeriod(settings *Settings, startDate, endDate time.Time) 
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		logger.WithFields(logrus.Fields{
-			"status_code": resp.StatusCode,
-			"body":        string(body),
-		}).Debug("API request failed")
+		log.Debug().
+			Int("status_code", resp.StatusCode).
+			Str("body", string(body)).
+			Msg("API request failed")
 		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -62,59 +62,43 @@ func getTransactionsForPeriod(settings *Settings, startDate, endDate time.Time) 
 	if err := json.NewDecoder(resp.Body).Decode(&accountsResponse); err != nil {
 		return nil, fmt.Errorf("error decoding response: %w", err)
 	}
-	logger.WithField("account_count", len(accountsResponse.Accounts)).Debug("Successfully decoded response")
+	log.Debug().Int("account_count", len(accountsResponse.Accounts)).Msg("Successfully decoded response")
 
 	// Log account details for debugging
 	for _, account := range accountsResponse.Accounts {
-		logFields := logrus.Fields{
-			"id":           account.ID,
-			"name":         account.Name,
-			"balance":      account.Balance.String(),
-			"balance_date": time.Unix(account.BalanceDate, 0).Format("2006-01-02 15:04:05"),
-		}
+		event := log.Debug().
+			Str("id", account.ID).
+			Str("name", account.Name).
+			Str("balance", account.Balance.String()).
+			Str("balance_date", time.Unix(account.BalanceDate, 0).Format("2006-01-02 15:04:05"))
 
 		if account.Currency != nil {
-			logFields["currency"] = *account.Currency
+			event.Str("currency", *account.Currency)
 		}
-
-		logger.WithFields(logFields).Debug("Account details")
+		event.Msg("Account details")
 
 		if account.AvailableBalance != nil {
-			logger.WithField("available_balance", account.AvailableBalance.String()).Debug("Available Balance")
+			log.Debug().Str("available_balance", account.AvailableBalance.String()).Msg("Available Balance")
 		}
 
 		// Log transaction details
-		logger.WithField("transaction_count", len(account.Transactions)).Debug("Transactions")
-		if len(account.Transactions) > 0 {
-			for _, tx := range account.Transactions {
-				logger.WithFields(logrus.Fields{
-					"id":          tx.ID,
-					"amount":      tx.Amount.String(),
-					"status":      getTransactionStatus(tx),
-					"posted":      time.Unix(tx.Posted, 0).Format("2006-01-02 15:04:05"),
-					"transacted":  getTransactionTime(tx),
-					"description": tx.Description,
-				}).Debug("Transaction details")
-			}
-		} else {
-			logger.Debug("No transactions found")
-		}
+		log.Debug().Int("transaction_count", len(account.Transactions)).Msg("Transactions")
 	}
 
 	// Log any errors or messages from the API
 	if len(accountsResponse.Errors) > 0 {
 		for _, errMsg := range accountsResponse.Errors {
-			logger.Warnf("API Error: %s", errMsg)
+			log.Warn().Str("error", errMsg).Msg("API Error")
 			if err := sendNtfyNotification(settings, fmt.Sprintf("API Error: %s", errMsg), "warning"); err != nil {
-				logger.WithError(err).Debug("Error sending notification")
-				logger.Errorf("Error sending notification: %v", err)
+				log.Debug().Err(err).Msg("Error sending notification")
+				log.Error().Err(err).Msg("Error sending notification")
 			}
 		}
 	}
 
 	if len(accountsResponse.XAPIMessage) > 0 {
 		for _, msg := range accountsResponse.XAPIMessage {
-			logger.WithField("message", msg).Debug("API Message")
+			log.Debug().Str("message", msg).Msg("API Message")
 		}
 	}
 
@@ -122,16 +106,16 @@ func getTransactionsForPeriod(settings *Settings, startDate, endDate time.Time) 
 	var filteredAccounts []Account
 	for _, account := range accountsResponse.Accounts {
 		if float64(account.Balance) != 0 {
-			logger.WithFields(logrus.Fields{
-				"account_id": account.ID,
-				"balance":    float64(account.Balance),
-			}).Debug("Included account with non-zero balance")
+			log.Debug().
+				Str("account_id", account.ID).
+				Float64("balance", float64(account.Balance)).
+				Msg("Included account with non-zero balance")
 			filteredAccounts = append(filteredAccounts, account)
 		} else {
-			logger.WithField("account_id", account.ID).Debug("Filtered out account with zero balance")
+			log.Debug().Str("account_id", account.ID).Msg("Filtered out account with zero balance")
 		}
 	}
-	logger.WithField("filtered_account_count", len(filteredAccounts)).Debug("Filtered accounts with non-zero balance")
+	log.Debug().Int("filtered_account_count", len(filteredAccounts)).Msg("Filtered accounts with non-zero balance")
 
 	return filteredAccounts, nil
 }

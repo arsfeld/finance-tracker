@@ -3,31 +3,24 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 	"time"
 
 	"github.com/joho/godotenv"
-	"github.com/sirupsen/logrus"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
 
-// Global verbose flag and logger
-var verboseMode bool
-var logger = logrus.New()
-
-// initLogger initializes the Logrus logger with the appropriate level
+// initLogger initializes the Zerolog logger with the appropriate level
 func initLogger(verbose bool) {
-	verboseMode = verbose
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	if verbose {
-		logger.SetLevel(logrus.DebugLevel)
-	} else {
-		logger.SetLevel(logrus.InfoLevel)
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	}
-	logger.SetFormatter(&logrus.TextFormatter{
-		FullTimestamp: true,
-	})
 }
 
 // Balance represents a monetary value that can be unmarshaled from either string or float64
@@ -132,10 +125,6 @@ type AccountsResponse struct {
 // Settings represents the application settings
 type Settings struct {
 	SimplefinBridgeURL string  `json:"simplefin_bridge_url"`
-	TwilioAccountSid   *string `json:"twilio_account_sid,omitempty"`
-	TwilioAuthToken    *string `json:"twilio_auth_token,omitempty"`
-	TwilioFromPhone    *string `json:"twilio_from_phone,omitempty"`
-	TwilioToPhones     *string `json:"twilio_to_phones,omitempty"`
 	OpenRouterURL      string  `json:"openrouter_url"`
 	OpenRouterAPIKey   string  `json:"openrouter_api_key"`
 	OpenRouterModel    string  `json:"openrouter_model"`
@@ -157,7 +146,7 @@ type Cache struct {
 func NewSettings() (*Settings, error) {
 	// Try to load .env file, but don't error if it doesn't exist
 	if err := godotenv.Load(); err != nil {
-		logger.Debug("No .env file found, using environment variables")
+		log.Debug().Msg("No .env file found, using environment variables")
 	}
 
 	settings := &Settings{
@@ -169,18 +158,6 @@ func NewSettings() (*Settings, error) {
 	}
 
 	// Optional fields
-	if twilioSid := os.Getenv("TWILIO_ACCOUNT_SID"); twilioSid != "" {
-		settings.TwilioAccountSid = &twilioSid
-	}
-	if twilioToken := os.Getenv("TWILIO_AUTH_TOKEN"); twilioToken != "" {
-		settings.TwilioAuthToken = &twilioToken
-	}
-	if twilioFrom := os.Getenv("TWILIO_FROM_PHONE"); twilioFrom != "" {
-		settings.TwilioFromPhone = &twilioFrom
-	}
-	if twilioTo := os.Getenv("TWILIO_TO_PHONES"); twilioTo != "" {
-		settings.TwilioToPhones = &twilioTo
-	}
 	if mailerURL := os.Getenv("MAILER_URL"); mailerURL != "" {
 		settings.MailerURL = &mailerURL
 	}
@@ -236,7 +213,7 @@ Example usage:
 	rootCmd.Flags().String("end-date", "", "End date for custom range (YYYY-MM-DD)")
 
 	if err := rootCmd.Execute(); err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("Error executing root command")
 	}
 }
 
@@ -252,20 +229,20 @@ func run(
 ) error {
 	// Initialize logger
 	initLogger(verbose)
-	logger.Debug("Starting finance tracker with verbose mode: ", verbose)
+	log.Debug().Bool("verbose", verbose).Msg("Starting finance tracker")
 
-	logger.Info("🔧 Loading configuration...")
+	log.Info().Msg("🔧 Loading configuration...")
 	settings, err := NewSettings()
 	if err != nil {
 		return fmt.Errorf("error loading settings: %w", err)
 	}
-	logger.Debug("Configuration loaded successfully")
+	log.Debug().Msg("Configuration loaded successfully")
 
 	// Parse date range
 	dateRangeType := DateRangeType(dateRange)
 	if dateRangeType != DateRangeTypeCurrentMonth {
 		disableCache = true
-		logger.Debug("Using non-current month date range, cache disabled")
+		log.Debug().Msg("Using non-current month date range, cache disabled")
 	}
 
 	// Parse custom dates if provided
@@ -276,7 +253,7 @@ func run(
 			return fmt.Errorf("error parsing start date: %w", err)
 		}
 		parsedStartDate = &parsed
-		logger.WithField("start_date", parsed.Format("2006-01-02")).Debug("Parsed start date")
+		log.Debug().Str("start_date", parsed.Format("2006-01-02")).Msg("Parsed start date")
 	}
 	if endDate != "" {
 		parsed, err := time.Parse("2006-01-02", endDate)
@@ -284,7 +261,7 @@ func run(
 			return fmt.Errorf("error parsing end date: %w", err)
 		}
 		parsedEndDate = &parsed
-		logger.WithField("end_date", parsed.Format("2006-01-02")).Debug("Parsed end date")
+		log.Debug().Str("end_date", parsed.Format("2006-01-02")).Msg("Parsed end date")
 	}
 
 	// Calculate date range
@@ -292,16 +269,16 @@ func run(
 	if err != nil {
 		return fmt.Errorf("error calculating date range: %w", err)
 	}
-	logger.WithFields(logrus.Fields{
-		"start": billingStart.Format("2006-01-02"),
-		"end":   billingEnd.Format("2006-01-02"),
-	}).Debug("Calculated date range")
+	log.Debug().
+		Str("start", billingStart.Format("2006-01-02")).
+		Str("end", billingEnd.Format("2006-01-02")).
+		Msg("Calculated date range")
 
 	// Validate billing period
 	if err := validateBillingPeriod(billingStart, billingEnd); err != nil {
 		return fmt.Errorf("error validating billing period: %w", err)
 	}
-	logger.Debug("Billing period validated successfully")
+	log.Debug().Msg("Billing period validated successfully")
 
 	// Load cache
 	cache := &Cache{}
@@ -309,48 +286,48 @@ func run(
 		if err := cache.Load(); err != nil {
 			return fmt.Errorf("error loading cache: %w", err)
 		}
-		logger.Debug("Cache loaded successfully")
+		log.Debug().Msg("Cache loaded successfully")
 	} else {
-		logger.Debug("Cache loading skipped (disabled)")
+		log.Debug().Msg("Cache loading skipped (disabled)")
 	}
 
 	// Fetch transactions
-	logger.Info("📊 Fetching transactions...")
+	log.Info().Msg("📊 Fetching transactions...")
 	accounts, err := getTransactionsForPeriod(settings, billingStart, billingEnd)
 	if err != nil {
 		return fmt.Errorf("error fetching transactions: %w", err)
 	}
-	logger.WithField("account_count", len(accounts)).Debug("Fetched accounts")
+	log.Debug().Int("account_count", len(accounts)).Msg("Fetched accounts")
 
 	if len(accounts) == 0 {
 		return fmt.Errorf("no accounts found")
 	}
 
 	// Process accounts
-	logger.Info("💳 Accounts:")
+	log.Info().Msg("💳 Accounts:")
 	hasUpdatedAccounts := false
 	for _, account := range accounts {
-		logger.Infof("• %s (%s)", account.Name, account.ID)
+		log.Info().Str("account_name", account.Name).Str("account_id", account.ID).Msg("•")
 		syncTime := time.Unix(account.BalanceDate, 0).Format("2006-01-02 15:04:05")
-		logger.Infof("  └ Last synced at: %s", syncTime)
-		logger.WithFields(logrus.Fields{
-			"account_name": account.Name,
-			"account_id":   account.ID,
-		}).Debug("Processing account")
+		log.Info().Str("sync_time", syncTime).Msg("  └ Last synced at:")
+		log.Debug().
+			Str("account_name", account.Name).
+			Str("account_id", account.ID).
+			Msg("Processing account")
 
 		if !disableCache && cache.IsAccountUpdated(account.ID, account.BalanceDate) {
 			hasUpdatedAccounts = true
 			cache.UpdateAccount(account.ID, account.Balance, account.BalanceDate)
-			logger.WithField("account_id", account.ID).Debug("Account updated in cache")
+			log.Debug().Str("account_id", account.ID).Msg("Account updated in cache")
 		} else {
-			logger.WithField("account_id", account.ID).Debug("Account not updated (cache disabled or no changes)")
+			log.Debug().Str("account_id", account.ID).Msg("Account not updated (cache disabled or no changes)")
 		}
 	}
 
 	// Early return conditions
 	if !hasUpdatedAccounts {
-		logger.Debug("No accounts were updated, returning early")
-		logger.Info("🔴 No updated accounts")
+		log.Debug().Msg("No accounts were updated, returning early")
+		log.Info().Msg("🔴 No updated accounts")
 	}
 
 	// Collect all transactions
@@ -358,7 +335,7 @@ func run(
 	for _, account := range accounts {
 		allTransactions = append(allTransactions, account.Transactions...)
 	}
-	logger.WithField("transaction_count", len(allTransactions)).Debug("Collected total transactions")
+	log.Debug().Int("transaction_count", len(allTransactions)).Msg("Collected total transactions")
 
 	if len(allTransactions) == 0 {
 		return fmt.Errorf("no transactions found")
@@ -368,33 +345,33 @@ func run(
 	if !disableCache && cache.LastSuccessfulMessage != nil {
 		lastMsgTime := time.Unix(*cache.LastSuccessfulMessage, 0)
 		if time.Since(lastMsgTime).Seconds() < float64(twoDaysInSeconds) {
-			logger.WithField("last_message_time", lastMsgTime.Format("2006-01-02 15:04:05")).Debug("Last message was sent too recently")
+			log.Debug().Str("last_message_time", lastMsgTime.Format("2006-01-02 15:04:05")).Msg("Last message was sent too recently")
 			return fmt.Errorf("last message was sent too recently (at %s)", lastMsgTime.Format("2006-01-02 15:04:05"))
 		}
-		logger.Debug("Last message check passed")
+		log.Debug().Msg("Last message check passed")
 	}
 
 	// Process transactions with AI
-	logger.Info("🤖 Analyzing transactions with AI...")
+	log.Info().Msg("🤖 Analyzing transactions with AI...")
 	prompt := generateAnalysisPrompt(accounts, allTransactions, billingStart, billingEnd)
-	logger.WithField("prompt", prompt).Debug("Generated analysis prompt")
+	log.Debug().Str("prompt", prompt).Msg("Generated analysis prompt")
 
 	analysis, err := getLLMResponse(settings, prompt)
 	if err != nil {
 		return fmt.Errorf("error getting LLM response: %w", err)
 	}
-	logger.WithField("analysis", analysis).Debug("Received AI analysis")
+	log.Debug().Str("analysis", analysis).Msg("Received AI analysis")
 
-	logger.Info("✨ AI Summary:")
-	logger.Info(analysis)
+	log.Info().Msg("✨ AI Summary:")
+	log.Info().Msg(analysis)
 
 	// Send notifications
 	if !disableNotifications {
-		logger.WithField("notification_channels", notifications).Debug("Sending notifications")
-		if err := sendNotification(settings, analysis, "info", notifications); err != nil {
+		log.Debug().Strs("notification_channels", notifications).Msg("Sending notifications")
+		if err := sendNotification(settings, analysis, allTransactions, "info", notifications); err != nil {
 			return fmt.Errorf("error sending notifications: %w", err)
 		}
-		logger.Debug("Notifications sent successfully")
+		log.Debug().Msg("Notifications sent successfully")
 
 		// Update cache
 		if !disableCache {
@@ -402,13 +379,13 @@ func run(
 			if err := cache.Save(); err != nil {
 				return fmt.Errorf("error saving cache: %w", err)
 			}
-			logger.Debug("Cache updated with new message time")
+			log.Debug().Msg("Cache updated with new message time")
 		}
 	} else {
-		logger.Debug("Notifications disabled, skipping")
-		logger.Info("ℹ️ Notifications disabled")
+		log.Debug().Msg("Notifications disabled, skipping")
+		log.Info().Msg("ℹ️ Notifications disabled")
 	}
 
-	logger.Debug("Finance tracker completed successfully")
+	log.Debug().Msg("Finance tracker completed successfully")
 	return nil
 }

@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"github.com/rs/zerolog/log"
 )
 
 // OpenRouterRequest represents a request to the OpenRouter API
@@ -75,22 +75,21 @@ func getLLMResponse(settings *Settings, prompt string) (string, error) {
 	defer resp.Body.Close()
 
 	// Create a comprehensive debug message
-	debugFields := logrus.Fields{
-		"status_code": resp.StatusCode,
-		"status":      resp.Status,
-		"headers":     resp.Header,
-	}
+	event := log.Debug().
+		Int("status_code", resp.StatusCode).
+		Str("status", resp.Status).
+		Interface("headers", resp.Header)
 
 	// Read the response body for logging
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		logger.WithFields(debugFields).WithError(err).Debug("OpenRouter response (error reading body)")
+		event.Err(err).Msg("OpenRouter response (error reading body)")
 		return "", fmt.Errorf("error reading response body: %w", err)
 	}
-	debugFields["body"] = string(bodyBytes)
+	event.Str("body", string(bodyBytes))
 
 	// Log the comprehensive debug message
-	logger.WithFields(debugFields).Debug("OpenRouter comprehensive response")
+	event.Msg("OpenRouter comprehensive response")
 
 	// Create a new reader with the body bytes for further processing
 	resp.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
@@ -104,7 +103,7 @@ func getLLMResponse(settings *Settings, prompt string) (string, error) {
 		return "", fmt.Errorf("error decoding response: %w", err)
 	}
 
-	logger.WithField("response", openRouterResp).Debug("OpenRouter response")
+	log.Debug().Interface("response", openRouterResp).Msg("OpenRouter response")
 
 	// Check for error in the response
 	if openRouterResp.Error != nil {

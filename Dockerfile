@@ -10,10 +10,10 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy source code
-COPY . .
+COPY src/ ./src/
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -o finance-tracker
+RUN CGO_ENABLED=0 GOOS=linux go build -o finance-tracker ./src
 
 # Final stage
 FROM alpine:latest

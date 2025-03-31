@@ -78,8 +78,6 @@ jobs:
         uses: ./.github/workflows/build.yaml
         with:
           version: ${{ needs.tag-release.outputs.new_tag }}
-          matrix_target: '["linux/amd64"]'
-          matrix_goarch: 'amd64'
       
       - name: Download x86_64 binary
         uses: actions/download-artifact@v4

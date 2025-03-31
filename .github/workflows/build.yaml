@@ -1,5 +1,16 @@
 name: Build
 on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      matrix_target:
+        required: true
+        type: string
+      matrix_goarch:
+        required: true
+        type: string
   workflow_run:
     workflows: ["Go Formatting"]
     types:
@@ -19,7 +30,7 @@ jobs:
     if: github.event.workflow_run.conclusion == 'success' || startsWith(github.ref, 'refs/tags/v')
     strategy:
       matrix:
-        target: [linux/amd64, linux/arm64]
+        target: ${{ inputs.matrix_target || '["linux/amd64", "linux/arm64"]' }}
         include:
           - target: linux/amd64
             goarch: amd64
@@ -46,7 +57,8 @@ jobs:
             echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
             echo "GIT_COMMIT=" >> $GITHUB_OUTPUT
           else
-            echo "VERSION=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+            VERSION=${{ inputs.version || '$(git rev-parse --short HEAD)' }}
+            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
             echo "GIT_COMMIT=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
           fi
           echo "BUILD_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT

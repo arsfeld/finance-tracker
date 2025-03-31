@@ -22,8 +22,6 @@ WORKDIR /app
 
 # Copy the binary from builder
 COPY --from=builder /app/finance-tracker .
-# Copy templates directory
-COPY --from=builder /app/templates ./templates
 
 # Expose port if needed (uncomment if your app needs it)
 # EXPOSE 8080

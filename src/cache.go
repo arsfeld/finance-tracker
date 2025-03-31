@@ -2,14 +2,27 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"os"
-	"path/filepath"
 	"time"
+
+	"github.com/adrg/xdg"
 )
 
 // getCacheFilePath returns the path to the cache file
 func getCacheFilePath() string {
-	return filepath.Join(os.Getenv("HOME"), ".finance_tracker_cache.json")
+	cacheFilePath, err := xdg.CacheFile("finance_tracker/cache.json")
+	if err != nil {
+		log.Fatal(err)
+	}
+	return cacheFilePath
+}
+
+// initializeCache sets the default values for a new cache
+func (c *Cache) initializeCache() {
+	c.Version = 2
+	c.Accounts = make(map[string]Account)
+	c.LastSuccessfulMessage = nil
 }
 
 // Load loads the cache from the cache file
@@ -18,16 +31,33 @@ func (c *Cache) Load() error {
 	data, err := os.ReadFile(cacheFile)
 	if err != nil {
 		if os.IsNotExist(err) {
+			// Initialize with default values for new cache
+			c.initializeCache()
 			return nil
 		}
 		return err
 	}
 
-	return json.Unmarshal(data, c)
+	// Try to unmarshal the data
+	if err := json.Unmarshal(data, c); err != nil {
+		// If unmarshaling fails, initialize with default values
+		c.initializeCache()
+		return nil
+	}
+
+	// If version is not set or is different from 1, initialize with version 1
+	if c.Version != 2 {
+		c.initializeCache()
+	}
+
+	return nil
 }
 
 // Save saves the cache to the cache file
 func (c *Cache) Save() error {
+	// Ensure version is set to 2
+	c.Version = 2;
+
 	cacheFile := getCacheFilePath()
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
@@ -38,15 +68,12 @@ func (c *Cache) Save() error {
 }
 
 // UpdateAccount updates the account information in the cache
-func (c *Cache) UpdateAccount(accountID string, balance Balance, balanceDate int64) {
+func (c *Cache) UpdateAccount(account Account) {
 	if c.Accounts == nil {
-		c.Accounts = make(map[string]map[string]interface{})
+		c.Accounts = make(map[string]Account)
 	}
 
-	c.Accounts[accountID] = map[string]interface{}{
-		"balance":      float64(balance),
-		"balance_date": balanceDate,
-	}
+	c.Accounts[account.ID] = account
 }
 
 // IsAccountUpdated checks if the account has been updated since the last time
@@ -61,12 +88,7 @@ func (c *Cache) IsAccountUpdated(accountID string, balanceDate int64) bool {
 		return true
 	}
 
-	storedDate, ok := account["balance_date"].(float64)
-	if !ok {
-		return true
-	}
-
-	return int64(storedDate) != balanceDate
+	return account.BalanceDate != balanceDate
 }
 
 // UpdateLastMessageTime updates the last successful message time to now

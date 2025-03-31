@@ -14,6 +14,11 @@ func calculateDateRange(
 ) (time.Time, time.Time, error) {
 	today := time.Now().UTC()
 
+	// If current day is 5 or less and range type is current month, switch to last month
+	if dateRangeType == DateRangeTypeCurrentMonth && today.Day() <= 5 {
+		dateRangeType = DateRangeTypeLastMonth
+	}
+
 	switch dateRangeType {
 	case DateRangeTypeCurrentMonth:
 		start := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)

@@ -138,8 +138,9 @@ type Settings struct {
 
 // Cache represents the cache for the application
 type Cache struct {
-	Accounts              map[string]map[string]interface{} `json:"accounts,omitempty"`
-	LastSuccessfulMessage *int64                            `json:"last_successful_message,omitempty"`
+	Version               int64              `json:"version"`
+	Accounts              map[string]Account `json:"accounts,omitempty"`
+	LastSuccessfulMessage *int64             `json:"last_successful_message,omitempty"`
 }
 
 // NewSettings creates a new Settings instance from environment variables
@@ -199,8 +200,9 @@ Example usage:
 			dateRange, _ := cmd.Flags().GetString("date-range")
 			startDate, _ := cmd.Flags().GetString("start-date")
 			endDate, _ := cmd.Flags().GetString("end-date")
+			force, _ := cmd.Flags().GetBool("force")
 
-			return run(notifications, disableNotifications, disableCache, verbose, dateRange, startDate, endDate)
+			return run(notifications, disableNotifications, disableCache, verbose, dateRange, startDate, endDate, force)
 		},
 	}
 
@@ -211,7 +213,7 @@ Example usage:
 	rootCmd.Flags().String("date-range", string(DateRangeTypeCurrentMonth), "Date range type")
 	rootCmd.Flags().String("start-date", "", "Start date for custom range (YYYY-MM-DD)")
 	rootCmd.Flags().String("end-date", "", "End date for custom range (YYYY-MM-DD)")
-
+	rootCmd.Flags().Bool("force", false, "Force analysis even if cache is up to date")
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatal().Err(err).Msg("Error executing root command")
 	}
@@ -226,6 +228,7 @@ func run(
 	dateRange string,
 	startDate string,
 	endDate string,
+	force bool,
 ) error {
 	// Initialize logger
 	initLogger(verbose)
@@ -281,6 +284,7 @@ func run(
 	log.Debug().Msg("Billing period validated successfully")
 
 	// Load cache
+	log.Info().Msg("🔄 Loading cache...")
 	cache := &Cache{}
 	if !disableCache {
 		if err := cache.Load(); err != nil {
@@ -317,7 +321,7 @@ func run(
 
 		if !disableCache && cache.IsAccountUpdated(account.ID, account.BalanceDate) {
 			hasUpdatedAccounts = true
-			cache.UpdateAccount(account.ID, account.Balance, account.BalanceDate)
+			cache.UpdateAccount(account)
 			log.Debug().Str("account_id", account.ID).Msg("Account updated in cache")
 		} else {
 			log.Debug().Str("account_id", account.ID).Msg("Account not updated (cache disabled or no changes)")
@@ -325,9 +329,10 @@ func run(
 	}
 
 	// Early return conditions
-	if !hasUpdatedAccounts {
+	if !hasUpdatedAccounts && !force {
 		log.Debug().Msg("No accounts were updated, returning early")
 		log.Info().Msg("🔴 No updated accounts")
+		return nil
 	}
 
 	// Collect all transactions
@@ -342,7 +347,7 @@ func run(
 	}
 
 	// Check last message time
-	if !disableCache && cache.LastSuccessfulMessage != nil {
+	if !force && cache.LastSuccessfulMessage != nil {
 		lastMsgTime := time.Unix(*cache.LastSuccessfulMessage, 0)
 		if time.Since(lastMsgTime).Seconds() < float64(twoDaysInSeconds) {
 			log.Debug().Str("last_message_time", lastMsgTime.Format("2006-01-02 15:04:05")).Msg("Last message was sent too recently")

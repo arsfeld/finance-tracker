@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -14,13 +15,19 @@ import (
 // OpenRouterRequest represents a request to the OpenRouter API
 type OpenRouterRequest struct {
 	Model    string    `json:"model"`
+	Models   []string  `json:"models"`
 	Messages []Message `json:"messages"`
+	Reasoning Reasoning `json:"reasoning"`
 }
 
 // Message represents a message in the OpenRouter API request/response
 type Message struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+}
+
+type Reasoning struct {
+	Exclude bool `json:"exclude"`
 }
 
 // OpenRouterResponse represents a response from the OpenRouter API
@@ -43,12 +50,15 @@ type Error struct {
 // getLLMResponse sends a prompt to the OpenRouter API and returns the response
 func getLLMResponse(settings *Settings, prompt string) (string, error) {
 	reqBody := OpenRouterRequest{
-		Model: settings.OpenRouterModel,
+		Models: strings.Split(settings.OpenRouterModel, ","),
 		Messages: []Message{
 			{
 				Role:    "user",
 				Content: prompt,
 			},
+		},
+		Reasoning: Reasoning{
+			Exclude: true,
 		},
 	}
 

@@ -65,16 +65,16 @@ func convertMarkdownToHTML(md string) string {
 	// Create markdown parser with common extensions
 	extensions := parser.CommonExtensions | parser.AutoHeadingIDs
 	p := parser.NewWithExtensions(extensions)
-	
+
 	// Parse markdown into AST
 	node := p.Parse([]byte(md))
-	
+
 	// Create HTML renderer with common flags
 	opts := html.RendererOptions{
 		Flags: html.CommonFlags | html.HrefTargetBlank,
 	}
 	renderer := html.NewRenderer(opts)
-	
+
 	// Render HTML
 	return string(markdown.Render(node, renderer))
 }
@@ -236,7 +236,7 @@ func generateEmailHTML(message string, transactions []Transaction) (string, erro
 // sendEmailNotification sends an email notification using SMTP
 func sendEmailNotification(settings *Settings, message string, transactions []Transaction) error {
 	log.Debug().Msg("Starting email notification process")
-	
+
 	if settings.MailerURL == nil || *settings.MailerURL == "" ||
 		settings.MailerFrom == nil || *settings.MailerFrom == "" ||
 		settings.MailerTo == nil || *settings.MailerTo == "" {
@@ -309,7 +309,7 @@ func sendEmailNotification(settings *Settings, message string, transactions []Tr
 	// Send email using SMTP
 	auth := smtp.PlainAuth("", username, password, smtpHost)
 	log.Debug().Msg("Attempting to send email via SMTP")
-	
+
 	err = smtp.SendMail(
 		fmt.Sprintf("%s:%s", smtpHost, smtpPort),
 		auth,

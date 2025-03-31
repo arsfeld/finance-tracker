@@ -29,4 +29,4 @@ func getGitCommit() string {
 // GetVersion returns a formatted version string
 func GetVersion() string {
 	return fmt.Sprintf("finance_tracker v%s (build: %s, commit: %s)", Version, BuildTime, GitCommit)
-} 
+}

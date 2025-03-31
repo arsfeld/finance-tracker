@@ -240,7 +240,7 @@ func run(
 		Bool("disable_cache", disableCache).
 		Str("date_range", dateRange).
 		Str("start_date", startDate).
-		Str("end_date", endDate).		
+		Str("end_date", endDate).
 		Bool("force", force).
 		Msg("Starting finance tracker")
 
@@ -249,7 +249,7 @@ func run(
 	if err != nil {
 		return fmt.Errorf("error loading settings: %w", err)
 	}
-	
+
 	// Log settings in a structured way
 	log.Info().
 		Str("simplefin_bridge_url", settings.SimplefinBridgeURL).

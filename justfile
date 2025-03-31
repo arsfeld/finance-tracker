@@ -11,7 +11,7 @@ build:
 # Run the project
 run: build
     #!/usr/bin/env bash
-    ./bin/finance_tracker
+    ./bin/finance_tracker --force
 
 # Clean build artifacts
 clean:
@@ -21,9 +21,9 @@ clean:
 # Run with verbose logging
 run-verbose: build
     #!/usr/bin/env bash
-    ./bin/finance_tracker --verbose
+    ./bin/finance_tracker --verbose --force
 
 # Run with specific notification channels
 run-notify notifications: build
     #!/usr/bin/env bash
-    ./bin/finance_tracker --notifications {{notifications}}
+    ./bin/finance_tracker --notifications {{notifications}} --force

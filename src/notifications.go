@@ -75,8 +75,9 @@ func convertMarkdownToHTML(md string) string {
 	}
 	renderer := html.NewRenderer(opts)
 
-	// Render HTML
-	return string(markdown.Render(node, renderer))
+	// Render HTML and remove newlines
+	html := string(markdown.Render(node, renderer))
+	return strings.ReplaceAll(html, "\n", "")
 }
 
 // generateEmailHTML generates a beautiful HTML email with the transaction list
@@ -229,6 +230,10 @@ func generateEmailHTML(message string, transactions []Transaction) (string, erro
 	}); err != nil {
 		return "", fmt.Errorf("error executing template: %w", err)
 	}
+
+	log.Debug().Int("html_length", len(buf.String())).
+		Str("html_content", buf.String()).
+		Msg("HTML content generated successfully")
 
 	return buf.String(), nil
 }

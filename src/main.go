@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -234,12 +235,33 @@ func run(
 	initLogger(verbose)
 	log.Debug().Bool("verbose", verbose).Msg("Starting finance tracker")
 
+	log.Info().Str("notifications", strings.Join(notifications, ", ")).
+		Bool("disable_notifications", disableNotifications).
+		Bool("disable_cache", disableCache).
+		Str("date_range", dateRange).
+		Str("start_date", startDate).
+		Str("end_date", endDate).		
+		Bool("force", force).
+		Msg("Starting finance tracker")
+
 	log.Info().Msg("🔧 Loading configuration...")
 	settings, err := NewSettings()
 	if err != nil {
 		return fmt.Errorf("error loading settings: %w", err)
 	}
-	log.Debug().Msg("Configuration loaded successfully")
+	
+	// Log settings in a structured way
+	log.Info().
+		Str("simplefin_bridge_url", settings.SimplefinBridgeURL).
+		Str("openrouter_url", settings.OpenRouterURL).
+		Str("openrouter_model", settings.OpenRouterModel).
+		Str("ntfy_server", settings.NtfyServer).
+		Str("mailer_url", getStringValue(settings.MailerURL)).
+		Str("mailer_from", getStringValue(settings.MailerFrom)).
+		Str("mailer_to", getStringValue(settings.MailerTo)).
+		Str("ntfy_topic", getStringValue(settings.NtfyTopic)).
+		Str("ntfy_topic_warning", getStringValue(settings.NtfyTopicWarning)).
+		Msg("Configuration loaded successfully")
 
 	// Parse date range
 	dateRangeType := DateRangeType(dateRange)
@@ -313,9 +335,10 @@ func run(
 	for _, account := range accounts {
 		log.Info().Str("account_name", account.Name).Str("account_id", account.ID).Msg("•")
 		syncTime := time.Unix(account.BalanceDate, 0).Format("2006-01-02 15:04:05")
-		log.Info().Str("sync_time", syncTime).Msg("  └ Last synced at:")
-		log.Info().Str("balance", account.Balance.String()).Msg("  └ Balance:")
-		log.Info().Str("transactions", strconv.Itoa(len(account.Transactions))).Msg("  └ Transactions:")
+		log.Info().Str("sync_time", syncTime).
+			Str("balance", account.Balance.String()).
+			Str("transactions", strconv.Itoa(len(account.Transactions))).
+			Msg("  └")
 
 		if !disableCache && cache.IsAccountUpdated(account.ID, account.BalanceDate) {
 			hasUpdatedAccounts = true
@@ -395,4 +418,12 @@ func run(
 
 	log.Debug().Msg("Finance tracker completed successfully")
 	return nil
+}
+
+// Helper function to safely get string value from pointer
+func getStringValue(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

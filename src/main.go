@@ -367,6 +367,10 @@ func run(
 	}
 	log.Debug().Str("analysis", analysis).Msg("Received AI analysis")
 
+	if analysis == "" {
+		return fmt.Errorf("received empty analysis from LLM")
+	}
+
 	log.Info().Msg("✨ AI Summary:")
 	log.Info().Msg(analysis)
 

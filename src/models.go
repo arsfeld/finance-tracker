@@ -98,4 +98,4 @@ type AccountsResponse struct {
 	Accounts    []Account `json:"accounts"`
 	Errors      []string  `json:"errors,omitempty"`
 	XAPIMessage []string  `json:"x-api-message,omitempty"`
-} 
+}

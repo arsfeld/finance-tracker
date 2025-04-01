@@ -17,18 +17,18 @@ const (
 
 // RunConfig holds all configuration parameters for the run function
 type RunConfig struct {
-	Notifications       []string
+	Notifications        []string
 	DisableNotifications bool
-	DisableCache       bool
-	Verbose            bool
-	DateRange          string
-	StartDate          string
-	EndDate            string
-	Force              bool
-	EnvFile            string
-	Version            string
-	MaxRetries         int
-	RetryDelay         int
+	DisableCache         bool
+	Verbose              bool
+	DateRange            string
+	StartDate            string
+	EndDate              string
+	Force                bool
+	EnvFile              string
+	Version              string
+	MaxRetries           int
+	RetryDelay           int
 }
 
 func main() {
@@ -66,18 +66,18 @@ Example usage:
 			retryDelay, _ := cmd.Flags().GetInt("retry-delay")
 
 			return run(RunConfig{
-				Notifications:       notifications,
+				Notifications:        notifications,
 				DisableNotifications: disableNotifications,
-				DisableCache:        disableCache,
-				Verbose:             verbose,
-				DateRange:           dateRange,
-				StartDate:           startDate,
-				EndDate:             endDate,
-				Force:               force,
-				EnvFile:             env_file,
-				Version:             GetVersion(),
-				MaxRetries:          maxRetries,
-				RetryDelay:          retryDelay,
+				DisableCache:         disableCache,
+				Verbose:              verbose,
+				DateRange:            dateRange,
+				StartDate:            startDate,
+				EndDate:              endDate,
+				Force:                force,
+				EnvFile:              env_file,
+				Version:              GetVersion(),
+				MaxRetries:           maxRetries,
+				RetryDelay:           retryDelay,
 			})
 		},
 	}
@@ -274,7 +274,7 @@ func run(config RunConfig) error {
 		if err != nil {
 			return fmt.Errorf("error sending notifications: %w", err)
 		}
-		
+
 		if len(successfulChannels) > 0 {
 			log.Info().
 				Str("channels", strings.Join(successfulChannels, "\n• ")).

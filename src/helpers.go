@@ -59,4 +59,4 @@ func getStringValue(s *string) string {
 		return ""
 	}
 	return *s
-} 
+}

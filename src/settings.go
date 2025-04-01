@@ -55,4 +55,4 @@ func NewSettings(env_file string) (*Settings, error) {
 	}
 
 	return settings, nil
-} 
+}

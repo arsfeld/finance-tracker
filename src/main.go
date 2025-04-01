@@ -1,172 +1,34 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/joho/godotenv"
-	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
-
-// initLogger initializes the Zerolog logger with the appropriate level
-func initLogger(verbose bool) {
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	zerolog.SetGlobalLevel(zerolog.InfoLevel)
-	if verbose {
-		zerolog.SetGlobalLevel(zerolog.DebugLevel)
-	}
-}
-
-// Balance represents a monetary value that can be unmarshaled from either string or float64
-type Balance float64
-
-// UnmarshalJSON implements the json.Unmarshaler interface for Balance
-func (b *Balance) UnmarshalJSON(data []byte) error {
-	// Try to unmarshal as string first (since API specifies numeric string)
-	var s string
-	if err := json.Unmarshal(data, &s); err == nil {
-		// If successful, try to convert to float64
-		f, err := strconv.ParseFloat(s, 64)
-		if err != nil {
-			return fmt.Errorf("error parsing balance string '%s': %w", s, err)
-		}
-		*b = Balance(f)
-		return nil
-	}
-
-	// If string unmarshal fails, try float64 (for backward compatibility)
-	var f float64
-	if err := json.Unmarshal(data, &f); err != nil {
-		return fmt.Errorf("error unmarshaling balance: %w", err)
-	}
-	*b = Balance(f)
-	return nil
-}
-
-// String returns a string representation of the balance
-func (b Balance) String() string {
-	return fmt.Sprintf("%.2f", float64(b))
-}
 
 // Constants
 const (
 	twoDaysInSeconds = 2 * 24 * 60 * 60
 )
 
-// NotificationType defines the type of notification
-type NotificationType string
-
-// Available notification types
-const (
-	NotificationTypeSMS   NotificationType = "sms"
-	NotificationTypeEmail NotificationType = "email"
-	NotificationTypeNtfy  NotificationType = "ntfy"
-)
-
-// DateRangeType defines the type of date range for analysis
-type DateRangeType string
-
-// Available date range types
-const (
-	DateRangeTypeCurrentMonth DateRangeType = "current_month"
-	DateRangeTypeLastMonth    DateRangeType = "last_month"
-	DateRangeTypeLast3Months  DateRangeType = "last_3_months"
-	DateRangeTypeCurrentYear  DateRangeType = "current_year"
-	DateRangeTypeLastYear     DateRangeType = "last_year"
-	DateRangeTypeCustom       DateRangeType = "custom"
-)
-
-// Organization represents a financial institution or organization
-type Organization struct {
-	SfinURL string  `json:"sfin-url"`
-	Domain  *string `json:"domain,omitempty"`
-	Name    *string `json:"name,omitempty"`
-	URL     *string `json:"url,omitempty"`
-	ID      *string `json:"id,omitempty"`
-}
-
-// Transaction represents a financial transaction
-type Transaction struct {
-	ID           string                  `json:"id"`
-	Description  string                  `json:"description"`
-	Amount       Balance                 `json:"amount"`
-	Posted       int64                   `json:"posted"`
-	TransactedAt *int64                  `json:"transacted_at,omitempty"`
-	Pending      *bool                   `json:"pending,omitempty"`
-	Extra        *map[string]interface{} `json:"extra,omitempty"`
-}
-
-// Account represents a financial account
-type Account struct {
-	ID               string        `json:"id"`
-	Name             string        `json:"name"`
-	Balance          Balance       `json:"balance"`
-	BalanceDate      int64         `json:"balance-date"`
-	Org              Organization  `json:"org"`
-	Transactions     []Transaction `json:"transactions,omitempty"`
-	Currency         *string       `json:"currency,omitempty"`
-	AvailableBalance *Balance      `json:"available-balance,omitempty"`
-	Holdings         []interface{} `json:"holdings,omitempty"`
-}
-
-// AccountsResponse represents the response from the SimpleFin API
-type AccountsResponse struct {
-	Accounts    []Account `json:"accounts"`
-	Errors      []string  `json:"errors,omitempty"`
-	XAPIMessage []string  `json:"x-api-message,omitempty"`
-}
-
-// Settings represents the application settings
-type Settings struct {
-	SimplefinBridgeURL string  `json:"simplefin_bridge_url"`
-	OpenRouterURL      string  `json:"openrouter_url"`
-	OpenRouterAPIKey   string  `json:"openrouter_api_key"`
-	OpenRouterModel    string  `json:"openrouter_model"`
-	MailerURL          *string `json:"mailer_url,omitempty"`
-	MailerFrom         *string `json:"mailer_from,omitempty"`
-	MailerTo           *string `json:"mailer_to,omitempty"`
-	NtfyServer         string  `json:"ntfy_server"`
-	NtfyTopic          *string `json:"ntfy_topic,omitempty"`
-	NtfyTopicWarning   *string `json:"ntfy_topic_warning,omitempty"`
-}
-
-// NewSettings creates a new Settings instance from environment variables
-func NewSettings(env_file string) (*Settings, error) {
-	// Try to load .env file, but don't error if it doesn't exist
-	if err := godotenv.Load(env_file); err != nil {
-		log.Info().Str("env_file", env_file).Str("error", err.Error()).Msg("No .env file found, using environment variables")
-	}
-
-	settings := &Settings{
-		SimplefinBridgeURL: os.Getenv("SIMPLEFIN_BRIDGE_URL"),
-		OpenRouterURL:      os.Getenv("OPENROUTER_URL"),
-		OpenRouterAPIKey:   os.Getenv("OPENROUTER_API_KEY"),
-		OpenRouterModel:    os.Getenv("OPENROUTER_MODEL"),
-		NtfyServer:         "https://ntfy.sh",
-	}
-
-	// Optional fields
-	if mailerURL := os.Getenv("MAILER_URL"); mailerURL != "" {
-		settings.MailerURL = &mailerURL
-	}
-	if mailerFrom := os.Getenv("MAILER_FROM"); mailerFrom != "" {
-		settings.MailerFrom = &mailerFrom
-	}
-	if mailerTo := os.Getenv("MAILER_TO"); mailerTo != "" {
-		settings.MailerTo = &mailerTo
-	}
-	if ntfyTopic := os.Getenv("NTFY_TOPIC"); ntfyTopic != "" {
-		settings.NtfyTopic = &ntfyTopic
-	}
-
-	return settings, nil
+// RunConfig holds all configuration parameters for the run function
+type RunConfig struct {
+	Notifications       []string
+	DisableNotifications bool
+	DisableCache       bool
+	Verbose            bool
+	DateRange          string
+	StartDate          string
+	EndDate            string
+	Force              bool
+	EnvFile            string
+	Version            string
+	MaxRetries         int
+	RetryDelay         int
 }
 
 func main() {
@@ -203,11 +65,24 @@ Example usage:
 			maxRetries, _ := cmd.Flags().GetInt("max-retries")
 			retryDelay, _ := cmd.Flags().GetInt("retry-delay")
 
-			return run(notifications, disableNotifications, disableCache, verbose, dateRange, startDate, endDate, force, env_file, GetVersion(), maxRetries, retryDelay)
+			return run(RunConfig{
+				Notifications:       notifications,
+				DisableNotifications: disableNotifications,
+				DisableCache:        disableCache,
+				Verbose:             verbose,
+				DateRange:           dateRange,
+				StartDate:           startDate,
+				EndDate:             endDate,
+				Force:               force,
+				EnvFile:             env_file,
+				Version:             GetVersion(),
+				MaxRetries:          maxRetries,
+				RetryDelay:          retryDelay,
+			})
 		},
 	}
 
-	rootCmd.Flags().StringSliceP("notifications", "n", []string{"sms", "email", "ntfy"}, "Notification types to send")
+	rootCmd.Flags().StringSliceP("notifications", "n", []string{"email", "ntfy"}, "Notification types to send")
 	rootCmd.Flags().Bool("disable-notifications", false, "Disable all notifications")
 	rootCmd.Flags().Bool("disable-cache", false, "Disable database caching")
 	rootCmd.Flags().Bool("verbose", false, "Enable verbose logging")
@@ -226,110 +101,43 @@ Example usage:
 	}
 }
 
-// retryWithBackoff implements a retry mechanism with exponential backoff
-func retryWithBackoff[T any](
-	operation func() (T, error),
-	maxRetries int,
-	retryDelay int,
-	operationName string,
-) (T, error) {
-	var result T
-	var lastErr error
-	delay := time.Duration(retryDelay) * time.Second
-
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		result, lastErr = operation()
-		if lastErr == nil {
-			return result, nil
-		}
-
-		log.Warn().
-			Err(lastErr).
-			Int("attempt", attempt).
-			Int("max_retries", maxRetries).
-			Dur("delay", delay).
-			Str("operation", operationName).
-			Msg("Retrying operation after delay")
-
-		time.Sleep(delay)
-		delay *= 2 // Exponential backoff
-	}
-
-	// Return zero value and error if all retries failed
-	var zero T
-	return zero, fmt.Errorf("all %d retry attempts failed for %s. Last error: %w", maxRetries, operationName, lastErr)
-}
-
 // run is the main function that runs the finance tracker
-func run(
-	notifications []string,
-	disableNotifications bool,
-	disableCache bool,
-	verbose bool,
-	dateRange string,
-	startDate string,
-	endDate string,
-	force bool,
-	env_file string,
-	version string,
-	maxRetries int,
-	retryDelay int,
-) error {
+func run(config RunConfig) error {
 	// Initialize logger
-	initLogger(verbose)
-	log.Debug().Bool("verbose", verbose).Msg("Starting finance tracker")
+	initLogger(config.Verbose)
 
-	log.Info().Str("notifications", strings.Join(notifications, ", ")).
-		Bool("disable_notifications", disableNotifications).
-		Bool("disable_cache", disableCache).
-		Str("date_range", dateRange).
-		Str("start_date", startDate).
-		Str("end_date", endDate).
-		Bool("force", force).
-		Str("version", version).
-		Str("env_file", env_file).
-		Int("max_retries", maxRetries).
-		Int("retry_delay", retryDelay).
-		Msg("Starting finance tracker")
+	log.Info().Msg("🔧 Starting " + GetVersion())
+
+	log.Debug().Interface("config", config).Msg("Starting finance tracker")
 
 	log.Info().Msg("🔧 Loading configuration...")
-	settings, err := NewSettings(env_file)
+	settings, err := NewSettings(config.EnvFile)
 	if err != nil {
 		return fmt.Errorf("error loading settings: %w", err)
 	}
 
 	// Log settings in a structured way
-	log.Info().
-		Str("simplefin_bridge_url", settings.SimplefinBridgeURL).
-		Str("openrouter_url", settings.OpenRouterURL).
-		Str("openrouter_model", settings.OpenRouterModel).
-		Str("ntfy_server", settings.NtfyServer).
-		Str("mailer_url", getStringValue(settings.MailerURL)).
-		Str("mailer_from", getStringValue(settings.MailerFrom)).
-		Str("mailer_to", getStringValue(settings.MailerTo)).
-		Str("ntfy_topic", getStringValue(settings.NtfyTopic)).
-		Str("ntfy_topic_warning", getStringValue(settings.NtfyTopicWarning)).
-		Msg("Configuration loaded successfully")
+	log.Debug().Interface("settings", settings).Msg("Configuration loaded successfully")
 
 	// Parse date range
-	dateRangeType := DateRangeType(dateRange)
+	dateRangeType := DateRangeType(config.DateRange)
 	if dateRangeType != DateRangeTypeCurrentMonth {
-		disableCache = true
+		config.DisableCache = true
 		log.Debug().Msg("Using non-current month date range, database disabled")
 	}
 
 	// Parse custom dates if provided
 	var parsedStartDate, parsedEndDate *time.Time
-	if startDate != "" {
-		parsed, err := time.Parse("2006-01-02", startDate)
+	if config.StartDate != "" {
+		parsed, err := time.Parse("2006-01-02", config.StartDate)
 		if err != nil {
 			return fmt.Errorf("error parsing start date: %w", err)
 		}
 		parsedStartDate = &parsed
 		log.Debug().Str("start_date", parsed.Format("2006-01-02")).Msg("Parsed start date")
 	}
-	if endDate != "" {
-		parsed, err := time.Parse("2006-01-02", endDate)
+	if config.EndDate != "" {
+		parsed, err := time.Parse("2006-01-02", config.EndDate)
 		if err != nil {
 			return fmt.Errorf("error parsing end date: %w", err)
 		}
@@ -356,7 +164,7 @@ func run(
 	// Load database
 	log.Info().Msg("🔄 Loading database...")
 	var db *DB
-	if !disableCache {
+	if !config.DisableCache {
 		db, err = NewDB()
 		if err != nil {
 			return fmt.Errorf("error creating database: %w", err)
@@ -391,7 +199,7 @@ func run(
 			Str("transactions", strconv.Itoa(len(account.Transactions))).
 			Msg("└")
 
-		if !disableCache && db.IsAccountUpdated(account.ID, account.BalanceDate) {
+		if !config.DisableCache && db.IsAccountUpdated(account.ID, account.BalanceDate) {
 			hasUpdatedAccounts = true
 			if err := db.UpdateAccount(account); err != nil {
 				return fmt.Errorf("error updating account in database: %w", err)
@@ -403,7 +211,7 @@ func run(
 	}
 
 	// Early return conditions
-	if !hasUpdatedAccounts && !force {
+	if !hasUpdatedAccounts && !config.Force {
 		log.Debug().Msg("No accounts were updated, returning early")
 		log.Info().Msg("🔴 No updated accounts")
 		return nil
@@ -421,7 +229,7 @@ func run(
 	}
 
 	// Check last message time
-	if !force {
+	if !config.Force {
 		lastMsgTime, err := db.GetLastMessageTime()
 		if err != nil {
 			return fmt.Errorf("error getting last message time: %w", err)
@@ -446,8 +254,8 @@ func run(
 		func() (string, error) {
 			return getLLMResponse(settings, prompt)
 		},
-		maxRetries,
-		retryDelay,
+		config.MaxRetries,
+		config.RetryDelay,
 		"LLM request",
 	)
 	if err != nil {
@@ -460,15 +268,22 @@ func run(
 	log.Info().Msg(analysis)
 
 	// Send notifications
-	if !disableNotifications {
-		log.Debug().Strs("notification_channels", notifications).Msg("Sending notifications")
-		if err := sendNotification(settings, analysis, allTransactions, "info", notifications); err != nil {
+	if !config.DisableNotifications {
+		log.Debug().Strs("notification_channels", config.Notifications).Msg("Sending notifications")
+		successfulChannels, err := sendNotification(settings, analysis, allTransactions, "info", config.Notifications)
+		if err != nil {
 			return fmt.Errorf("error sending notifications: %w", err)
+		}
+		
+		if len(successfulChannels) > 0 {
+			log.Info().
+				Str("channels", strings.Join(successfulChannels, "\n• ")).
+				Msg("📱 Notifications sent successfully via:\n• " + strings.Join(successfulChannels, "\n• "))
 		}
 		log.Debug().Msg("Notifications sent successfully")
 
 		// Update database
-		if !disableCache {
+		if !config.DisableCache {
 			if err := db.UpdateLastMessageTime(); err != nil {
 				return fmt.Errorf("error updating last message time: %w", err)
 			}
@@ -483,10 +298,4 @@ func run(
 	return nil
 }
 
-// Helper function to safely get string value from pointer
-func getStringValue(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
+// getStringValue helper function is defined in settings.go

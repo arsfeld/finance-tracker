@@ -326,18 +326,27 @@ func sendEmailNotification(settings *Settings, message string, transactions []Tr
 }
 
 // sendNotification sends a notification through the specified notification channels
-func sendNotification(settings *Settings, message string, allTransactions []Transaction, notificationTopic string, notificationTypes []string) error {
+func sendNotification(settings *Settings, message string, allTransactions []Transaction, notificationTopic string, notificationTypes []string) ([]string, error) {
+	var successfulChannels []string
+
 	for _, nt := range notificationTypes {
 		switch NotificationType(nt) {
 		case NotificationTypeNtfy:
 			if err := sendNtfyNotification(settings, message, notificationTopic); err != nil {
-				return fmt.Errorf("error sending ntfy notification: %w", err)
+				return nil, fmt.Errorf("error sending ntfy notification: %w", err)
+			}
+			if settings.NtfyTopic != nil && *settings.NtfyTopic != "" {
+				successfulChannels = append(successfulChannels, fmt.Sprintf("Ntfy: %s", *settings.NtfyTopic))
 			}
 		case NotificationTypeEmail:
 			if err := sendEmailNotification(settings, message, allTransactions); err != nil {
-				return fmt.Errorf("error sending email notification: %w", err)
+				return nil, fmt.Errorf("error sending email notification: %w", err)
+			}
+			if settings.MailerTo != nil && *settings.MailerTo != "" {
+				successfulChannels = append(successfulChannels, fmt.Sprintf("Email: %s", *settings.MailerTo))
 			}
 		}
 	}
-	return nil
+
+	return successfulChannels, nil
 }

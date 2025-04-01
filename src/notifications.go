@@ -168,13 +168,7 @@ func generateEmailHTML(message string, transactions []Transaction) (string, erro
 <body>
     <div class="container">
         <div class="header">
-            <svg class="logo" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
-                <path d="M50 100 L100 50 L150 100 V150 H50 V100 Z" fill="#4CAF50" stroke="#388E3C" stroke-width="3"/>
-                <rect x="65" y="115" width="15" height="25" fill="#FFC107"/>
-                <rect x="90" y="105" width="15" height="35" fill="#FF9800"/>
-                <rect x="115" y="120" width="15" height="20" fill="#FF5722"/>
-                <text x="100" y="145" font-size="12" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif">Monthly</text>
-            </svg>
+            <img src="https://raw.githubusercontent.com/arsfeld/finance-tracker/refs/heads/main/logo.jpg" class="logo" alt="Finance Tracker Logo">
             <div class="title">Transaction Summary</div>
         </div>
         

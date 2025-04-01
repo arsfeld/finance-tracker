@@ -1,4 +1,8 @@
-# 💰 Finance Tracker
+# Finance Tracker
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/arsfeld/finance-tracker/refs/heads/main/logo.jpg" alt="Logo" width="200" height="200">
+</div>
 
 A smart and friendly tool that helps you keep track of your finances using AI! This tool connects to your SimpleFin account, analyzes your transactions, and provides insights about your spending patterns.
 
@@ -7,7 +11,7 @@ A smart and friendly tool that helps you keep track of your finances using AI! T
 - 🤖 AI-powered analysis of your spending habits
 - 📊 Multiple date range options for analysis
 - 📱 Multiple notification channels:
-  - �� Email
+  - 📧 Email
   - 🔔 Ntfy
 - 💾 Smart caching to prevent duplicate notifications
 - 🔍 Detailed transaction analysis
@@ -20,6 +24,7 @@ A smart and friendly tool that helps you keep track of your finances using AI! T
 - Go 1.x or later
 - A SimpleFin account
 - (Optional) Ntfy account for push notifications
+- (Optional) Logo image hosted at a publicly accessible URL for email templates
 
 ### 🔧 Configuration
 

@@ -137,18 +137,11 @@ type Settings struct {
 	NtfyTopicWarning   *string `json:"ntfy_topic_warning,omitempty"`
 }
 
-// Cache represents the cache for the application
-type Cache struct {
-	Version               int64              `json:"version"`
-	Accounts              map[string]Account `json:"accounts,omitempty"`
-	LastSuccessfulMessage *int64             `json:"last_successful_message,omitempty"`
-}
-
 // NewSettings creates a new Settings instance from environment variables
 func NewSettings(env_file string) (*Settings, error) {
 	// Try to load .env file, but don't error if it doesn't exist
-	if err := godotenv.Load(".env", env_file); err != nil {
-		log.Debug().Msg("No .env file found, using environment variables")
+	if err := godotenv.Load(env_file); err != nil {
+		log.Info().Str("env_file", env_file).Str("error", err.Error()).Msg("No .env file found, using environment variables")
 	}
 
 	settings := &Settings{
@@ -194,7 +187,9 @@ Example usage:
   finance_tracker                    # Analyze current month's transactions
   finance_tracker --date-range last_month  # Analyze last month's transactions
   finance_tracker --notifications ntfy     # Send notifications via ntfy
-  finance_tracker --disable-cache          # Force fresh analysis without caching`, GetVersion()),
+  finance_tracker --disable-cache          # Force fresh analysis without caching
+  finance_tracker --max-retries 5          # Set maximum number of retries for LLM calls
+  finance_tracker --retry-delay 2          # Set initial retry delay in seconds`, GetVersion()),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			notifications, _ := cmd.Flags().GetStringSlice("notifications")
 			disableNotifications, _ := cmd.Flags().GetBool("disable-notifications")
@@ -205,26 +200,64 @@ Example usage:
 			endDate, _ := cmd.Flags().GetString("end-date")
 			force, _ := cmd.Flags().GetBool("force")
 			env_file, _ := cmd.Flags().GetString("env-file")
+			maxRetries, _ := cmd.Flags().GetInt("max-retries")
+			retryDelay, _ := cmd.Flags().GetInt("retry-delay")
 
-			return run(notifications, disableNotifications, disableCache, verbose, dateRange, startDate, endDate, force, env_file, GetVersion())
+			return run(notifications, disableNotifications, disableCache, verbose, dateRange, startDate, endDate, force, env_file, GetVersion(), maxRetries, retryDelay)
 		},
 	}
 
 	rootCmd.Flags().StringSliceP("notifications", "n", []string{"sms", "email", "ntfy"}, "Notification types to send")
 	rootCmd.Flags().Bool("disable-notifications", false, "Disable all notifications")
-	rootCmd.Flags().Bool("disable-cache", false, "Disable caching")
+	rootCmd.Flags().Bool("disable-cache", false, "Disable database caching")
 	rootCmd.Flags().Bool("verbose", false, "Enable verbose logging")
 	rootCmd.Flags().String("date-range", string(DateRangeTypeCurrentMonth), "Date range type")
 	rootCmd.Flags().String("start-date", "", "Start date for custom range (YYYY-MM-DD)")
 	rootCmd.Flags().String("end-date", "", "End date for custom range (YYYY-MM-DD)")
-	rootCmd.Flags().Bool("force", false, "Force analysis even if cache is up to date")
-	rootCmd.Flags().String("env-file", "", "Path to environment file")
+	rootCmd.Flags().Bool("force", false, "Force analysis even if database is up to date")
+	rootCmd.Flags().String("env-file", ".env", "Path to environment file")
 	rootCmd.Flags().Bool("version", false, "Show version information")
+	rootCmd.Flags().Int("max-retries", 5, "Maximum number of retries for LLM calls")
+	rootCmd.Flags().Int("retry-delay", 2, "Initial retry delay in seconds")
 	rootCmd.SetVersionTemplate(GetVersion() + "\n")
 
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatal().Err(err).Msg("Error executing root command")
 	}
+}
+
+// retryWithBackoff implements a retry mechanism with exponential backoff
+func retryWithBackoff[T any](
+	operation func() (T, error),
+	maxRetries int,
+	retryDelay int,
+	operationName string,
+) (T, error) {
+	var result T
+	var lastErr error
+	delay := time.Duration(retryDelay) * time.Second
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		result, lastErr = operation()
+		if lastErr == nil {
+			return result, nil
+		}
+
+		log.Warn().
+			Err(lastErr).
+			Int("attempt", attempt).
+			Int("max_retries", maxRetries).
+			Dur("delay", delay).
+			Str("operation", operationName).
+			Msg("Retrying operation after delay")
+
+		time.Sleep(delay)
+		delay *= 2 // Exponential backoff
+	}
+
+	// Return zero value and error if all retries failed
+	var zero T
+	return zero, fmt.Errorf("all %d retry attempts failed for %s. Last error: %w", maxRetries, operationName, lastErr)
 }
 
 // run is the main function that runs the finance tracker
@@ -239,6 +272,8 @@ func run(
 	force bool,
 	env_file string,
 	version string,
+	maxRetries int,
+	retryDelay int,
 ) error {
 	// Initialize logger
 	initLogger(verbose)
@@ -252,6 +287,9 @@ func run(
 		Str("end_date", endDate).
 		Bool("force", force).
 		Str("version", version).
+		Str("env_file", env_file).
+		Int("max_retries", maxRetries).
+		Int("retry_delay", retryDelay).
 		Msg("Starting finance tracker")
 
 	log.Info().Msg("🔧 Loading configuration...")
@@ -277,7 +315,7 @@ func run(
 	dateRangeType := DateRangeType(dateRange)
 	if dateRangeType != DateRangeTypeCurrentMonth {
 		disableCache = true
-		log.Debug().Msg("Using non-current month date range, cache disabled")
+		log.Debug().Msg("Using non-current month date range, database disabled")
 	}
 
 	// Parse custom dates if provided
@@ -315,16 +353,19 @@ func run(
 	}
 	log.Debug().Msg("Billing period validated successfully")
 
-	// Load cache
-	log.Info().Msg("🔄 Loading cache...")
-	cache := &Cache{}
+	// Load database
+	log.Info().Msg("🔄 Loading database...")
+	var db *DB
 	if !disableCache {
-		if err := cache.Load(); err != nil {
-			return fmt.Errorf("error loading cache: %w", err)
+		db, err = NewDB()
+		if err != nil {
+			return fmt.Errorf("error creating database: %w", err)
 		}
-		log.Debug().Msg("Cache loaded successfully")
+		defer db.Close()
+
+		log.Debug().Msg("Database loaded successfully")
 	} else {
-		log.Debug().Msg("Cache loading skipped (disabled)")
+		log.Debug().Msg("Database loading skipped (disabled)")
 	}
 
 	// Fetch transactions
@@ -348,14 +389,16 @@ func run(
 		log.Info().Str("sync_time", syncTime).
 			Str("balance", account.Balance.String()).
 			Str("transactions", strconv.Itoa(len(account.Transactions))).
-			Msg("  └")
+			Msg("└")
 
-		if !disableCache && cache.IsAccountUpdated(account.ID, account.BalanceDate) {
+		if !disableCache && db.IsAccountUpdated(account.ID, account.BalanceDate) {
 			hasUpdatedAccounts = true
-			cache.UpdateAccount(account)
-			log.Debug().Str("account_id", account.ID).Msg("Account updated in cache")
+			if err := db.UpdateAccount(account); err != nil {
+				return fmt.Errorf("error updating account in database: %w", err)
+			}
+			log.Debug().Str("account_id", account.ID).Msg("Account updated in database")
 		} else {
-			log.Debug().Str("account_id", account.ID).Msg("Account not updated (cache disabled or no changes)")
+			log.Debug().Str("account_id", account.ID).Msg("Account not updated (database disabled or no changes)")
 		}
 	}
 
@@ -378,13 +421,19 @@ func run(
 	}
 
 	// Check last message time
-	if !force && cache.LastSuccessfulMessage != nil {
-		lastMsgTime := time.Unix(*cache.LastSuccessfulMessage, 0)
-		if time.Since(lastMsgTime).Seconds() < float64(twoDaysInSeconds) {
-			log.Debug().Str("last_message_time", lastMsgTime.Format("2006-01-02 15:04:05")).Msg("Last message was sent too recently")
-			return fmt.Errorf("last message was sent too recently (at %s)", lastMsgTime.Format("2006-01-02 15:04:05"))
+	if !force {
+		lastMsgTime, err := db.GetLastMessageTime()
+		if err != nil {
+			return fmt.Errorf("error getting last message time: %w", err)
 		}
-		log.Debug().Msg("Last message check passed")
+		if lastMsgTime != nil {
+			lastMsgTimeUnix := time.Unix(*lastMsgTime, 0)
+			if time.Since(lastMsgTimeUnix).Seconds() < float64(twoDaysInSeconds) {
+				log.Debug().Str("last_message_time", lastMsgTimeUnix.Format("2006-01-02 15:04:05")).Msg("Last message was sent too recently")
+				return fmt.Errorf("last message was sent too recently (at %s)", lastMsgTimeUnix.Format("2006-01-02 15:04:05"))
+			}
+			log.Debug().Msg("Last message check passed")
+		}
 	}
 
 	// Process transactions with AI
@@ -392,15 +441,20 @@ func run(
 	prompt := generateAnalysisPrompt(accounts, allTransactions, billingStart, billingEnd)
 	log.Debug().Str("prompt", prompt).Msg("Generated analysis prompt")
 
-	analysis, err := getLLMResponse(settings, prompt)
+	// Get LLM response with retry
+	analysis, err := retryWithBackoff(
+		func() (string, error) {
+			return getLLMResponse(settings, prompt)
+		},
+		maxRetries,
+		retryDelay,
+		"LLM request",
+	)
 	if err != nil {
 		return fmt.Errorf("error getting LLM response: %w", err)
 	}
-	log.Debug().Str("analysis", analysis).Msg("Received AI analysis")
 
-	if analysis == "" {
-		return fmt.Errorf("received empty analysis from LLM")
-	}
+	log.Debug().Str("analysis", analysis).Msg("Received AI analysis")
 
 	log.Info().Msg("✨ AI Summary:")
 	log.Info().Msg(analysis)
@@ -413,13 +467,12 @@ func run(
 		}
 		log.Debug().Msg("Notifications sent successfully")
 
-		// Update cache
+		// Update database
 		if !disableCache {
-			cache.UpdateLastMessageTime()
-			if err := cache.Save(); err != nil {
-				return fmt.Errorf("error saving cache: %w", err)
+			if err := db.UpdateLastMessageTime(); err != nil {
+				return fmt.Errorf("error updating last message time: %w", err)
 			}
-			log.Debug().Msg("Cache updated with new message time")
+			log.Debug().Msg("Database updated with new message time")
 		}
 	} else {
 		log.Debug().Msg("Notifications disabled, skipping")

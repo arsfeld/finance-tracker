@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -32,13 +33,27 @@ type Reasoning struct {
 
 // OpenRouterResponse represents a response from the OpenRouter API
 type OpenRouterResponse struct {
-	Choices []Choice `json:"choices"`
-	Error   *Error   `json:"error,omitempty"`
+	Id       string   `json:"id"`
+	Choices  []Choice `json:"choices"`
+	Error    *Error   `json:"error,omitempty"`
+	Provider string   `json:"provider"`
+	Model    string   `json:"model"`
+	Object   string   `json:"object"`
+	Created  int64    `json:"created"`
+	Usage    Usage    `json:"usage"`
 }
 
 // Choice represents a choice in the OpenRouter API response
 type Choice struct {
-	Message Message `json:"message"`
+	Message            Message `json:"message"`
+	FinishReason       string  `json:"finish_reason"`
+	NativeFinishReason string  `json:"native_finish_reason"`
+}
+
+type Usage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 }
 
 // Error represents an error in the OpenRouter API response
@@ -47,10 +62,23 @@ type Error struct {
 	Code    int    `json:"code"`
 }
 
+// shuffleModels randomly shuffles the models slice
+func shuffleModels(models []string) {
+	rand.Seed(time.Now().UnixNano())
+	rand.Shuffle(len(models), func(i, j int) {
+		models[i], models[j] = models[j], models[i]
+	})
+}
+
 // getLLMResponse sends a prompt to the OpenRouter API and returns the response
 func getLLMResponse(settings *Settings, prompt string) (string, error) {
+	models := strings.Split(settings.OpenRouterModel, ",")
+	shuffleModels(models)
+
+	log.Debug().Msgf("Using models: %v", models)
+
 	reqBody := OpenRouterRequest{
-		Models: strings.Split(settings.OpenRouterModel, ","),
+		Models: models,
 		Messages: []Message{
 			{
 				Role:    "user",
@@ -113,7 +141,7 @@ func getLLMResponse(settings *Settings, prompt string) (string, error) {
 		return "", fmt.Errorf("error decoding response: %w", err)
 	}
 
-	log.Debug().Interface("response", openRouterResp).Msg("OpenRouter response")
+	log.Info().Str("model", openRouterResp.Model).Str("provider", openRouterResp.Provider).Msg(" └ OpenRouter response")
 
 	// Check for error in the response
 	if openRouterResp.Error != nil {
@@ -124,7 +152,12 @@ func getLLMResponse(settings *Settings, prompt string) (string, error) {
 		return "", fmt.Errorf("no response from OpenRouter")
 	}
 
-	return openRouterResp.Choices[0].Message.Content, nil
+	content := openRouterResp.Choices[0].Message.Content
+	if content == "" {
+		return "", fmt.Errorf("received empty analysis from LLM")
+	}
+
+	return content, nil
 }
 
 // formatTransactions formats the transactions as a markdown table

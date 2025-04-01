@@ -70,13 +70,13 @@ func getStringValue(s *string) string {
 func stripMarkdown(text string) string {
 	// Remove bold formatting (**text** or __text__)
 	text = regexp.MustCompile(`\*\*(.*?)\*\*|__(.*?)__`).ReplaceAllString(text, "$1$2")
-	
+
 	// Remove italic formatting (*text* or _text_)
 	text = regexp.MustCompile(`\*(.*?)\*|_(.*?)_`).ReplaceAllString(text, "$1$2")
-	
+
 	// Remove heading markers (# text)
 	text = regexp.MustCompile(`^#+\s+`).ReplaceAllString(text, "")
-	
+
 	return text
 }
 
@@ -98,4 +98,4 @@ func convertMarkdownToHTML(md string) string {
 	// Render HTML and remove newlines
 	html := string(markdown.Render(node, renderer))
 	return strings.ReplaceAll(html, "\n", "")
-} 
+}

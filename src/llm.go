@@ -201,7 +201,8 @@ func generateAnalysisPrompt(accounts []Account, transactions []Transaction, star
 	return fmt.Sprintf(`## Financial Transaction Analysis
 Billing Period: %s to %s
 
-I need a structured analysis of the provided financial transactions. Please create a concise report (max 150 words total) with the following sections:
+I need a structured analysis of the provided financial transactions. Use emojis to make the report more engaging.
+Please create a concise report (max 150 words total) with the following sections:
 
 ### Summary
 Provide a human-friendly overview of spending patterns during this period. Be specific about trends and notable observations.

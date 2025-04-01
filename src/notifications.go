@@ -11,9 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gomarkdown/markdown"
-	"github.com/gomarkdown/markdown/html"
-	"github.com/gomarkdown/markdown/parser"
 	"github.com/rs/zerolog/log"
 )
 
@@ -34,13 +31,20 @@ func sendNtfyNotification(settings *Settings, message string, notificationTopic 
 		topic = *settings.NtfyTopicWarning
 	}
 
+	// Strip markdown formatting from the message
+	plainMessage := stripMarkdown(message)
+
 	url := fmt.Sprintf("%s/%s", settings.NtfyServer, topic)
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer([]byte(message)))
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer([]byte(plainMessage)))
 	if err != nil {
 		return fmt.Errorf("error creating request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", "text/plain")
+	req.Header.Set("Title", "💰 Finance Tracker")
+
+	// Update request body with plain text message
+	req.Body = io.NopCloser(bytes.NewBuffer([]byte(plainMessage)))
 
 	client := &http.Client{
 		Timeout: 10 * time.Second,
@@ -58,26 +62,6 @@ func sendNtfyNotification(settings *Settings, message string, notificationTopic 
 	}
 
 	return nil
-}
-
-// convertMarkdownToHTML converts markdown text to HTML
-func convertMarkdownToHTML(md string) string {
-	// Create markdown parser with common extensions
-	extensions := parser.CommonExtensions | parser.AutoHeadingIDs
-	p := parser.NewWithExtensions(extensions)
-
-	// Parse markdown into AST
-	node := p.Parse([]byte(md))
-
-	// Create HTML renderer with common flags
-	opts := html.RendererOptions{
-		Flags: html.CommonFlags | html.HrefTargetBlank,
-	}
-	renderer := html.NewRenderer(opts)
-
-	// Render HTML and remove newlines
-	html := string(markdown.Render(node, renderer))
-	return strings.ReplaceAll(html, "\n", "")
 }
 
 // generateEmailHTML generates a beautiful HTML email with the transaction list

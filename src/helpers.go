@@ -3,8 +3,13 @@ package main
 import (
 	"fmt"
 	"os"
+	"regexp"
+	"strings"
 	"time"
 
+	"github.com/gomarkdown/markdown"
+	"github.com/gomarkdown/markdown/html"
+	"github.com/gomarkdown/markdown/parser"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -60,3 +65,37 @@ func getStringValue(s *string) string {
 	}
 	return *s
 }
+
+// stripMarkdown removes markdown formatting from text using regex
+func stripMarkdown(text string) string {
+	// Remove bold formatting (**text** or __text__)
+	text = regexp.MustCompile(`\*\*(.*?)\*\*|__(.*?)__`).ReplaceAllString(text, "$1$2")
+	
+	// Remove italic formatting (*text* or _text_)
+	text = regexp.MustCompile(`\*(.*?)\*|_(.*?)_`).ReplaceAllString(text, "$1$2")
+	
+	// Remove heading markers (# text)
+	text = regexp.MustCompile(`^#+\s+`).ReplaceAllString(text, "")
+	
+	return text
+}
+
+// convertMarkdownToHTML converts markdown text to HTML
+func convertMarkdownToHTML(md string) string {
+	// Create markdown parser with common extensions
+	extensions := parser.CommonExtensions | parser.AutoHeadingIDs
+	p := parser.NewWithExtensions(extensions)
+
+	// Parse markdown into AST
+	node := p.Parse([]byte(md))
+
+	// Create HTML renderer with common flags
+	opts := html.RendererOptions{
+		Flags: html.CommonFlags | html.HrefTargetBlank,
+	}
+	renderer := html.NewRenderer(opts)
+
+	// Render HTML and remove newlines
+	html := string(markdown.Render(node, renderer))
+	return strings.ReplaceAll(html, "\n", "")
+} 

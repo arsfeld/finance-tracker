@@ -29,6 +29,7 @@ type RunConfig struct {
 	Version              string
 	MaxRetries           int
 	RetryDelay           int
+	BillingDay           int
 }
 
 func main() {
@@ -46,7 +47,8 @@ detailed breakdowns of your spending habits.
 Version: %s
 
 Example usage:
-  finance_tracker                    # Analyze current month's transactions
+  finance_tracker                    # Analyze current month's transactions (billing day 15)
+  finance_tracker --billing-day 1    # Analyze current month's transactions (billing day 1)
   finance_tracker --date-range last_month  # Analyze last month's transactions
   finance_tracker --notifications ntfy     # Send notifications via ntfy
   finance_tracker --disable-cache          # Force fresh analysis without caching
@@ -64,6 +66,7 @@ Example usage:
 			env_file, _ := cmd.Flags().GetString("env-file")
 			maxRetries, _ := cmd.Flags().GetInt("max-retries")
 			retryDelay, _ := cmd.Flags().GetInt("retry-delay")
+			billingDay, _ := cmd.Flags().GetInt("billing-day")
 
 			return run(RunConfig{
 				Notifications:        notifications,
@@ -78,6 +81,7 @@ Example usage:
 				Version:              GetVersion(),
 				MaxRetries:           maxRetries,
 				RetryDelay:           retryDelay,
+				BillingDay:           billingDay,
 			})
 		},
 	}
@@ -94,6 +98,7 @@ Example usage:
 	rootCmd.Flags().Bool("version", false, "Show version information")
 	rootCmd.Flags().Int("max-retries", 5, "Maximum number of retries for LLM calls")
 	rootCmd.Flags().Int("retry-delay", 2, "Initial retry delay in seconds")
+	rootCmd.Flags().Int("billing-day", 15, "Day of the month for the billing cycle start (1-28)")
 	rootCmd.SetVersionTemplate(GetVersion() + "\n")
 
 	if err := rootCmd.Execute(); err != nil {
@@ -146,7 +151,7 @@ func run(config RunConfig) error {
 	}
 
 	// Calculate date range
-	billingStart, billingEnd, err := calculateDateRange(dateRangeType, parsedStartDate, parsedEndDate)
+	billingStart, billingEnd, err := calculateDateRange(dateRangeType, parsedStartDate, parsedEndDate, config.BillingDay)
 	if err != nil {
 		return fmt.Errorf("error calculating date range: %w", err)
 	}

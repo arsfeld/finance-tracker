@@ -58,12 +58,12 @@ func calculateDateRange(
 		start := time.Date(end.Year(), end.Month(), billingDay, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 0)
 		// Handle edge case where end month doesn't have billingDay (e.g. billingDay=31)
 		/*
-		if start.Day() != billingDay {
-			// Go to the first of the *next* month, then subtract one day to get the last day of the correct month
-			start = time.Date(end.Year(), end.Month()+1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -1)
-			// Now set the start day to the billing day for the correct month/year
-			start = time.Date(start.Year(), start.Month(), billingDay, 0, 0, 0, 0, time.UTC)
-		}
+			if start.Day() != billingDay {
+				// Go to the first of the *next* month, then subtract one day to get the last day of the correct month
+				start = time.Date(end.Year(), end.Month()+1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -1)
+				// Now set the start day to the billing day for the correct month/year
+				start = time.Date(start.Year(), start.Month(), billingDay, 0, 0, 0, 0, time.UTC)
+			}
 		*/
 
 		return start, end, nil

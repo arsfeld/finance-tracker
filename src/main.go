@@ -183,11 +183,25 @@ func run(config RunConfig) error {
 
 	// Fetch transactions
 	log.Info().Msg("📊 Fetching transactions...")
-	accounts, err := getTransactionsForPeriod(settings, billingStart, billingEnd)
+	accounts, apiErrors, err := getTransactionsForPeriod(settings, billingStart, billingEnd)
 	if err != nil {
 		return fmt.Errorf("error fetching transactions: %w", err)
 	}
 	log.Debug().Int("account_count", len(accounts)).Msg("Fetched accounts")
+
+	// Handle API errors by sending warnings through configured channels
+	if len(apiErrors) > 0 && !config.DisableNotifications {
+		log.Warn().Strs("api_errors", apiErrors).Msg("Received API errors during transaction fetch")
+		for _, apiErr := range apiErrors {
+			warnMsg := fmt.Sprintf("API Error: %s", apiErr)
+			_, notifyErr := sendNotification(settings, warnMsg, nil, "warning", config.Notifications)
+			if notifyErr != nil {
+				// Log the notification error but don't stop the main process
+				log.Error().Err(notifyErr).Str("original_api_error", apiErr).Msg("Failed to send API error warning notification")
+			}
+		}
+		log.Debug().Msg("Sent warning notifications for API errors")
+	}
 
 	if len(accounts) == 0 {
 		return fmt.Errorf("no accounts found")
@@ -229,6 +243,22 @@ func run(config RunConfig) error {
 	}
 	log.Debug().Int("transaction_count", len(allTransactions)).Msg("Collected total transactions")
 
+	// Filter out positive transactions (keep only expenses)
+	var expenses []Transaction
+	positiveTxnCount := 0
+	for _, tx := range allTransactions {
+		if tx.Amount < 0 {
+			expenses = append(expenses, tx)
+		} else {
+			positiveTxnCount++
+		}
+	}
+	allTransactions = expenses // Replace the original slice with the filtered one
+	log.Debug().
+		Int("filtered_transaction_count", len(allTransactions)).
+		Int("positive_txns_ignored", positiveTxnCount).
+		Msg("Filtered out positive transactions (e.g., income, payments)")
+
 	if len(allTransactions) == 0 {
 		return fmt.Errorf("no transactions found")
 	}
@@ -242,8 +272,8 @@ func run(config RunConfig) error {
 		if lastMsgTime != nil {
 			lastMsgTimeUnix := time.Unix(*lastMsgTime, 0)
 			if time.Since(lastMsgTimeUnix).Seconds() < float64(twoDaysInSeconds) {
-				log.Debug().Str("last_message_time", lastMsgTimeUnix.Format("2006-01-02 15:04:05")).Msg("Last message was sent too recently")
-				return fmt.Errorf("last message was sent too recently (at %s)", lastMsgTimeUnix.Format("2006-01-02 15:04:05"))
+				log.Info().Str("last_message_time", lastMsgTimeUnix.Format("2006-01-02 15:04:05")).Msg("🚫 Notification skipped: Last message sent too recently.")
+				return nil // Return success, but indicate skipped notification
 			}
 			log.Debug().Msg("Last message check passed")
 		}

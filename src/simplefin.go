@@ -27,7 +27,7 @@ func getTransactionTime(tx Transaction) string {
 }
 
 // getTransactionsForPeriod fetches transactions from the SimpleFin bridge for the specified date range
-func getTransactionsForPeriod(settings *Settings, startDate, endDate time.Time) ([]Account, error) {
+func getTransactionsForPeriod(settings *Settings, startDate, endDate time.Time) ([]Account, []string, error) {
 	startTS := startDate.Unix()
 	endTS := endDate.Unix()
 
@@ -40,12 +40,12 @@ func getTransactionsForPeriod(settings *Settings, startDate, endDate time.Time) 
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("error creating request: %w", err)
+		return nil, nil, fmt.Errorf("error creating request: %w", err)
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("error making request: %w", err)
+		return nil, nil, fmt.Errorf("error making request: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -55,12 +55,12 @@ func getTransactionsForPeriod(settings *Settings, startDate, endDate time.Time) 
 			Int("status_code", resp.StatusCode).
 			Str("body", string(body)).
 			Msg("API request failed")
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var accountsResponse AccountsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&accountsResponse); err != nil {
-		return nil, fmt.Errorf("error decoding response: %w", err)
+		return nil, nil, fmt.Errorf("error decoding response: %w", err)
 	}
 	log.Debug().Int("account_count", len(accountsResponse.Accounts)).Msg("Successfully decoded response")
 
@@ -89,10 +89,6 @@ func getTransactionsForPeriod(settings *Settings, startDate, endDate time.Time) 
 	if len(accountsResponse.Errors) > 0 {
 		for _, errMsg := range accountsResponse.Errors {
 			log.Warn().Str("error", errMsg).Msg("API Error")
-			if err := sendNtfyNotification(settings, fmt.Sprintf("API Error: %s", errMsg), "warning"); err != nil {
-				log.Debug().Err(err).Msg("Error sending notification")
-				log.Error().Err(err).Msg("Error sending notification")
-			}
 		}
 	}
 
@@ -117,5 +113,5 @@ func getTransactionsForPeriod(settings *Settings, startDate, endDate time.Time) 
 	}
 	log.Debug().Int("filtered_account_count", len(filteredAccounts)).Msg("Filtered accounts with non-zero balance")
 
-	return filteredAccounts, nil
+	return filteredAccounts, accountsResponse.Errors, nil
 }

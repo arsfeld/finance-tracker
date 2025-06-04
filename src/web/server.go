@@ -3,7 +3,6 @@ package web
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,7 +14,6 @@ import (
 
 	"finance_tracker/src/internal/auth"
 	"finance_tracker/src/internal/config"
-	"finance_tracker/src/internal/jobs"
 	"finance_tracker/src/web/handlers"
 	webmiddleware "finance_tracker/src/web/middleware"
 )
@@ -49,7 +47,7 @@ func (s *Server) Start() error {
 	if s.config.IsDevelopment {
 		// In development, we'll dynamically determine this per request
 		// For now, default to localhost but this will be overridden
-		viteHost = "dev.local" // Set to your development domain
+		viteHost = "localhost" // Set to your development domain
 	}
 	
 	// Initialize Inertia
@@ -86,17 +84,11 @@ func (s *Server) Start() error {
 	authHandlers := handlers.NewInertiaAuthHandlers(s.config.Client, s.inertia)
 	orgHandlers := handlers.NewInertiaOrganizationHandlers(s.config.Client, s.inertia)
 	
-	// Initialize simple job client and handlers
-	// TODO: Fix database connection
-	jobClient := jobs.NewSimpleJobClient(nil)
-	
-	// Start job client (no-op for simple implementation)
-	err = jobClient.Start(context.Background())
-	if err != nil {
-		return fmt.Errorf("failed to start job client: %w", err)
-	}
-	
-	jobHandlers := handlers.NewSimpleJobHandler(jobClient)
+	// Initialize River job client and handlers
+	// For the web server, we'll use a minimal job client setup
+	// The full River client is initialized in the worker command
+	var jobHandlers *handlers.RiverJobHandler
+	// TODO: Initialize proper River job client when database is available
 
 	// Setup routes
 	s.setupRoutes(r, pageHandlers, apiHandlers, authHandlers, orgHandlers, jobHandlers, authMiddleware)
@@ -144,7 +136,7 @@ func (s *Server) setupRoutes(
 	apiHandlers *handlers.APIHandlers,
 	authHandlers *handlers.AuthHandlers,
 	orgHandlers *handlers.OrganizationHandlers,
-	jobHandlers *handlers.SimpleJobHandler,
+	jobHandlers *handlers.RiverJobHandler,
 	authMiddleware *auth.Middleware,
 ) {
 	// Public routes
@@ -197,25 +189,27 @@ func (s *Server) setupRoutes(
 			r.Delete("/{connectionID}", apiHandlers.HandleDeleteConnection)
 			r.Post("/{connectionID}/test", apiHandlers.HandleTestConnection)
 			r.Get("/{connectionID}/accounts", apiHandlers.HandleGetConnectionAccounts)
-			r.Post("/{id}/sync", jobHandlers.CreateSyncJob)
+			// TODO: Re-enable when River job client is properly initialized
+			// r.Post("/{id}/sync", jobHandlers.CreateSyncJob)
 		})
 
+		// TODO: Re-enable job endpoints when River job client is properly initialized
 		// Job endpoints
-		r.Route("/jobs", func(r chi.Router) {
-			r.Get("/", jobHandlers.ListJobs)
-			r.Get("/stats", jobHandlers.GetJobStats)
-			r.Get("/{id}", jobHandlers.GetJob)
-			r.Post("/{id}/cancel", jobHandlers.CancelJob)
-			r.Post("/{id}/pause", jobHandlers.PauseJob)
-			r.Post("/{id}/resume", jobHandlers.ResumeJob)
-			r.Post("/{id}/retry", jobHandlers.RetryJob)
-		})
+		// r.Route("/jobs", func(r chi.Router) {
+		//	r.Get("/", jobHandlers.ListJobs)
+		//	r.Get("/stats", jobHandlers.GetJobStats)
+		//	r.Get("/{id}", jobHandlers.GetJob)
+		//	r.Post("/{id}/cancel", jobHandlers.CancelJob)
+		//	r.Post("/{id}/pause", jobHandlers.PauseJob)
+		//	r.Post("/{id}/resume", jobHandlers.ResumeJob)
+		//	r.Post("/{id}/retry", jobHandlers.RetryJob)
+		// })
 
-		// Worker endpoints  
-		r.Route("/workers", func(r chi.Router) {
-			r.Get("/", jobHandlers.ListWorkers)
-			r.Get("/stats", jobHandlers.GetWorkerStats)
-		})
+		// Worker endpoints
+		// r.Route("/workers", func(r chi.Router) {
+		//	r.Get("/", jobHandlers.ListWorkers)
+		//	r.Get("/stats", jobHandlers.GetWorkerStats)
+		// })
 
 		// Bank account endpoints
 		r.Put("/bank-accounts/{accountID}/status", apiHandlers.HandleUpdateAccountStatus)

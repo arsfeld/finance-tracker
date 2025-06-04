@@ -8,14 +8,14 @@ import (
 
 	"github.com/riverqueue/river"
 	"finance_tracker/src/internal/services"
-	provider "finance_tracker/src/providers"
+	"finance_tracker/src/providers"
 )
 
 // SyncTransactionsJob handles transaction synchronization
 type SyncTransactionsJob struct {
 	river.WorkerDefaults[SyncTransactionsArgs]
 	syncService *services.SyncService
-	providers   map[string]provider.Provider
+	providers   map[string]providers.FinancialProvider
 }
 
 func (SyncTransactionsJob) Kind() string { return "sync_transactions" }
@@ -66,7 +66,7 @@ func (job *SyncTransactionsJob) Work(ctx context.Context, j *river.Job[SyncTrans
 		
 		// Get transactions from provider  
 		// TODO: Implement credential decryption
-		credentials := make(map[string]interface{})
+		credentials := make(map[string]string)
 		transactions, err := provider.GetTransactions(ctx, credentials, account.ProviderAccountID, *startDate, *endDate)
 		if err != nil {
 			log.Printf("Warning: failed to get transactions for account %s: %v", account.ID, err)
@@ -101,7 +101,7 @@ func (job *SyncTransactionsJob) Work(ctx context.Context, j *river.Job[SyncTrans
 type SyncAccountsJob struct {
 	river.WorkerDefaults[SyncAccountsArgs]
 	syncService *services.SyncService
-	providers   map[string]provider.Provider
+	providers   map[string]providers.FinancialProvider
 }
 
 func (SyncAccountsJob) Kind() string { return "sync_accounts" }
@@ -123,7 +123,7 @@ func (job *SyncAccountsJob) Work(ctx context.Context, j *river.Job[SyncAccountsA
 	
 	// Step 2: Fetch accounts from provider
 	// TODO: Implement credential decryption
-	credentials := make(map[string]interface{})
+	credentials := make(map[string]string)
 	accounts, err := provider.ListAccounts(ctx, credentials)
 	if err != nil {
 		return fmt.Errorf("failed to fetch accounts from provider: %w", err)
@@ -151,7 +151,7 @@ func (job *SyncAccountsJob) Work(ctx context.Context, j *river.Job[SyncAccountsA
 type FullSyncJob struct {
 	river.WorkerDefaults[FullSyncArgs]
 	syncService *services.SyncService
-	providers   map[string]provider.Provider
+	providers   map[string]providers.FinancialProvider
 }
 
 func (FullSyncJob) Kind() string { return "full_sync" }
@@ -175,7 +175,7 @@ func (job *FullSyncJob) Work(ctx context.Context, j *river.Job[FullSyncArgs]) er
 	// Step 2: Sync accounts
 	log.Printf("Full sync step 2/4: Syncing accounts")
 	// TODO: Implement credential decryption
-	credentials := make(map[string]interface{})
+	credentials := make(map[string]string)
 	accounts, err := provider.ListAccounts(ctx, credentials)
 	if err != nil {
 		return fmt.Errorf("failed to fetch accounts from provider: %w", err)
@@ -207,7 +207,7 @@ func (job *FullSyncJob) Work(ctx context.Context, j *river.Job[FullSyncArgs]) er
 	
 	totalTransactions := 0
 	for _, account := range accounts {
-		transactions, err := provider.GetTransactions(ctx, credentials, account.ProviderID, *startDate, endDate)
+		transactions, err := provider.GetTransactions(ctx, credentials, account.ID, *startDate, endDate)
 		if err != nil {
 			log.Printf("Warning: failed to get transactions for account %s: %v", account.ID, err)
 			continue
@@ -241,7 +241,7 @@ func (job *FullSyncJob) Work(ctx context.Context, j *river.Job[FullSyncArgs]) er
 type TestConnectionJob struct {
 	river.WorkerDefaults[TestConnectionArgs]
 	syncService *services.SyncService
-	providers   map[string]provider.Provider
+	providers   map[string]providers.FinancialProvider
 }
 
 func (TestConnectionJob) Kind() string { return "test_connection" }
@@ -265,7 +265,7 @@ func (job *TestConnectionJob) Work(ctx context.Context, j *river.Job[TestConnect
 	// Step 3: Test connection by listing accounts
 	log.Printf("Testing connection by fetching accounts...")
 	// TODO: Implement credential decryption
-	credentials := make(map[string]interface{})
+	credentials := make(map[string]string)
 	accounts, err := provider.ListAccounts(ctx, credentials)
 	if err != nil {
 		return fmt.Errorf("connection test failed: %w", err)
@@ -283,7 +283,7 @@ func (job *TestConnectionJob) Work(ctx context.Context, j *river.Job[TestConnect
 			now := time.Now()
 			lastWeek := now.AddDate(0, 0, -7)
 			
-			transactions, err := provider.GetTransactions(ctx, credentials, test_account.ProviderID, lastWeek, now)
+			transactions, err := provider.GetTransactions(ctx, credentials, test_account.ID, lastWeek, now)
 			if err != nil {
 				return fmt.Errorf("account validation failed: %w", err)
 			}

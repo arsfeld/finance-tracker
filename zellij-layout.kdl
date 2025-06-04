@@ -1,0 +1,14 @@
+layout {
+    tab name="Development" {
+        pane split_direction="vertical" {
+            pane {
+                command "just"
+                args "web-dev"
+            }
+            pane {
+                command "just"
+                args "frontend-dev"
+            }
+        }
+    }
+}

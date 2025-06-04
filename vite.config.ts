@@ -30,7 +30,7 @@ export default defineConfig({
       credentials: true,
     }, // Enable CORS for cross-origin requests
     hmr: {
-      host: 'dev.local', // Use your actual development domain
+      host: 'localhost', // Use your actual development domain
     },
   },
 })

@@ -15,6 +15,13 @@ import (
 	"finance_tracker/src/internal/jobs"
 )
 
+// Helper function to get organization ID from request context
+func GetOrganizationID(r *http.Request) uuid.UUID {
+	// TODO: Extract this from the auth middleware context
+	// For now, return a placeholder UUID
+	return uuid.New()
+}
+
 type RiverJobHandler struct {
 	jobClient *jobs.RiverJobClient
 }
@@ -107,7 +114,7 @@ func (h *RiverJobHandler) CreateSyncJob(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	writeJSON(w, map[string]interface{}{
+	respondWithJSON(w, r, http.StatusOK, map[string]interface{}{
 		"id":           result.Job.ID,
 		"kind":         result.Job.Kind,
 		"state":        string(result.Job.State),
@@ -163,7 +170,7 @@ func (h *RiverJobHandler) CreateAnalysisJob(w http.ResponseWriter, r *http.Reque
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	writeJSON(w, map[string]interface{}{
+	respondWithJSON(w, r, http.StatusOK, map[string]interface{}{
 		"id":           result.Job.ID,
 		"kind":         result.Job.Kind,
 		"state":        string(result.Job.State),
@@ -234,7 +241,7 @@ func (h *RiverJobHandler) CreateMaintenanceJob(w http.ResponseWriter, r *http.Re
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	writeJSON(w, map[string]interface{}{
+	respondWithJSON(w, r, http.StatusOK, map[string]interface{}{
 		"id":           result.Job.ID,
 		"kind":         result.Job.Kind,
 		"state":        string(result.Job.State),
@@ -324,7 +331,7 @@ func (h *RiverJobHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, map[string]interface{}{
+	respondWithJSON(w, r, http.StatusOK, map[string]interface{}{
 		"jobs": apiJobs,
 		"pagination": map[string]interface{}{
 			"limit":  limit,
@@ -363,7 +370,7 @@ func (h *RiverJobHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 		progress = 50 // You'd get this from job metadata
 	}
 
-	writeJSON(w, map[string]interface{}{
+	respondWithJSON(w, r, http.StatusOK, map[string]interface{}{
 		"id":               job.ID,
 		"type":             job.Kind,
 		"status":           string(job.State),
@@ -406,7 +413,7 @@ func (h *RiverJobHandler) CancelJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, map[string]string{"status": "cancelled"})
+	respondWithJSON(w, r, http.StatusOK, map[string]string{"status": "cancelled"})
 }
 
 // GetJobStats handles GET /api/v1/jobs/stats with River backend
@@ -431,7 +438,7 @@ func (h *RiverJobHandler) GetJobStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, stats)
+	respondWithJSON(w, r, http.StatusOK, stats)
 }
 
 // GetWorkerStats handles GET /api/v1/workers/stats with River backend
@@ -442,7 +449,7 @@ func (h *RiverJobHandler) GetWorkerStats(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, stats)
+	respondWithJSON(w, r, http.StatusOK, stats)
 }
 
 // ListWorkers handles GET /api/v1/workers with River backend
@@ -453,7 +460,7 @@ func (h *RiverJobHandler) ListWorkers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, map[string]interface{}{
+	respondWithJSON(w, r, http.StatusOK, map[string]interface{}{
 		"workers": workers,
 	})
 }
@@ -488,7 +495,7 @@ func (h *RiverJobHandler) GetQueues(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	writeJSON(w, map[string]interface{}{
+	respondWithJSON(w, r, http.StatusOK, map[string]interface{}{
 		"queues": queues,
 	})
 }
@@ -500,7 +507,7 @@ func (h *RiverJobHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, map[string]interface{}{
+	respondWithJSON(w, r, http.StatusOK, map[string]interface{}{
 		"status":    "healthy",
 		"timestamp": time.Now(),
 		"version":   "river-0.11.4",

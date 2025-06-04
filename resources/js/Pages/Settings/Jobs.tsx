@@ -1,6 +1,6 @@
 import { Head } from '@inertiajs/react'
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout'
-import { JobMonitor } from '@/Components/JobMonitor'
+import { JobMonitor } from '@/components/JobMonitor'
 
 export default function Jobs() {
   return (

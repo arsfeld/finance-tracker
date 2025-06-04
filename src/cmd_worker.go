@@ -17,8 +17,8 @@ import (
 	"finance_tracker/src/internal/config"
 	"finance_tracker/src/internal/jobs"
 	"finance_tracker/src/internal/services"
+	"finance_tracker/src/providers"
 	"finance_tracker/src/providers/simplefin"
-	provider "finance_tracker/src/providers"
 )
 
 // WorkerConfig holds configuration for the worker
@@ -87,16 +87,16 @@ func runWorker(cfg WorkerConfig) error {
 	syncService := services.NewSyncService(sqlxDB, jobService)
 
 	// Initialize providers
-	providers := make(map[string]provider.Provider)
+	financialProviders := make(map[string]providers.FinancialProvider)
 	if settings.SimplefinBridgeURL != "" {
-		sfProvider := simplefin.NewProvider()
-		providers["simplefin"] = sfProvider
+		sfProvider := simplefin.NewSimpleFin()
+		financialProviders["simplefin"] = sfProvider
 		syncService.RegisterProvider("simplefin", sfProvider)
 		log.Info().Msg("SimpleFin provider registered")
 	}
 
 	// Initialize River job client
-	riverClient, err := jobs.NewRiverJobClient(dbPool, syncService, providers)
+	riverClient, err := jobs.NewRiverJobClient(dbPool, syncService, financialProviders)
 	if err != nil {
 		return fmt.Errorf("failed to create River job client: %w", err)
 	}

@@ -92,5 +92,46 @@ dev:
     # Kill frontend when backend exits
     kill $FRONTEND_PID 2>/dev/null || true
 
+# Run development stack in tmux with split panes
+tmux-dev:
+    #!/usr/bin/env bash
+    SESSION_NAME="finance-tracker-dev"
+    
+    # Check if tmux session already exists
+    if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+        echo "Tmux session '$SESSION_NAME' already exists. Attaching..."
+        tmux attach-session -t "$SESSION_NAME"
+    else
+        echo "Creating new tmux session '$SESSION_NAME'..."
+        # Create new session with first pane running web-dev
+        tmux new-session -d -s "$SESSION_NAME" -c "$(pwd)" "just web-dev"
+        
+        # Split horizontally and run frontend-dev in the new pane
+        tmux split-window -h -t "$SESSION_NAME" -c "$(pwd)" "just frontend-dev"
+        
+        # Attach to the session
+        tmux attach-session -t "$SESSION_NAME"
+    fi
+
+# Run development stack in zellij with split panes
+zellij-dev:
+    #!/usr/bin/env bash
+    SESSION_NAME="finance-tracker-dev"
+    LAYOUT_FILE="zellij-layout.kdl"
+    
+    echo "Starting Zellij session '$SESSION_NAME' with layout..."
+    # Check if session exists and attach, otherwise create new one
+    if zellij list-sessions | grep -q "$SESSION_NAME"; then
+        echo "Attaching to existing session..."
+        zellij attach "$SESSION_NAME"
+    else
+        echo "Creating new session with layout..."
+        # Create session with specific name using the layout
+        zellij --new-session-with-layout "$LAYOUT_FILE" --session "$SESSION_NAME"
+    fi
+
+claude:
+    zellij a claude -c
+
 # Build everything for production
 build-all: frontend-build build

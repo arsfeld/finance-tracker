@@ -15,7 +15,7 @@ import (
 	"github.com/riverqueue/river/rivertype"
 	
 	"finance_tracker/src/internal/services"
-	provider "finance_tracker/src/providers"
+	"finance_tracker/src/providers"
 )
 
 // RiverJobClient wraps River client with our custom methods
@@ -29,7 +29,7 @@ type RiverJobClient struct {
 }
 
 // NewRiverJobClient creates a new River-based job client
-func NewRiverJobClient(dbPool *pgxpool.Pool, syncService *services.SyncService, providers map[string]provider.Provider) (*RiverJobClient, error) {
+func NewRiverJobClient(dbPool *pgxpool.Pool, syncService *services.SyncService, providers map[string]providers.FinancialProvider) (*RiverJobClient, error) {
 	workers := river.NewWorkers()
 	
 	// Register all job workers with dependencies

@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"finance_tracker/src/internal/models"
-	provider "finance_tracker/src/providers"
+	"finance_tracker/src/providers"
 )
 
 // RiverJobClient interface to avoid circular dependency
@@ -21,14 +21,14 @@ type SyncService struct {
 	db          *sqlx.DB
 	jobService  *JobService
 	riverClient RiverJobClient
-	providers   map[string]provider.Provider
+	providers   map[string]providers.FinancialProvider
 }
 
 func NewSyncService(db *sqlx.DB, jobService *JobService) *SyncService {
 	return &SyncService{
 		db:         db,
 		jobService: jobService,
-		providers:  make(map[string]provider.Provider),
+		providers:  make(map[string]providers.FinancialProvider),
 	}
 }
 
@@ -38,7 +38,7 @@ func (s *SyncService) SetRiverClient(riverClient RiverJobClient) {
 }
 
 // RegisterProvider registers a financial data provider
-func (s *SyncService) RegisterProvider(name string, p provider.Provider) {
+func (s *SyncService) RegisterProvider(name string, p providers.FinancialProvider) {
 	s.providers[name] = p
 }
 
@@ -143,10 +143,10 @@ func (s *SyncService) GetAccountsByConnection(ctx context.Context, connectionID 
 }
 
 // StoreAccounts stores or updates accounts in the database
-func (s *SyncService) StoreAccounts(ctx context.Context, organizationID, connectionID uuid.UUID, accounts []provider.Account) error {
+func (s *SyncService) StoreAccounts(ctx context.Context, organizationID, connectionID uuid.UUID, accounts []providers.ProviderAccount) error {
 	for _, account := range accounts {
 		// Check if account already exists
-		existingID, err := s.getAccountByProviderID(ctx, connectionID, account.ProviderID)
+		existingID, err := s.getAccountByProviderID(ctx, connectionID, account.ID)
 		if err == nil {
 			// Update existing account
 			query := `
@@ -156,7 +156,7 @@ func (s *SyncService) StoreAccounts(ctx context.Context, organizationID, connect
 			`
 			_, err = s.db.ExecContext(ctx, query, account.Name, account.Type, account.Balance, account.Currency, existingID)
 			if err != nil {
-				return fmt.Errorf("failed to update account %s: %w", account.ProviderID, err)
+				return fmt.Errorf("failed to update account %s: %w", account.ID, err)
 			}
 		} else {
 			// Insert new account
@@ -166,9 +166,9 @@ func (s *SyncService) StoreAccounts(ctx context.Context, organizationID, connect
 				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
 			`
 			_, err = s.db.ExecContext(ctx, query, accountID, organizationID, connectionID, 
-				account.ProviderID, account.Name, account.Type, account.Balance, account.Currency)
+				account.ID, account.Name, account.Type, account.Balance, account.Currency)
 			if err != nil {
-				return fmt.Errorf("failed to insert account %s: %w", account.ProviderID, err)
+				return fmt.Errorf("failed to insert account %s: %w", account.ID, err)
 			}
 		}
 	}
@@ -176,10 +176,10 @@ func (s *SyncService) StoreAccounts(ctx context.Context, organizationID, connect
 }
 
 // StoreTransactions stores transactions in the database
-func (s *SyncService) StoreTransactions(ctx context.Context, organizationID, accountID uuid.UUID, transactions []provider.Transaction) error {
+func (s *SyncService) StoreTransactions(ctx context.Context, organizationID, accountID uuid.UUID, transactions []providers.ProviderTransaction) error {
 	for _, transaction := range transactions {
 		// Check if transaction already exists
-		exists, err := s.transactionExists(ctx, accountID, transaction.ProviderID)
+		exists, err := s.transactionExists(ctx, accountID, transaction.ID)
 		if err != nil {
 			return fmt.Errorf("failed to check transaction existence: %w", err)
 		}
@@ -192,10 +192,10 @@ func (s *SyncService) StoreTransactions(ctx context.Context, organizationID, acc
 				VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
 			`
 			_, err = s.db.ExecContext(ctx, query, transactionID, organizationID, accountID,
-				transaction.ProviderID, transaction.Amount, transaction.Description, 
+				transaction.ID, transaction.Amount, transaction.Description, 
 				transaction.Date)
 			if err != nil {
-				return fmt.Errorf("failed to insert transaction %s: %w", transaction.ProviderID, err)
+				return fmt.Errorf("failed to insert transaction %s: %w", transaction.ID, err)
 			}
 		}
 	}

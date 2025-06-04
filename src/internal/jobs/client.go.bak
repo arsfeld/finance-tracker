@@ -1,0 +1,312 @@
+package jobs
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jmoiron/sqlx"
+	"github.com/google/uuid"
+	
+	provider "finance_tracker/src/providers"
+	"finance_tracker/src/providers/simplefin"
+)
+
+// JobClient wraps River client with our custom functionality
+type JobClient struct {
+	riverClient *river.Client[pgx.Tx]
+	db          *sqlx.DB
+}
+
+// NewJobClient creates a new job client with all workers registered
+func NewJobClient(db *sqlx.DB, pgxPool *pgxpool.Pool) (*JobClient, error) {
+	// Set up worker dependencies
+	deps := &WorkerDependencies{
+		DB:        db,
+		Providers: make(map[string]provider.Provider),
+	}
+	
+	// Register providers
+	deps.Providers["simplefin"] = simplefin.NewProvider()
+
+	// Create River workers
+	workers := river.NewWorkers()
+	
+	// Register all job workers
+	river.AddWorker(workers, NewSyncTransactionsWorker(deps))
+	river.AddWorker(workers, NewSyncAccountsWorker(deps))
+	river.AddWorker(workers, NewFullSyncWorker(deps))
+	river.AddWorker(workers, NewTestConnectionWorker(deps))
+
+	// Create River client
+	riverClient, err := river.NewClient(riverpgxv5.New(pgxPool), &river.Config{
+		Queues: map[string]river.QueueConfig{
+			river.QueueDefault: {MaxWorkers: 10},
+			"sync_high":        {MaxWorkers: 5},
+			"sync_low":         {MaxWorkers: 2},
+		},
+		Workers: workers,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create River client: %w", err)
+	}
+
+	return &JobClient{
+		riverClient: riverClient,
+		db:          db,
+	}, nil
+}
+
+// Start starts the job client
+func (jc *JobClient) Start(ctx context.Context) error {
+	return jc.riverClient.Start(ctx)
+}
+
+// Stop stops the job client gracefully
+func (jc *JobClient) Stop(ctx context.Context) error {
+	return jc.riverClient.Stop(ctx)
+}
+
+// Job insertion methods with organization tracking
+
+func (jc *JobClient) InsertSyncTransactionsJob(ctx context.Context, args SyncTransactionsArgs, opts ...river.InsertOpts) (*river.JobRow, error) {
+	// Set default options
+	insertOpts := river.InsertOpts{
+		Priority: PriorityNormal,
+		Queue:    river.QueueDefault,
+		Metadata: map[string]interface{}{
+			MetadataStartDate: args.StartDate,
+			MetadataEndDate:   args.EndDate,
+		},
+	}
+	
+	// Apply custom options
+	if len(opts) > 0 {
+		insertOpts = opts[0]
+	}
+
+	// Insert job
+	job, err := jc.riverClient.Insert(ctx, args, &insertOpts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to insert sync transactions job: %w", err)
+	}
+
+	// Track job in our custom table
+	err = jc.trackJob(ctx, job.ID, args.OrganizationID, &args.ConnectionID)
+	if err != nil {
+		// Log error but don't fail the job insertion
+		fmt.Printf("Warning: failed to track job in custom table: %v\n", err)
+	}
+
+	return job, nil
+}
+
+func (jc *JobClient) InsertSyncAccountsJob(ctx context.Context, args SyncAccountsArgs, opts ...river.InsertOpts) (*river.JobRow, error) {
+	insertOpts := river.InsertOpts{
+		Priority: PriorityNormal,
+		Queue:    river.QueueDefault,
+	}
+	
+	if len(opts) > 0 {
+		insertOpts = opts[0]
+	}
+
+	job, err := jc.riverClient.Insert(ctx, args, &insertOpts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to insert sync accounts job: %w", err)
+	}
+
+	err = jc.trackJob(ctx, job.ID, args.OrganizationID, &args.ConnectionID)
+	if err != nil {
+		fmt.Printf("Warning: failed to track job in custom table: %v\n", err)
+	}
+
+	return job, nil
+}
+
+func (jc *JobClient) InsertFullSyncJob(ctx context.Context, args FullSyncArgs, opts ...river.InsertOpts) (*river.JobRow, error) {
+	insertOpts := river.InsertOpts{
+		Priority: PriorityHigh,
+		Queue:    "sync_high",
+		Metadata: map[string]interface{}{
+			MetadataStartDate:      args.StartDate,
+			MetadataIncludeHistory: args.IncludeHistory,
+		},
+	}
+	
+	if len(opts) > 0 {
+		insertOpts = opts[0]
+	}
+
+	job, err := jc.riverClient.Insert(ctx, args, &insertOpts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to insert full sync job: %w", err)
+	}
+
+	err = jc.trackJob(ctx, job.ID, args.OrganizationID, &args.ConnectionID)
+	if err != nil {
+		fmt.Printf("Warning: failed to track job in custom table: %v\n", err)
+	}
+
+	return job, nil
+}
+
+func (jc *JobClient) InsertTestConnectionJob(ctx context.Context, args TestConnectionArgs, opts ...river.InsertOpts) (*river.JobRow, error) {
+	insertOpts := river.InsertOpts{
+		Priority: PriorityHigh,
+		Queue:    river.QueueDefault,
+		Metadata: map[string]interface{}{
+			MetadataValidateAccounts: args.ValidateAccounts,
+		},
+	}
+	
+	if len(opts) > 0 {
+		insertOpts = opts[0]
+	}
+
+	job, err := jc.riverClient.Insert(ctx, args, &insertOpts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to insert test connection job: %w", err)
+	}
+
+	err = jc.trackJob(ctx, job.ID, args.OrganizationID, &args.ConnectionID)
+	if err != nil {
+		fmt.Printf("Warning: failed to track job in custom table: %v\n", err)
+	}
+
+	return job, nil
+}
+
+// Job management methods
+
+func (jc *JobClient) CancelJob(ctx context.Context, jobID int64) error {
+	_, err := jc.riverClient.JobCancel(ctx, jobID)
+	return err
+}
+
+func (jc *JobClient) GetJob(ctx context.Context, jobID int64) (*river.JobRow, error) {
+	return jc.riverClient.JobGet(ctx, jobID)
+}
+
+func (jc *JobClient) ListJobs(ctx context.Context, limit int, states ...river.JobState) ([]*river.JobRow, error) {
+	params := river.NewJobListParams().
+		Limit(limit).
+		State(states...)
+	
+	return jc.riverClient.JobList(ctx, params)
+}
+
+func (jc *JobClient) ListJobsForOrganization(ctx context.Context, organizationID uuid.UUID, limit int, offset int) ([]*river.JobRow, error) {
+	// Use our custom function to get jobs for organization
+	query := `
+		SELECT 
+			rj.id, rj.kind, rj.state, rj.attempt, rj.max_attempts,
+			rj.created_at, rj.scheduled_at, rj.attempted_at, rj.finalized_at,
+			rj.errors, rj.metadata, rj.args
+		FROM river_job rj
+		INNER JOIN river_job_states rjs ON rj.id = rjs.river_job_id
+		WHERE rjs.organization_id = $1
+		ORDER BY rj.created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+	
+	rows, err := jc.db.QueryContext(ctx, query, organizationID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list jobs for organization: %w", err)
+	}
+	defer rows.Close()
+
+	var jobs []*river.JobRow
+	for rows.Next() {
+		job := &river.JobRow{}
+		err := rows.Scan(
+			&job.ID, &job.Kind, &job.State, &job.Attempt, &job.MaxAttempts,
+			&job.CreatedAt, &job.ScheduledAt, &job.AttemptedAt, &job.FinalizedAt,
+			&job.Errors, &job.Metadata, &job.EncodedArgs,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan job row: %w", err)
+		}
+		jobs = append(jobs, job)
+	}
+
+	return jobs, nil
+}
+
+// Schedule recurring jobs
+func (jc *JobClient) ScheduleRecurringSync(ctx context.Context, organizationID, connectionID uuid.UUID, interval time.Duration) error {
+	// For now, we'll use a simple approach - insert jobs with schedule_at in the future
+	// River Pro has better recurring job support, but this works for the basic case
+	
+	scheduleAt := time.Now().Add(interval)
+	
+	_, err := jc.InsertSyncTransactionsJob(ctx, SyncTransactionsArgs{
+		OrganizationID: organizationID,
+		ConnectionID:   connectionID,
+		ForceSync:      false,
+	}, river.InsertOpts{
+		ScheduledAt: scheduleAt,
+		Priority:    PriorityLow,
+		Queue:       "sync_low",
+	})
+	
+	return err
+}
+
+// Helper method to track jobs in our custom table
+func (jc *JobClient) trackJob(ctx context.Context, jobID int64, organizationID uuid.UUID, connectionID *uuid.UUID) error {
+	query := `
+		INSERT INTO river_job_states (river_job_id, organization_id, connection_id)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (river_job_id) DO NOTHING
+	`
+	
+	_, err := jc.db.ExecContext(ctx, query, jobID, organizationID, connectionID)
+	return err
+}
+
+// Get job statistics for organization
+func (jc *JobClient) GetJobStatsForOrganization(ctx context.Context, organizationID uuid.UUID, since time.Time) (map[string]interface{}, error) {
+	query := `SELECT * FROM get_organization_job_stats($1, $2)`
+	
+	rows, err := jc.db.QueryContext(ctx, query, organizationID, since)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get job stats: %w", err)
+	}
+	defer rows.Close()
+
+	stats := map[string]interface{}{
+		"by_state": make(map[string]map[string]interface{}),
+		"total":    0,
+	}
+
+	total := 0
+	for rows.Next() {
+		var state string
+		var count int64
+		var avgDuration *float64
+
+		err := rows.Scan(&state, &count, &avgDuration)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan job stats: %w", err)
+		}
+
+		stateStats := map[string]interface{}{
+			"count": count,
+		}
+		
+		if avgDuration != nil {
+			stateStats["avg_duration_seconds"] = *avgDuration
+		}
+
+		stats["by_state"].(map[string]map[string]interface{})[state] = stateStats
+		total += int(count)
+	}
+
+	stats["total"] = total
+	return stats, nil
+}

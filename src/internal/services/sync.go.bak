@@ -1,0 +1,362 @@
+package services
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
+	"finance_tracker/src/internal/models"
+	provider "finance_tracker/src/providers"
+)
+
+type SyncService struct {
+	db           *sqlx.DB
+	jobService   *JobService
+	providers    map[string]provider.Provider
+}
+
+func NewSyncService(db *sqlx.DB, jobService *JobService) *SyncService {
+	return &SyncService{
+		db:         db,
+		jobService: jobService,
+		providers:  make(map[string]provider.Provider),
+	}
+}
+
+// RegisterProvider registers a financial data provider
+func (s *SyncService) RegisterProvider(name string, p provider.Provider) {
+	s.providers[name] = p
+}
+
+// CreateSyncJob creates a new sync job for a provider connection
+func (s *SyncService) CreateSyncJob(ctx context.Context, organizationID, connectionID uuid.UUID, jobType models.JobType, params interface{}) (*models.Job, error) {
+	// Get connection details
+	var connection models.ProviderConnection
+	err := s.db.GetContext(ctx, &connection, 
+		`SELECT * FROM provider_connections WHERE id = $1 AND organization_id = $2`, 
+		connectionID, organizationID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get provider connection: %w", err)
+	}
+
+	// Serialize parameters
+	paramBytes, err := json.Marshal(params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize parameters: %w", err)
+	}
+
+	// Create job
+	jobParams := models.CreateJobParams{
+		OrganizationID:       organizationID,
+		Type:                 jobType,
+		Priority:             models.JobPriorityNormal,
+		Title:                s.getJobTitle(jobType, connection.Name),
+		Description:          s.getJobDescription(jobType, connection.Name),
+		ProviderConnectionID: &connectionID,
+		Parameters:           paramBytes,
+	}
+
+	return s.jobService.CreateJob(ctx, jobParams)
+}
+
+// CreateFullSyncJob creates a comprehensive sync job that syncs accounts and transactions
+func (s *SyncService) CreateFullSyncJob(ctx context.Context, organizationID, connectionID uuid.UUID, includeHistory bool, startDate *time.Time) (*models.Job, error) {
+	params := models.FullSyncParams{
+		IncludeHistory: includeHistory,
+		StartDate:      startDate,
+		ForceSync:      false,
+	}
+
+	return s.CreateSyncJob(ctx, organizationID, connectionID, models.JobTypeFullSync, params)
+}
+
+// CreateTransactionSyncJob creates a job to sync transactions for a specific date range
+func (s *SyncService) CreateTransactionSyncJob(ctx context.Context, organizationID, connectionID uuid.UUID, startDate, endDate *time.Time, forceSync bool) (*models.Job, error) {
+	params := models.SyncTransactionsParams{
+		StartDate: startDate,
+		EndDate:   endDate,
+		ForceSync: forceSync,
+	}
+
+	return s.CreateSyncJob(ctx, organizationID, connectionID, models.JobTypeSyncTransactions, params)
+}
+
+// ProcessJob processes a sync job
+func (s *SyncService) ProcessJob(ctx context.Context, job *models.Job, workerID string) error {
+	log.Printf("Processing job %s (type: %s) with worker %s", job.ID, job.Type, workerID)
+
+	// Update job progress
+	err := s.jobService.UpdateJobProgress(ctx, job.ID, 0, 100, "Starting sync...")
+	if err != nil {
+		log.Printf("Warning: failed to update job progress: %v", err)
+	}
+
+	// Get provider connection
+	if job.ProviderConnectionID == nil {
+		return fmt.Errorf("job has no provider connection ID")
+	}
+
+	var connection models.ProviderConnection
+	err = s.db.GetContext(ctx, &connection,
+		`SELECT * FROM provider_connections WHERE id = $1`,
+		*job.ProviderConnectionID)
+	if err != nil {
+		return fmt.Errorf("failed to get provider connection: %w", err)
+	}
+
+	// Get provider
+	provider, exists := s.providers[connection.ProviderType]
+	if !exists {
+		return fmt.Errorf("provider %s not registered", connection.ProviderType)
+	}
+
+	// Process based on job type
+	switch job.Type {
+	case models.JobTypeFullSync:
+		return s.processFullSync(ctx, job, provider, connection, workerID)
+	case models.JobTypeSyncTransactions:
+		return s.processTransactionSync(ctx, job, provider, connection, workerID)
+	case models.JobTypeSyncAccounts:
+		return s.processAccountSync(ctx, job, provider, connection, workerID)
+	case models.JobTypeTestConnection:
+		return s.processTestConnection(ctx, job, provider, connection, workerID)
+	default:
+		return fmt.Errorf("unknown job type: %s", job.Type)
+	}
+}
+
+// processFullSync handles full synchronization
+func (s *SyncService) processFullSync(ctx context.Context, job *models.Job, provider provider.Provider, connection models.ProviderConnection, workerID string) error {
+	var params models.FullSyncParams
+	err := json.Unmarshal(job.Parameters, &params)
+	if err != nil {
+		return fmt.Errorf("failed to parse full sync parameters: %w", err)
+	}
+
+	// Step 1: Sync accounts (25% of progress)
+	err = s.jobService.UpdateJobProgress(ctx, job.ID, 10, 100, "Syncing accounts...")
+	if err != nil {
+		log.Printf("Warning: failed to update job progress: %v", err)
+	}
+
+	accounts, err := s.syncAccountsForConnection(ctx, provider, connection)
+	if err != nil {
+		return fmt.Errorf("failed to sync accounts: %w", err)
+	}
+
+	err = s.jobService.UpdateJobProgress(ctx, job.ID, 25, 100, fmt.Sprintf("Synced %d accounts", len(accounts)))
+	if err != nil {
+		log.Printf("Warning: failed to update job progress: %v", err)
+	}
+
+	// Step 2: Sync transactions for each account (75% of progress)
+	totalAccounts := len(accounts)
+	processedAccounts := 0
+
+	for _, account := range accounts {
+		if !account.IsActive {
+			continue // Skip inactive accounts
+		}
+
+		err = s.jobService.UpdateJobProgress(ctx, job.ID, 
+			25 + (processedAccounts * 75 / totalAccounts), 100, 
+			fmt.Sprintf("Syncing transactions for account %s...", account.Name))
+		if err != nil {
+			log.Printf("Warning: failed to update job progress: %v", err)
+		}
+
+		// Determine date range for transaction sync
+		startDate := params.StartDate
+		if startDate == nil && params.IncludeHistory {
+			// Default to 90 days of history
+			defaultStart := time.Now().AddDate(0, 0, -90)
+			startDate = &defaultStart
+		} else if startDate == nil {
+			// Default to last sync or 30 days
+			if account.LastSync != nil {
+				startDate = account.LastSync
+			} else {
+				defaultStart := time.Now().AddDate(0, 0, -30)
+				startDate = &defaultStart
+			}
+		}
+
+		endDate := time.Now()
+
+		_, err = s.syncTransactionsForAccount(ctx, provider, connection, account, *startDate, endDate, params.ForceSync)
+		if err != nil {
+			log.Printf("Warning: failed to sync transactions for account %s: %v", account.ID, err)
+			// Continue with other accounts rather than failing the entire job
+		}
+
+		processedAccounts++
+	}
+
+	// Update connection last sync
+	_, err = s.db.ExecContext(ctx,
+		`UPDATE provider_connections SET last_sync = NOW(), sync_status = 'success', error_message = NULL WHERE id = $1`,
+		connection.ID)
+	if err != nil {
+		log.Printf("Warning: failed to update connection sync status: %v", err)
+	}
+
+	// Complete job
+	result := map[string]interface{}{
+		"accounts_synced": len(accounts),
+		"accounts_processed": processedAccounts,
+	}
+	resultBytes, _ := json.Marshal(result)
+
+	return s.jobService.CompleteJob(ctx, job.ID, models.JobStatusCompleted, resultBytes, "")
+}
+
+// processTransactionSync handles transaction synchronization
+func (s *SyncService) processTransactionSync(ctx context.Context, job *models.Job, provider provider.Provider, connection models.ProviderConnection, workerID string) error {
+	var params models.SyncTransactionsParams
+	err := json.Unmarshal(job.Parameters, &params)
+	if err != nil {
+		return fmt.Errorf("failed to parse transaction sync parameters: %w", err)
+	}
+
+	// Get accounts for this connection
+	var accounts []models.BankAccount
+	err = s.db.SelectContext(ctx, &accounts,
+		`SELECT * FROM bank_accounts WHERE provider_connection_id = $1 AND is_active = true`,
+		connection.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get accounts: %w", err)
+	}
+
+	totalAccounts := len(accounts)
+	processedAccounts := 0
+	totalTransactions := 0
+
+	// Determine date range
+	startDate := time.Now().AddDate(0, 0, -30) // Default to 30 days
+	if params.StartDate != nil {
+		startDate = *params.StartDate
+	}
+
+	endDate := time.Now()
+	if params.EndDate != nil {
+		endDate = *params.EndDate
+	}
+
+	for _, account := range accounts {
+		err = s.jobService.UpdateJobProgress(ctx, job.ID,
+			(processedAccounts * 100 / totalAccounts), 100,
+			fmt.Sprintf("Syncing transactions for account %s...", account.Name))
+		if err != nil {
+			log.Printf("Warning: failed to update job progress: %v", err)
+		}
+
+		transactions, err := s.syncTransactionsForAccount(ctx, provider, connection, account, startDate, endDate, params.ForceSync)
+		if err != nil {
+			log.Printf("Warning: failed to sync transactions for account %s: %v", account.ID, err)
+		} else {
+			totalTransactions += len(transactions)
+		}
+
+		processedAccounts++
+	}
+
+	// Complete job
+	result := map[string]interface{}{
+		"accounts_processed": processedAccounts,
+		"transactions_synced": totalTransactions,
+		"start_date": startDate,
+		"end_date": endDate,
+	}
+	resultBytes, _ := json.Marshal(result)
+
+	return s.jobService.CompleteJob(ctx, job.ID, models.JobStatusCompleted, resultBytes, "")
+}
+
+// processAccountSync handles account synchronization
+func (s *SyncService) processAccountSync(ctx context.Context, job *models.Job, provider provider.Provider, connection models.ProviderConnection, workerID string) error {
+	accounts, err := s.syncAccountsForConnection(ctx, provider, connection)
+	if err != nil {
+		return fmt.Errorf("failed to sync accounts: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"accounts_synced": len(accounts),
+	}
+	resultBytes, _ := json.Marshal(result)
+
+	return s.jobService.CompleteJob(ctx, job.ID, models.JobStatusCompleted, resultBytes, "")
+}
+
+// processTestConnection handles connection testing
+func (s *SyncService) processTestConnection(ctx context.Context, job *models.Job, provider provider.Provider, connection models.ProviderConnection, workerID string) error {
+	// Test connection
+	err = s.jobService.UpdateJobProgress(ctx, job.ID, 50, 100, "Testing connection...")
+	if err != nil {
+		log.Printf("Warning: failed to update job progress: %v", err)
+	}
+
+	// This would depend on provider interface - assuming it has a test method
+	// For now, we'll just try to list accounts as a test
+	_, err = provider.ListAccounts(ctx, connection.Credentials)
+	if err != nil {
+		return fmt.Errorf("connection test failed: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"status": "healthy",
+		"tested_at": time.Now(),
+	}
+	resultBytes, _ := json.Marshal(result)
+
+	return s.jobService.CompleteJob(ctx, job.ID, models.JobStatusCompleted, resultBytes, "")
+}
+
+// Helper functions
+
+func (s *SyncService) syncAccountsForConnection(ctx context.Context, provider provider.Provider, connection models.ProviderConnection) ([]models.BankAccount, error) {
+	// This would implement the actual account syncing logic
+	// For now, return empty slice as placeholder
+	return []models.BankAccount{}, nil
+}
+
+func (s *SyncService) syncTransactionsForAccount(ctx context.Context, provider provider.Provider, connection models.ProviderConnection, account models.BankAccount, startDate, endDate time.Time, forceSync bool) ([]models.Transaction, error) {
+	// This would implement the actual transaction syncing logic
+	// For now, return empty slice as placeholder
+	return []models.Transaction{}, nil
+}
+
+func (s *SyncService) getJobTitle(jobType models.JobType, connectionName string) string {
+	switch jobType {
+	case models.JobTypeFullSync:
+		return fmt.Sprintf("Full sync for %s", connectionName)
+	case models.JobTypeSyncTransactions:
+		return fmt.Sprintf("Sync transactions for %s", connectionName)
+	case models.JobTypeSyncAccounts:
+		return fmt.Sprintf("Sync accounts for %s", connectionName)
+	case models.JobTypeTestConnection:
+		return fmt.Sprintf("Test connection for %s", connectionName)
+	default:
+		return fmt.Sprintf("Sync job for %s", connectionName)
+	}
+}
+
+func (s *SyncService) getJobDescription(jobType models.JobType, connectionName string) *string {
+	var desc string
+	switch jobType {
+	case models.JobTypeFullSync:
+		desc = "Synchronize both accounts and transactions from the financial provider"
+	case models.JobTypeSyncTransactions:
+		desc = "Synchronize transaction data from the financial provider"
+	case models.JobTypeSyncAccounts:
+		desc = "Synchronize account information from the financial provider"
+	case models.JobTypeTestConnection:
+		desc = "Test connectivity and authentication with the financial provider"
+	default:
+		desc = "Synchronize data from the financial provider"
+	}
+	return &desc
+}

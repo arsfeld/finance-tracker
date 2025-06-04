@@ -1,0 +1,318 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/spf13/cobra"
+	"finance_tracker/src/internal/config"
+	"finance_tracker/src/internal/models"
+	"finance_tracker/src/internal/services"
+	"finance_tracker/src/providers/simplefin"
+)
+
+// SyncWorker manages background job processing
+type SyncWorker struct {
+	workerID       string
+	db             *sqlx.DB
+	jobService     *services.JobService
+	workerService  *services.WorkerService
+	syncService    *services.SyncService
+	maxConcurrent  int
+	pollInterval   time.Duration
+	heartbeatInterval time.Duration
+	
+	// Worker state
+	ctx            context.Context
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
+	currentJobs    sync.Map
+	isShuttingDown bool
+	mutex          sync.RWMutex
+}
+
+// NewSyncWorker creates a new sync worker
+func NewSyncWorker(db *sqlx.DB, maxConcurrent int) *SyncWorker {
+	workerID := fmt.Sprintf("worker-%s-%d", uuid.New().String()[:8], os.Getpid())
+	
+	jobService := services.NewJobService(db)
+	workerService := services.NewWorkerService(db)
+	syncService := services.NewSyncService(db, jobService)
+	
+	// Register providers
+	simpleFinProvider := simplefin.NewProvider()
+	syncService.RegisterProvider("simplefin", simpleFinProvider)
+	
+	ctx, cancel := context.WithCancel(context.Background())
+	
+	return &SyncWorker{
+		workerID:          workerID,
+		db:                db,
+		jobService:        jobService,
+		workerService:     workerService,
+		syncService:       syncService,
+		maxConcurrent:     maxConcurrent,
+		pollInterval:      5 * time.Second,
+		heartbeatInterval: 30 * time.Second,
+		ctx:               ctx,
+		cancel:            cancel,
+	}
+}
+
+// Start starts the worker
+func (w *SyncWorker) Start() error {
+	log.Printf("Starting sync worker %s with max concurrency %d", w.workerID, w.maxConcurrent)
+	
+	// Register worker
+	err := w.workerService.RegisterWorker(w.ctx, w.workerID, w.maxConcurrent)
+	if err != nil {
+		return fmt.Errorf("failed to register worker: %w", err)
+	}
+	
+	// Start heartbeat routine
+	w.wg.Add(1)
+	go w.heartbeatLoop()
+	
+	// Start job polling routine
+	w.wg.Add(1)
+	go w.jobPollLoop()
+	
+	// Wait for shutdown signal
+	w.waitForShutdown()
+	
+	return nil
+}
+
+// Stop stops the worker gracefully
+func (w *SyncWorker) Stop() {
+	w.mutex.Lock()
+	if w.isShuttingDown {
+		w.mutex.Unlock()
+		return
+	}
+	w.isShuttingDown = true
+	w.mutex.Unlock()
+	
+	log.Printf("Shutting down worker %s...", w.workerID)
+	
+	// Update worker status
+	err := w.workerService.UpdateWorkerStatus(w.ctx, w.workerID, "stopping")
+	if err != nil {
+		log.Printf("Warning: failed to update worker status: %v", err)
+	}
+	
+	// Cancel context to stop all routines
+	w.cancel()
+	
+	// Wait for all routines to finish
+	w.wg.Wait()
+	
+	// Remove worker from registry
+	err = w.workerService.RemoveWorker(context.Background(), w.workerID)
+	if err != nil {
+		log.Printf("Warning: failed to remove worker: %v", err)
+	}
+	
+	log.Printf("Worker %s stopped", w.workerID)
+}
+
+// heartbeatLoop sends periodic heartbeats
+func (w *SyncWorker) heartbeatLoop() {
+	defer w.wg.Done()
+	
+	ticker := time.NewTicker(w.heartbeatInterval)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-w.ctx.Done():
+			return
+		case <-ticker.C:
+			err := w.workerService.UpdateHeartbeat(w.ctx, w.workerID)
+			if err != nil {
+				log.Printf("Warning: failed to update heartbeat: %v", err)
+			}
+		}
+	}
+}
+
+// jobPollLoop polls for new jobs and processes them
+func (w *SyncWorker) jobPollLoop() {
+	defer w.wg.Done()
+	
+	ticker := time.NewTicker(w.pollInterval)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-w.ctx.Done():
+			return
+		case <-ticker.C:
+			w.processAvailableJobs()
+		}
+	}
+}
+
+// processAvailableJobs checks for available jobs and processes them
+func (w *SyncWorker) processAvailableJobs() {
+	w.mutex.RLock()
+	if w.isShuttingDown {
+		w.mutex.RUnlock()
+		return
+	}
+	w.mutex.RUnlock()
+	
+	// Count current jobs
+	currentJobCount := 0
+	w.currentJobs.Range(func(key, value interface{}) bool {
+		currentJobCount++
+		return true
+	})
+	
+	// Check if we can accept more jobs
+	if currentJobCount >= w.maxConcurrent {
+		return
+	}
+	
+	// Update worker job count
+	err := w.workerService.UpdateWorkerJobCount(w.ctx, w.workerID, currentJobCount)
+	if err != nil {
+		log.Printf("Warning: failed to update worker job count: %v", err)
+	}
+	
+	// Get available jobs
+	availableSlots := w.maxConcurrent - currentJobCount
+	for i := 0; i < availableSlots; i++ {
+		job, err := w.jobService.GetNextJob(w.ctx, w.workerID)
+		if err != nil {
+			log.Printf("Warning: failed to get next job: %v", err)
+			break
+		}
+		
+		if job == nil {
+			break // No more jobs available
+		}
+		
+		// Process job in background
+		w.wg.Add(1)
+		go w.processJob(job)
+	}
+}
+
+// processJob processes a single job
+func (w *SyncWorker) processJob(job *models.Job) {
+	defer w.wg.Done()
+	
+	// Track this job
+	w.currentJobs.Store(job.ID, job)
+	defer w.currentJobs.Delete(job.ID)
+	
+	log.Printf("Processing job %s (type: %s)", job.ID, job.Type)
+	
+	// Process the job
+	err := w.syncService.ProcessJob(w.ctx, job, w.workerID)
+	if err != nil {
+		log.Printf("Job %s failed: %v", job.ID, err)
+		
+		// Complete job with error
+		err = w.jobService.CompleteJob(w.ctx, job.ID, models.JobStatusFailed, nil, err.Error())
+		if err != nil {
+			log.Printf("Warning: failed to mark job as failed: %v", err)
+		}
+		
+		// Try to retry the job if it's eligible
+		if job.CanRetry() {
+			_, retryErr := w.jobService.RetryJob(w.ctx, job.ID)
+			if retryErr != nil {
+				log.Printf("Warning: failed to create retry job: %v", retryErr)
+			} else {
+				log.Printf("Created retry job for %s", job.ID)
+			}
+		}
+	} else {
+		log.Printf("Job %s completed successfully", job.ID)
+	}
+}
+
+// waitForShutdown waits for shutdown signals
+func (w *SyncWorker) waitForShutdown() {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	
+	select {
+	case sig := <-sigChan:
+		log.Printf("Received signal %v", sig)
+		w.Stop()
+	case <-w.ctx.Done():
+		// Context cancelled
+	}
+}
+
+// syncCmd creates the sync command
+func syncCmd() *cobra.Command {
+	var (
+		maxConcurrent int
+		daemon        bool
+	)
+	
+	cmd := &cobra.Command{
+		Use:   "sync",
+		Short: "Run sync worker to process background jobs",
+		Long: `Run a background worker that processes sync jobs for financial data.
+		
+The sync worker polls for pending jobs and processes them asynchronously.
+It handles transaction syncing, account syncing, and connection testing.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Initialize database connection
+			supabaseClient, err := config.NewSupabaseServiceClient()
+			if err != nil {
+				return fmt.Errorf("failed to initialize Supabase client: %w", err)
+			}
+			
+			db := supabaseClient.DB
+			
+			// Create and start worker
+			worker := NewSyncWorker(db, maxConcurrent)
+			
+			if daemon {
+				log.Println("Running in daemon mode...")
+				// In daemon mode, run indefinitely until stopped
+				return worker.Start()
+			} else {
+				// In single-run mode, process available jobs once
+				log.Println("Running in single-run mode...")
+				ctx := context.Background()
+				
+				// Register worker temporarily
+				err := worker.workerService.RegisterWorker(ctx, worker.workerID, maxConcurrent)
+				if err != nil {
+					return fmt.Errorf("failed to register worker: %w", err)
+				}
+				defer worker.workerService.RemoveWorker(ctx, worker.workerID)
+				
+				// Process available jobs once
+				worker.processAvailableJobs()
+				
+				log.Println("Single-run sync completed")
+				return nil
+			}
+		},
+	}
+	
+	cmd.Flags().IntVarP(&maxConcurrent, "max-concurrent", "c", 2, "Maximum number of concurrent jobs")
+	cmd.Flags().BoolVarP(&daemon, "daemon", "d", false, "Run as daemon (continuous mode)")
+	
+	return cmd
+}
+
+// Add the sync command to root command in main.go
+func init() {
+	rootCmd.AddCommand(syncCmd())
+}

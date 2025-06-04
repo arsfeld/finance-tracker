@@ -50,7 +50,7 @@ func sendNtfyNotification(settings *Settings, message string, notificationTopic 
 	}
 
 	req.Header.Set("Content-Type", "text/plain")
-	req.Header.Set("Title", "💰 Finance Tracker")
+	req.Header.Set("Title", "💰 WalletMind")
 
 	// Update request body with plain text message
 	req.Body = io.NopCloser(bytes.NewBuffer([]byte(plainMessage)))
@@ -161,7 +161,7 @@ func generateEmailHTML(message string, transactions []Transaction) (string, erro
 <body>
     <div class="container">
         <div class="header">
-            <img src="https://raw.githubusercontent.com/arsfeld/finance-tracker/refs/heads/main/logo.jpg" class="logo" alt="Finance Tracker Logo">
+            <img src="https://raw.githubusercontent.com/arsfeld/finance-tracker/refs/heads/main/logo.jpg" class="logo" alt="WalletMind Logo">
             <div class="title">Transaction Summary</div>
         </div>
         
@@ -284,7 +284,7 @@ func sendEmailNotification(settings *Settings, message string, transactions []Tr
 	headers := make(map[string]string)
 	headers["From"] = *settings.MailerFrom
 	headers["To"] = *settings.MailerTo
-	headers["Subject"] = "Finance Tracker - Transaction Summary"
+	headers["Subject"] = "WalletMind - Transaction Summary"
 	headers["MIME-Version"] = "1.0"
 	headers["Content-Type"] = "text/html; charset=UTF-8"
 

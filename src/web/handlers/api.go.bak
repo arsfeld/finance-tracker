@@ -1,0 +1,832 @@
+package handlers
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
+
+	"finance_tracker/src/internal/auth"
+	"finance_tracker/src/internal/config"
+	"finance_tracker/src/providers"
+	"finance_tracker/src/providers/simplefin"
+)
+
+// APIHandlers contains API endpoint handlers
+type APIHandlers struct {
+	client *config.Client
+}
+
+// checkSupabaseAvailable checks if Supabase service client is configured
+func (h *APIHandlers) checkSupabaseAvailable(w http.ResponseWriter, r *http.Request) bool {
+	if h.client.Service == nil {
+		logAndError(w, r, "Database not configured. Please set SUPABASE_SERVICE_KEY environment variable.", http.StatusServiceUnavailable)
+		return false
+	}
+	return true
+}
+
+// NewAPIHandlers creates a new API handlers instance
+func NewAPIHandlers(client *config.Client) *APIHandlers {
+	return &APIHandlers{
+		client: client,
+	}
+}
+
+// Transaction represents a financial transaction for API responses
+type Transaction struct {
+	ID          string    `json:"id"`
+	Date        time.Time `json:"date"`
+	Amount      float64   `json:"amount"`
+	Description string    `json:"description"`
+	Category    string    `json:"category,omitempty"`
+	AccountID   string    `json:"account_id"`
+	AccountName string    `json:"account_name"`
+	Merchant    string    `json:"merchant,omitempty"`
+	Pending     bool      `json:"pending"`
+}
+
+// Account represents a financial account for API responses
+type Account struct {
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	Type          string    `json:"type"`
+	Balance       float64   `json:"balance"`
+	Currency      string    `json:"currency"`
+	LastSyncDate  time.Time `json:"last_sync_date"`
+	IsActive      bool      `json:"is_active"`
+	ProviderID    string    `json:"provider_id"`
+	ProviderName  string    `json:"provider_name"`
+}
+
+// DashboardStats represents dashboard statistics
+type DashboardStats struct {
+	TotalBalance     float64 `json:"total_balance"`
+	MonthlySpending  float64 `json:"monthly_spending"`
+	TransactionCount int     `json:"transaction_count"`
+	AccountCount     int     `json:"account_count"`
+}
+
+// HandleGetTransactions returns paginated transactions for the current organization
+func (h *APIHandlers) HandleGetTransactions(w http.ResponseWriter, r *http.Request) {
+	// Get user and organization from context
+	user := auth.GetUser(r.Context())
+	orgID := auth.GetOrganization(r.Context())
+	if user == nil || orgID.String() == "00000000-0000-0000-0000-000000000000" {
+		respondWithError(w, r, http.StatusUnauthorized, "Unauthorized", nil)
+		return
+	}
+
+	// Parse query parameters
+	limit := 50 // default
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
+			limit = parsed
+		}
+	}
+
+	offset := 0
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	// Parse query parameters (not used currently, but preserved for future implementation)
+	_ = r.URL.Query().Get("search")
+	_ = r.URL.Query().Get("category")
+	_ = r.URL.Query().Get("account_id")
+
+	// Query real transactions from database
+	var transactions []Transaction
+	
+	// For now, return empty array since we're removing mock data
+	// The database tables exist but may not have real data yet
+	transactions = []Transaction{}
+
+	// Check if this is an HTMX request for HTML response
+	if r.Header.Get("HX-Request") == "true" {
+		h.renderTransactionListHTML(w, transactions)
+		return
+	}
+
+	// Regular JSON response
+	response := map[string]interface{}{
+		"transactions": transactions,
+		"pagination": map[string]interface{}{
+			"limit":  limit,
+			"offset": offset,
+			"total":  len(transactions), // TODO: Get actual count from DB
+		},
+	}
+
+	respondWithJSON(w, r, http.StatusOK, response)
+}
+
+// HandleGetRecentTransactions returns recent transactions for dashboard
+func (h *APIHandlers) HandleGetRecentTransactions(w http.ResponseWriter, r *http.Request) {
+	// Get user and organization from context
+	user := auth.GetUser(r.Context())
+	orgID := auth.GetOrganization(r.Context())
+	if user == nil || orgID.String() == "00000000-0000-0000-0000-000000000000" {
+		respondWithError(w, r, http.StatusUnauthorized, "Unauthorized", nil)
+		return
+	}
+
+	// Get recent transactions (last 10) - return empty for now
+	transactions := []Transaction{}
+
+	// Return HTML for HTMX
+	if r.Header.Get("HX-Request") == "true" {
+		h.renderRecentTransactionsHTML(w, transactions)
+		return
+	}
+
+	// JSON response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(transactions)
+}
+
+// HandleGetAccounts returns accounts for the current organization
+func (h *APIHandlers) HandleGetAccounts(w http.ResponseWriter, r *http.Request) {
+	// Get user and organization from context
+	user := auth.GetUser(r.Context())
+	orgID := auth.GetOrganization(r.Context())
+	if user == nil || orgID.String() == "00000000-0000-0000-0000-000000000000" {
+		respondWithError(w, r, http.StatusUnauthorized, "Unauthorized", nil)
+		return
+	}
+
+	// Return empty accounts array for now
+	accounts := []Account{}
+
+	// Check if this is an HTMX request
+	if r.Header.Get("HX-Request") == "true" {
+		h.renderAccountListHTML(w, accounts)
+		return
+	}
+
+	// JSON response
+	respondWithJSON(w, r, http.StatusOK, accounts)
+}
+
+// HandleGetDashboardStats returns dashboard statistics
+func (h *APIHandlers) HandleGetDashboardStats(w http.ResponseWriter, r *http.Request) {
+	// Get user and organization from context
+	user := auth.GetUser(r.Context())
+	orgID := auth.GetOrganization(r.Context())
+	if user == nil || orgID.String() == "00000000-0000-0000-0000-000000000000" {
+		respondWithError(w, r, http.StatusUnauthorized, "Unauthorized", nil)
+		return
+	}
+
+	// Return empty/zero stats for now since we're removing mock data
+	stats := DashboardStats{
+		TotalBalance:     0.0,
+		MonthlySpending:  0.0,
+		TransactionCount: 0,
+		AccountCount:     0,
+	}
+
+	// Return HTML for HTMX
+	if r.Header.Get("HX-Request") == "true" {
+		h.renderDashboardStatsHTML(w, stats)
+		return
+	}
+
+	// JSON response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
+// HandleGetTransactionDetail returns detailed information about a specific transaction
+func (h *APIHandlers) HandleGetTransactionDetail(w http.ResponseWriter, r *http.Request) {
+	// Get user and organization from context
+	user := auth.GetUser(r.Context())
+	orgID := auth.GetOrganization(r.Context())
+	if user == nil || orgID.String() == "00000000-0000-0000-0000-000000000000" {
+		respondWithError(w, r, http.StatusUnauthorized, "Unauthorized", nil)
+		return
+	}
+
+	transactionID := chi.URLParam(r, "transactionID")
+	if transactionID == "" {
+		respondWithError(w, r, http.StatusBadRequest, "Transaction ID is required", nil)
+		return
+	}
+
+	// Return not found for now since we're removing mock data
+	respondWithError(w, r, http.StatusNotFound, "Transaction not found", nil)
+}
+
+// HandleUpdateTransactionCategory updates the category of a transaction
+func (h *APIHandlers) HandleUpdateTransactionCategory(w http.ResponseWriter, r *http.Request) {
+	// Get user and organization from context
+	user := auth.GetUser(r.Context())
+	orgID := auth.GetOrganization(r.Context())
+	if user == nil || orgID.String() == "00000000-0000-0000-0000-000000000000" {
+		respondWithError(w, r, http.StatusUnauthorized, "Unauthorized", nil)
+		return
+	}
+
+	transactionID := chi.URLParam(r, "transactionID")
+	if transactionID == "" {
+		respondWithError(w, r, http.StatusBadRequest, "Transaction ID is required", nil)
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		Category string `json:"category"`
+	}
+	
+	// Handle both JSON and form data
+	contentType := r.Header.Get("Content-Type")
+	if strings.Contains(contentType, "application/json") {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request", http.StatusBadRequest)
+			return
+		}
+	} else {
+		// Form data from HTMX
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "Invalid request", http.StatusBadRequest)
+			return
+		}
+		req.Category = r.FormValue("category")
+	}
+
+	if req.Category == "" {
+		http.Error(w, "Category is required", http.StatusBadRequest)
+		return
+	}
+
+	// TODO: Implement real database update for transaction category
+	log.Info().
+		Str("transaction_id", transactionID).
+		Str("new_category", req.Category).
+		Str("user_id", user.ID.String()).
+		Msg("Updating transaction category")
+
+	// For now, return success since we're removing mock data
+	// In real implementation, this would update the database
+	
+	// Return updated category for HTMX
+	if r.Header.Get("HX-Request") == "true" {
+		html := fmt.Sprintf(`<span id="category-badge-%s" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">%s</span>`, transactionID, req.Category)
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(html))
+		return
+	}
+
+	// JSON response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"category": req.Category,
+	})
+}
+
+// Connection represents a provider connection for API responses
+type Connection struct {
+	ID                   string                 `json:"id"`
+	Name                 string                 `json:"name"`
+	ProviderType         string                 `json:"provider_type"`
+	CredentialsEncrypted string                 `json:"-"` // Don't expose in JSON
+	LastSync             *time.Time             `json:"last_sync"`
+	SyncStatus           string                 `json:"sync_status"`
+	ErrorMessage         *string                `json:"error_message"`
+	Settings             map[string]interface{} `json:"settings"`
+	CreatedAt            time.Time              `json:"created_at"`
+}
+
+// ConnectionAccount represents a bank account from a connection
+type ConnectionAccount struct {
+	ID                string    `json:"id"`
+	ConnectionID      string    `json:"connection_id"`
+	ProviderAccountID string    `json:"provider_account_id"`
+	Name              string    `json:"name"`
+	Institution       *string   `json:"institution"`
+	AccountType       *string   `json:"account_type"`
+	Balance           *float64  `json:"balance"`
+	Currency          string    `json:"currency"`
+	IsActive          bool      `json:"is_active"`
+	LastSync          *time.Time `json:"last_sync"`
+}
+
+// HandleGetConnections returns all provider connections for the organization
+func (h *APIHandlers) HandleGetConnections(w http.ResponseWriter, r *http.Request) {
+	user := auth.GetUser(r.Context())
+	orgID := auth.GetOrganization(r.Context())
+	if user == nil || orgID.String() == "00000000-0000-0000-0000-000000000000" {
+		respondWithError(w, r, http.StatusUnauthorized, "Unauthorized", nil)
+		return
+	}
+
+	if !h.checkSupabaseAvailable(w, r) {
+		return
+	}
+
+	// Query connections from Supabase
+	var connections []Connection
+	_, err := h.client.Service.
+		From("provider_connections").
+		Select("id, name, provider_type, last_sync, sync_status, error_message, settings, created_at", "", false).
+		Eq("organization_id", orgID.String()).
+		ExecuteTo(&connections)
+		
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to query connections")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	respondWithJSON(w, r, http.StatusOK, connections)
+}
+
+// HandleCreateConnection creates a new provider connection
+func (h *APIHandlers) HandleCreateConnection(w http.ResponseWriter, r *http.Request) {
+	user := auth.GetUser(r.Context())
+	orgID := auth.GetOrganization(r.Context())
+	if user == nil || orgID.String() == "00000000-0000-0000-0000-000000000000" {
+		respondWithError(w, r, http.StatusUnauthorized, "Unauthorized", nil)
+		return
+	}
+
+	var req struct {
+		Name         string            `json:"name"`
+		ProviderType string            `json:"provider_type"`
+		Credentials  map[string]string `json:"credentials"`
+		SetupToken   string            `json:"setup_token,omitempty"` // For initial setup
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if req.Name == "" || req.ProviderType == "" {
+		http.Error(w, "Name and provider_type are required", http.StatusBadRequest)
+		return
+	}
+
+	// Handle setup token or existing credentials
+	if req.SetupToken != "" {
+		// Use setup token to get credentials
+		req.Credentials = map[string]string{"setup_token": req.SetupToken}
+	}
+
+	// Validate name length
+	if len(req.Name) > 100 {
+		http.Error(w, "Name must be 100 characters or less", http.StatusBadRequest)
+		return
+	}
+
+	if !h.checkSupabaseAvailable(w, r) {
+		return
+	}
+
+	// Check for duplicate connection names within the organization
+	var existingConnections []Connection
+	_, err := h.client.Service.
+		From("provider_connections").
+		Select("id", "", false).
+		Eq("organization_id", orgID.String()).
+		Eq("name", req.Name).
+		ExecuteTo(&existingConnections)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to check for duplicate connection name")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	if len(existingConnections) > 0 {
+		http.Error(w, "A connection with this name already exists", http.StatusBadRequest)
+		return
+	}
+
+	// Validate credentials with provider
+	var provider providers.FinancialProvider
+	switch req.ProviderType {
+	case "simplefin":
+		provider = simplefin.NewSimpleFin()
+	default:
+		http.Error(w, "Unsupported provider type", http.StatusBadRequest)
+		return
+	}
+
+	if err := provider.ValidateCredentials(req.Credentials); err != nil {
+		if providerErr, ok := err.(*providers.ProviderError); ok {
+			switch providerErr.Code {
+				case "MISSING_CREDENTIALS":
+				respondWithError(w, r, http.StatusBadRequest, "SimpleFin setup token or access URL is required", err)
+				case "INVALID_CREDENTIALS":
+				respondWithError(w, r, http.StatusBadRequest, "Setup token must be valid base64 or access URL must be HTTPS", err)
+				default:
+				respondWithError(w, r, http.StatusBadRequest, fmt.Sprintf("Invalid credentials: %v", providerErr.Message), err)
+			}
+		} else {
+			respondWithError(w, r, http.StatusBadRequest, fmt.Sprintf("Invalid credentials: %v", err), err)
+		}
+		return
+	}
+
+	// If we have a setup token, exchange it for access URL
+	if setupToken, ok := req.Credentials["setup_token"]; ok && setupToken != "" {
+		simplefinProvider, ok := provider.(*simplefin.SimpleFin)
+		if !ok {
+			http.Error(w, "Setup token only supported for SimpleFin provider", http.StatusBadRequest)
+			return
+		}
+
+		log.Debug().Str("setup_token", setupToken[:10]+"...").Msg("Exchanging setup token for access URL")
+		
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		
+		accessURL, err := simplefinProvider.SetupTokenExchange(ctx, setupToken)
+		if err != nil {
+			if providerErr, ok := err.(*providers.ProviderError); ok {
+				log.Error().
+					Str("provider_error_code", providerErr.Code).
+					Str("provider_error_message", providerErr.Message).
+					Msg("SimpleFin setup token exchange failed")
+				http.Error(w, fmt.Sprintf("Setup failed: %s", providerErr.Message), http.StatusBadRequest)
+			} else {
+				log.Error().Err(err).Msg("Non-provider error during setup token exchange")
+				http.Error(w, fmt.Sprintf("Setup failed: %v", err), http.StatusBadRequest)
+			}
+			return
+		}
+
+		log.Debug().Str("access_url", accessURL).Msg("Setup token exchange successful")
+		
+		// Update credentials with the access URL
+		req.Credentials = map[string]string{
+			"access_url": accessURL,
+		}
+	}
+
+	// Test connection by listing accounts
+	log.Debug().
+		Str("provider_type", req.ProviderType).
+		Str("connection_name", req.Name).
+		Interface("credentials_keys", func() []string {
+			keys := make([]string, 0, len(req.Credentials))
+			for k := range req.Credentials {
+				keys = append(keys, k)
+			}
+			return keys
+		}()).
+		Msg("Testing SimpleFin connection")
+	
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	
+	accounts, err := provider.ListAccounts(ctx, req.Credentials)
+	if err != nil {
+		if providerErr, ok := err.(*providers.ProviderError); ok {
+			log.Error().
+				Str("provider_error_code", providerErr.Code).
+				Str("provider_error_message", providerErr.Message).
+				Bool("provider_retry", providerErr.Retry).
+				Msg("SimpleFin provider error")
+			
+			switch providerErr.Code {
+			case "NETWORK_ERROR":
+				http.Error(w, fmt.Sprintf("Unable to connect to SimpleFin: %s", providerErr.Message), http.StatusBadRequest)
+			case "API_ERROR":
+				http.Error(w, fmt.Sprintf("SimpleFin API error: %s", providerErr.Message), http.StatusBadRequest)
+			case "PARSE_ERROR":
+				http.Error(w, fmt.Sprintf("Unable to parse SimpleFin response: %s", providerErr.Message), http.StatusBadRequest)
+			default:
+				http.Error(w, fmt.Sprintf("SimpleFin error (%s): %s", providerErr.Code, providerErr.Message), http.StatusBadRequest)
+			}
+		} else {
+			log.Error().Err(err).Msg("Non-provider error during SimpleFin connection")
+			http.Error(w, fmt.Sprintf("Failed to connect: %v", err), http.StatusBadRequest)
+		}
+		return
+	}
+
+	if len(accounts) == 0 {
+		http.Error(w, "No accounts found. Please verify your SimpleFin setup and try again.", http.StatusBadRequest)
+		return
+	}
+
+	// Encrypt credentials (simple base64 encoding for now - use proper encryption in production)
+	credentialsJSON, _ := json.Marshal(req.Credentials)
+	encryptedCredentials := base64.StdEncoding.EncodeToString(credentialsJSON)
+
+	// Create connection record
+	connectionID := uuid.New()
+	newConnection := map[string]interface{}{
+		"id": connectionID,
+		"organization_id": orgID,
+		"provider_type": req.ProviderType,
+		"name": req.Name,
+		"credentials_encrypted": encryptedCredentials,
+		"sync_status": "success",
+	}
+	
+	var createdConnections []Connection
+	_, err = h.client.Service.
+		From("provider_connections").
+		Insert(newConnection, false, "", "*", "").
+		ExecuteTo(&createdConnections)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to create connection")
+		http.Error(w, "Failed to create connection", http.StatusInternalServerError)
+		return
+	}
+
+	// Create bank account records for discovered accounts
+	var bankAccounts []map[string]interface{}
+	for _, account := range accounts {
+		accountID := uuid.New()
+		bankAccount := map[string]interface{}{
+			"id": accountID,
+			"organization_id": orgID,
+			"connection_id": connectionID,
+			"provider_account_id": account.ID,
+			"name": account.Name,
+			"institution": account.Institution,
+			"account_type": account.Type,
+			"balance": account.Balance,
+			"currency": account.Currency,
+			"is_active": false,
+		}
+		bankAccounts = append(bankAccounts, bankAccount)
+	}
+	
+	if len(bankAccounts) > 0 {
+		var createdAccounts []interface{}
+		for _, bankAccount := range bankAccounts {
+			_, err = h.client.Service.
+				From("bank_accounts").
+				Insert(bankAccount, false, "", "", "").
+				ExecuteTo(&createdAccounts)
+			if err != nil {
+				log.Error().Err(err).Msg("Failed to create bank account")
+				// Don't fail the entire operation if bank accounts can't be created
+			}
+		}
+	}
+
+	// Return the created connection
+	response := Connection{
+		ID:           connectionID.String(),
+		Name:         req.Name,
+		ProviderType: req.ProviderType,
+		SyncStatus:   "success",
+		CreatedAt:    time.Now(),
+	}
+
+	respondWithJSON(w, r, http.StatusCreated, response)
+}
+
+// HandleDeleteConnection deletes a provider connection
+func (h *APIHandlers) HandleDeleteConnection(w http.ResponseWriter, r *http.Request) {
+	user := auth.GetUser(r.Context())
+	orgID := auth.GetOrganization(r.Context())
+	if user == nil || orgID.String() == "00000000-0000-0000-0000-000000000000" {
+		respondWithError(w, r, http.StatusUnauthorized, "Unauthorized", nil)
+		return
+	}
+
+	if !h.checkSupabaseAvailable(w, r) {
+		return
+	}
+
+	connectionID := chi.URLParam(r, "connectionID")
+	if connectionID == "" {
+		http.Error(w, "Connection ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Delete connection (bank accounts will cascade via foreign key)
+	var deletedConnections []Connection
+	_, err := h.client.Service.
+		From("provider_connections").
+		Delete("*", "").
+		Eq("id", connectionID).
+		Eq("organization_id", orgID.String()).
+		ExecuteTo(&deletedConnections)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to delete connection")
+		http.Error(w, "Failed to delete connection", http.StatusInternalServerError)
+		return
+	}
+
+	if len(deletedConnections) == 0 {
+		http.Error(w, "Connection not found", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// HandleGetConnectionAccounts returns all bank accounts for a connection
+func (h *APIHandlers) HandleGetConnectionAccounts(w http.ResponseWriter, r *http.Request) {
+	user := auth.GetUser(r.Context())
+	orgID := auth.GetOrganization(r.Context())
+	if user == nil || orgID.String() == "00000000-0000-0000-0000-000000000000" {
+		respondWithError(w, r, http.StatusUnauthorized, "Unauthorized", nil)
+		return
+	}
+
+	if !h.checkSupabaseAvailable(w, r) {
+		return
+	}
+
+	connectionID := chi.URLParam(r, "connectionID")
+	if connectionID == "" {
+		http.Error(w, "Connection ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Query bank accounts for the connection
+	var accounts []ConnectionAccount
+	_, err := h.client.Service.
+		From("bank_accounts").
+		Select("id, provider_account_id, name, institution, account_type, balance, currency, is_active, last_sync", "", false).
+		Eq("connection_id", connectionID).
+		Eq("organization_id", orgID.String()).
+		ExecuteTo(&accounts)
+		
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to query connection accounts")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Set connection ID for all accounts
+	for i := range accounts {
+		accounts[i].ConnectionID = connectionID
+	}
+
+	respondWithJSON(w, r, http.StatusOK, accounts)
+}
+
+// HandleUpdateAccountStatus toggles the active status of a bank account
+func (h *APIHandlers) HandleUpdateAccountStatus(w http.ResponseWriter, r *http.Request) {
+	user := auth.GetUser(r.Context())
+	orgID := auth.GetOrganization(r.Context())
+	if user == nil || orgID.String() == "00000000-0000-0000-0000-000000000000" {
+		respondWithError(w, r, http.StatusUnauthorized, "Unauthorized", nil)
+		return
+	}
+
+	if !h.checkSupabaseAvailable(w, r) {
+		return
+	}
+
+	accountID := chi.URLParam(r, "accountID")
+	if accountID == "" {
+		http.Error(w, "Account ID is required", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		IsActive bool `json:"is_active"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	// Update account status
+	updateData := map[string]interface{}{
+		"is_active": req.IsActive,
+	}
+	
+	var updatedAccounts []ConnectionAccount
+	_, err := h.client.Service.
+		From("bank_accounts").
+		Update(updateData, "*", "").
+		Eq("id", accountID).
+		Eq("organization_id", orgID.String()).
+		ExecuteTo(&updatedAccounts)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to update account status")
+		http.Error(w, "Failed to update account status", http.StatusInternalServerError)
+		return
+	}
+
+	if len(updatedAccounts) == 0 {
+		http.Error(w, "Account not found", http.StatusNotFound)
+		return
+	}
+
+	respondWithJSON(w, r, http.StatusOK, map[string]interface{}{
+		"success":   true,
+		"is_active": req.IsActive,
+	})
+}
+
+// HandleTestConnection tests a provider connection
+func (h *APIHandlers) HandleTestConnection(w http.ResponseWriter, r *http.Request) {
+	user := auth.GetUser(r.Context())
+	orgID := auth.GetOrganization(r.Context())
+	if user == nil || orgID.String() == "00000000-0000-0000-0000-000000000000" {
+		respondWithError(w, r, http.StatusUnauthorized, "Unauthorized", nil)
+		return
+	}
+
+	if !h.checkSupabaseAvailable(w, r) {
+		return
+	}
+
+	connectionID := chi.URLParam(r, "connectionID")
+	if connectionID == "" {
+		http.Error(w, "Connection ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get connection details
+	var connections []Connection
+	_, err := h.client.Service.
+		From("provider_connections").
+		Select("provider_type, credentials_encrypted", "", false).
+		Eq("id", connectionID).
+		Eq("organization_id", orgID.String()).
+		ExecuteTo(&connections)
+	if err != nil || len(connections) == 0 {
+		http.Error(w, "Connection not found", http.StatusNotFound)
+		return
+	}
+
+	connection := connections[0]
+
+	// Decrypt credentials
+	credentialsJSON, err := base64.StdEncoding.DecodeString(connection.CredentialsEncrypted)
+	if err != nil {
+		http.Error(w, "Failed to decrypt credentials", http.StatusInternalServerError)
+		return
+	}
+
+	var credentials map[string]string
+	if err := json.Unmarshal(credentialsJSON, &credentials); err != nil {
+		http.Error(w, "Failed to parse credentials", http.StatusInternalServerError)
+		return
+	}
+
+	// Test connection with provider
+	var provider providers.FinancialProvider
+	switch connection.ProviderType {
+	case "simplefin":
+		provider = simplefin.NewSimpleFin()
+	default:
+		http.Error(w, "Unsupported provider type", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	err = provider.HealthCheck(ctx, credentials)
+	
+	// Update connection status
+	var status string
+	var errorMessage *string
+	if err != nil {
+		status = "error"
+		errMsg := err.Error()
+		errorMessage = &errMsg
+	} else {
+		status = "success"
+		errorMessage = nil
+	}
+
+	updateData := map[string]interface{}{
+		"sync_status": status,
+		"error_message": errorMessage,
+	}
+	
+	var updatedConnections []Connection
+	_, updateErr := h.client.Service.
+		From("provider_connections").
+		Update(updateData, "*", "").
+		Eq("id", connectionID).
+		ExecuteTo(&updatedConnections)
+	if updateErr != nil {
+		log.Error().Err(updateErr).Msg("Failed to update connection status")
+	}
+
+	response := map[string]interface{}{
+		"success":       err == nil,
+		"status":        status,
+		"error_message": errorMessage,
+	}
+
+	respondWithJSON(w, r, http.StatusOK, response)
+}
+

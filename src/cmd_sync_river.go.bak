@@ -1,0 +1,139 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/spf13/cobra"
+	
+	"finance_tracker/src/internal/config"
+	"finance_tracker/src/internal/jobs"
+)
+
+// syncRiverCmd creates the sync command using River
+func syncRiverCmd() *cobra.Command {
+	var (
+		maxWorkers int
+		queues     []string
+		daemon     bool
+	)
+	
+	cmd := &cobra.Command{
+		Use:   "sync",
+		Short: "Run sync worker using River job queue",
+		Long: `Run a background worker that processes sync jobs using River job queue.
+		
+The sync worker processes jobs for transaction syncing, account syncing, and connection testing.
+It uses PostgreSQL (via River) for job persistence and management.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			
+			// Initialize Supabase client
+			supabaseClient, err := config.NewSupabaseServiceClient()
+			if err != nil {
+				return fmt.Errorf("failed to initialize Supabase client: %w", err)
+			}
+			
+			// Create pgx pool for River (River requires pgx, not database/sql)
+			pgxPool, err := pgxpool.New(ctx, supabaseClient.Database.URL)
+			if err != nil {
+				return fmt.Errorf("failed to create pgx pool: %w", err)
+			}
+			defer pgxPool.Close()
+			
+			// Initialize job client
+			jobClient, err := jobs.NewJobClient(supabaseClient.DB, pgxPool)
+			if err != nil {
+				return fmt.Errorf("failed to create job client: %w", err)
+			}
+			
+			if daemon {
+				return runRiverWorkerDaemon(ctx, jobClient)
+			} else {
+				return runRiverWorkerOnce(ctx, jobClient)
+			}
+		},
+	}
+	
+	cmd.Flags().IntVarP(&maxWorkers, "max-workers", "w", 5, "Maximum number of concurrent workers")
+	cmd.Flags().StringSliceVarP(&queues, "queues", "q", []string{"default"}, "Queues to process")
+	cmd.Flags().BoolVarP(&daemon, "daemon", "d", false, "Run as daemon (continuous mode)")
+	
+	return cmd
+}
+
+// runRiverWorkerDaemon runs the worker in daemon mode
+func runRiverWorkerDaemon(ctx context.Context, jobClient *jobs.JobClient) error {
+	log.Println("Starting River worker daemon...")
+	
+	// Create context for graceful shutdown
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	
+	// Start the River client
+	if err := jobClient.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start job client: %w", err)
+	}
+	
+	log.Println("River worker daemon started successfully")
+	
+	// Wait for shutdown signal
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	
+	select {
+	case sig := <-sigChan:
+		log.Printf("Received signal %v, shutting down...", sig)
+	case <-ctx.Done():
+		log.Println("Context cancelled, shutting down...")
+	}
+	
+	// Graceful shutdown with timeout
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+	
+	log.Println("Stopping River worker...")
+	if err := jobClient.Stop(shutdownCtx); err != nil {
+		log.Printf("Error during shutdown: %v", err)
+		return err
+	}
+	
+	log.Println("River worker stopped successfully")
+	return nil
+}
+
+// runRiverWorkerOnce processes available jobs once and exits
+func runRiverWorkerOnce(ctx context.Context, jobClient *jobs.JobClient) error {
+	log.Println("Running River worker in single-run mode...")
+	
+	// Create a context with timeout for single run
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	
+	// Start the client
+	if err := jobClient.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start job client: %w", err)
+	}
+	
+	// Wait a bit for jobs to be processed
+	time.Sleep(10 * time.Second)
+	
+	// Stop the client
+	if err := jobClient.Stop(ctx); err != nil {
+		return fmt.Errorf("failed to stop job client: %w", err)
+	}
+	
+	log.Println("Single-run sync completed")
+	return nil
+}
+
+// Add to main.go init function
+func init() {
+	rootCmd.AddCommand(syncRiverCmd())
+}

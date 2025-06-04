@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WalletMind</title>
+    
+    <!-- Vite will inject CSS here in production -->
+    {{ if .isDevelopment }}
+        <script type="module">
+            import RefreshRuntime from 'http://{{ .viteHost }}:5173/@react-refresh'
+            RefreshRuntime.injectIntoGlobalHook(window)
+            window.$RefreshReg$ = () => {}
+            window.$RefreshSig$ = () => (type) => type
+            window.__vite_plugin_react_preamble_installed__ = true
+        </script>
+        <script type="module" src="http://{{ .viteHost }}:5173/@vite/client"></script>
+    {{ else }}
+        <link rel="stylesheet" href="/build/assets/app-Di6yz4oI.css">
+    {{ end }}
+    
+    {{ .inertiaHead }}
+</head>
+<body>
+    {{ .inertia }}
+    
+    <!-- Vite will inject JS here -->
+    {{ if .isDevelopment }}
+        <script type="module" src="http://{{ .viteHost }}:5173/js/app.tsx"></script>
+    {{ else }}
+        <script type="module" src="/build/assets/app.js"></script>
+    {{ end }}
+</body>
+</html>

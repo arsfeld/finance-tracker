@@ -1,136 +1,164 @@
-# Finance Tracker
+# WalletMind 🧠💰
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/arsfeld/finance-tracker/refs/heads/main/logo.jpg" alt="Logo" width="200" height="200">
+  <img src="https://raw.githubusercontent.com/arsfeld/finance-tracker/refs/heads/main/logo.jpg" alt="WalletMind Logo" width="200" height="200">
+  
+  **Your AI-Powered Financial Intelligence Platform**
+  
+  [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+  [![Go Version](https://img.shields.io/badge/go-1.21+-00ADD8.svg)](https://go.dev/)
+  [![Supabase](https://img.shields.io/badge/Supabase-3.0-3ECF8E.svg)](https://supabase.com)
+  
+  [Features](#features) • [Getting Started](#getting-started) • [Documentation](#documentation) • [Contributing](#contributing)
 </div>
 
-A smart and friendly tool that helps you keep track of your finances using AI! This tool connects to your SimpleFin account, analyzes your transactions, and provides insights about your spending patterns.
+---
 
-## ✨ Features
+## 🎯 What is WalletMind?
 
-- 🤖 AI-powered analysis of your spending habits
-- 📊 Multiple date range options for analysis
-- 📱 Multiple notification channels:
-  - 📧 Email
-  - 🔔 Ntfy
-- 💾 Smart caching to prevent duplicate notifications
-- 🔍 Detailed transaction analysis
-- 🎯 Customizable date ranges
+WalletMind transforms how you understand and manage your money by combining automatic bank synchronization with conversational AI. Simply ask questions about your finances in plain English and get intelligent, actionable insights.
+
+### 🌟 Key Features
+
+- **🤖 AI-Powered Chat**: Ask questions like "How much did I spend on dining last month?"
+- **🏦 Multi-Bank Support**: Connect all your accounts in one place
+- **👥 Collaborative**: Share financial insights with family or team members
+- **📊 Smart Analytics**: Automatic categorization and spending trends
+- **🔔 Intelligent Alerts**: Get notified about unusual transactions or spending patterns
+- **🔒 Bank-Level Security**: Your data is encrypted and never shared
 
 ## 🚀 Getting Started
 
 ### Prerequisites
 
-- Go 1.x or later
-- A SimpleFin account
-- (Optional) Ntfy account for push notifications
-- (Optional) Logo image hosted at a publicly accessible URL for email templates
+- Go 1.21 or later
+- A Supabase account (free tier available)
+- A SimpleFin account for bank connections
 
-### 🔧 Configuration
+### Quick Start
 
-Create a `.env` file in your project root with the following variables:
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/yourusername/walletmind.git
+   cd walletmind
+   ```
 
-```env
-# Required
-SIMPLEFIN_BRIDGE_URL=your_simplefin_bridge_url
-OPENROUTER_URL=your_openrouter_url
-OPENROUTER_API_KEY=your_openrouter_api_key
-OPENROUTER_MODEL=your_preferred_model
+2. **Set up Supabase**
+   - Create a project at [supabase.com](https://supabase.com)
+   - Run the migrations from `docs/SUPABASE_SETUP.md`
 
-# Optional - for email notifications
-MAILER_URL=your_mailer_url
-MAILER_FROM=your_sender_email
-MAILER_TO=recipient_email
+3. **Configure environment**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your credentials
+   ```
 
-# Optional - for Ntfy notifications
-NTFY_TOPIC=your_ntfy_topic
+4. **Run the application**
+   ```bash
+   go run src/main.go web
+   ```
+
+5. **Visit http://localhost:8080**
+
+## 📚 Documentation
+
+- [Product Overview](docs/PRODUCT.md) - Vision, mission, and strategy
+- [Features Specification](docs/FEATURES.md) - Detailed feature list and priorities
+- [Product Roadmap](docs/ROADMAP.md) - Development timeline and milestones
+- [Architecture](docs/ARCHITECTURE.md) - Technical architecture and design
+- [API Documentation](docs/API.md) - REST API reference
+- [Database Schema](docs/DATABASE.md) - Data model and relationships
+- [Supabase Setup](docs/SUPABASE_SETUP.md) - Database setup instructions
+
+## 🏗️ Architecture Overview
+
+```
+WalletMind
+├── 🧠 AI Layer (OpenRouter)
+│   ├── Natural language processing
+│   ├── Financial insights generation
+│   └── Anomaly detection
+├── 🔄 Sync Layer (Go)
+│   ├── Bank connections (SimpleFin)
+│   ├── Transaction processing
+│   └── Background workers
+├── 💾 Data Layer (Supabase)
+│   ├── PostgreSQL database
+│   ├── Row Level Security
+│   └── Real-time subscriptions
+└── 🎨 UI Layer (Inertia.js + React)
+    ├── Modern SPA experience
+    ├── Server-side routing
+    └── Real-time updates
 ```
 
-### 🏗️ Building
+## 🤝 Contributing
 
-To build the application, run:
+We love contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Development Setup
 
 ```bash
-go build -o finance_tracker ./src
+# Install dependencies
+go mod download
+
+# Run tests
+go test ./...
+
+# Run linter
+golangci-lint run
+
+# Start development server
+just run
 ```
 
-### 🎮 Running
+## 🗺️ Roadmap
 
-The application supports various command-line flags to customize its behavior:
+### Currently Working On (Q1 2025)
+- [x] Multi-tenant architecture
+- [x] Supabase integration
+- [ ] AI chat interface
+- [ ] SimpleFin bank sync
+- [ ] Basic analytics dashboard
 
-```bash
-./finance_tracker [flags]
-```
+### Coming Soon
+- [ ] Mobile apps (iOS & Android)
+- [ ] Investment tracking
+- [ ] Tax optimization features
+- [ ] API for developers
 
-Available flags:
-- `-n, --notifications`: Notification types to send (default: ["email", "ntfy"])
-- `--disable-notifications`: Disable all notifications
-- `--disable-cache`: Disable database caching
-- `--verbose`: Enable verbose logging
-- `--date-range`: Date range type (default: "current_month")
-- `--start-date`: Start date for custom range (YYYY-MM-DD)
-- `--end-date`: End date for custom range (YYYY-MM-DD)
-- `--force`: Force analysis even if database is up to date
-- `--env-file`: Path to environment file (default: ".env")
-- `--version`: Show version information
-- `--max-retries`: Maximum number of retries for LLM calls (default: 5)
-- `--retry-delay`: Initial retry delay in seconds (default: 2)
+See our [detailed roadmap](docs/ROADMAP.md) for more information.
 
-Example usage:
-```bash
-# Analyze current month's transactions
-./finance_tracker
+## 💬 Community
 
-# Analyze last month's transactions
-./finance_tracker --date-range last_month
+- [Discord](https://discord.gg/walletmind) - Join our community
+- [Twitter](https://twitter.com/walletmind) - Follow for updates
+- [Blog](https://blog.walletmind.io) - Financial insights and tips
 
-# Send notifications via ntfy only
-./finance_tracker --notifications ntfy
+## 🔒 Security
 
-# Force fresh analysis without caching
-./finance_tracker --disable-cache
+- End-to-end encryption for credentials
+- Read-only bank access
+- SOC2 compliance (in progress)
+- Regular security audits
 
-# Analyze custom date range
-./finance_tracker --date-range custom --start-date 2024-01-01 --end-date 2024-03-31
+Found a security issue? Please email security@walletmind.io
 
-# Enable verbose logging
-./finance_tracker --verbose
-```
+## 📄 License
 
-### 📝 Example Output
+WalletMind is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-Here's an example of what the application output looks like:
+## 🙏 Acknowledgments
 
-```bash
-10:01AM INF 🔧 Loading configuration...
-10:01AM INF 🔄 Loading database...
-10:01AM INF 📊 Fetching transactions...
-10:01AM INF 💳 Accounts:
-10:01AM INF • account_id=ACT-1234-5678-9012 account_name="Sample Credit Card"
-10:01AM INF └ balance=-2500.00 sync_time="2024-04-01 02:33:25" transactions=45
-10:01AM INF 🤖 Analyzing transactions with AI...
-10:01AM INF  └ OpenRouter response model=deepseek/deepseek-chat-v3-0324 provider=Example
-10:01AM INF ✨ AI Summary:
-10:01AM INF ### Summary
-In March 2024, total expenses amounted to **$2,500.00**, with notable spending on groceries, dining, and transportation. Frequent small purchases at local restaurants and coffee shops suggest habitual spending, while larger one-time expenses included a medical visit ($150.00) and a concert ticket ($120.00). Groceries (e.g., Local Market, Super Store) and fuel (Gas Station A, Gas Station B) were recurring costs.
+- [SimpleFin](https://simplefin.org) for bank connectivity
+- [Supabase](https://supabase.com) for the backend platform
+- [OpenRouter](https://openrouter.ai) for AI capabilities
+- Our amazing beta testers and contributors
 
-### Analysis Breakdown
-1. **Total Expenses**: $2,500.00
-2. **Major Categories**:
-   - Groceries: $600.00
-   - Dining: $450.00
-   - Fuel: $300.00
-   - Retail: $250.00
-   - Subscriptions: $50.00
-3. **Largest Expenses**:
-   - $150.00: Medical Center on 2024-03-15
-   - $120.00: Concert Venue on 2024-03-20
-   - $100.00: Department Store on 2024-03-25
-4. **Account Status**:
-   - Sample Credit Card: Balance -$2,500.00, Last synced 2024-04-01
 ---
-*Generated by deepseek/deepseek-chat-v3-0324*
-10:01AM INF 📱 Notifications sent successfully via:
-• Email: recipient@example.com
-• Ntfy: finance-tracker-test channels="Email: recipient@example.com\n• Ntfy: finance-tracker-test"
-```
+
+<div align="center">
+  Made with ❤️ by the WalletMind team
+  
+  **[Website](https://walletmind.io) • [Documentation](https://docs.walletmind.io) • [Support](mailto:support@walletmind.io)**
+</div>

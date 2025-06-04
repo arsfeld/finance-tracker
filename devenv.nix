@@ -11,6 +11,8 @@
     gcc
     go
     just
+    air
+    supabase-cli
   ];
 
   languages.go.enable = true;

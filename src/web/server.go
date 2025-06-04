@@ -3,17 +3,25 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jmoiron/sqlx"
+	_ "github.com/lib/pq"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog/log"
 
 	"finance_tracker/src/internal/auth"
 	"finance_tracker/src/internal/config"
+	"finance_tracker/src/internal/jobs"
+	"finance_tracker/src/internal/services"
+	"finance_tracker/src/providers"
+	"finance_tracker/src/providers/simplefin"
 	"finance_tracker/src/web/handlers"
 	webmiddleware "finance_tracker/src/web/middleware"
 )
@@ -85,10 +93,53 @@ func (s *Server) Start() error {
 	orgHandlers := handlers.NewInertiaOrganizationHandlers(s.config.Client, s.inertia)
 	
 	// Initialize River job client and handlers
-	// For the web server, we'll use a minimal job client setup
-	// The full River client is initialized in the worker command
 	var jobHandlers *handlers.RiverJobHandler
-	// TODO: Initialize proper River job client when database is available
+	
+	// Try to initialize database connection for River jobs
+	// This is optional - if it fails, job endpoints will be disabled
+	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
+		log.Info().Msg("Initializing database connection for job management")
+		
+		// Create database connections
+		sqlxDB, err := createSQLXConnection()
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to create SQLX connection - job endpoints disabled")
+		} else {
+			defer sqlxDB.Close()
+			
+			dbPool, err := createPgxPool()
+			if err != nil {
+				log.Warn().Err(err).Msg("Failed to create pgx pool - job endpoints disabled")
+			} else {
+				defer dbPool.Close()
+				
+				// Initialize services
+				jobService := services.NewJobService(sqlxDB)
+				syncService := services.NewSyncService(sqlxDB, jobService)
+				
+				// Initialize providers (optional)
+				financialProviders := make(map[string]providers.FinancialProvider)
+				if bridgeURL := os.Getenv("SIMPLEFIN_BRIDGE_URL"); bridgeURL != "" {
+					sfProvider := simplefin.NewSimpleFin()
+					financialProviders["simplefin"] = sfProvider
+					syncService.RegisterProvider("simplefin", sfProvider)
+					log.Info().Msg("SimpleFin provider registered for job management")
+				}
+				
+				// Initialize River job client
+				riverClient, err := jobs.NewRiverJobClient(dbPool, syncService, financialProviders)
+				if err != nil {
+					log.Warn().Err(err).Msg("Failed to create River job client - job endpoints disabled")
+				} else {
+					syncService.SetRiverClient(riverClient)
+					jobHandlers = handlers.NewRiverJobHandler(riverClient)
+					log.Info().Msg("River job client initialized successfully")
+				}
+			}
+		}
+	} else {
+		log.Info().Msg("DATABASE_URL not set - job endpoints disabled")
+	}
 
 	// Setup routes
 	s.setupRoutes(r, pageHandlers, apiHandlers, authHandlers, orgHandlers, jobHandlers, authMiddleware)
@@ -189,27 +240,28 @@ func (s *Server) setupRoutes(
 			r.Delete("/{connectionID}", apiHandlers.HandleDeleteConnection)
 			r.Post("/{connectionID}/test", apiHandlers.HandleTestConnection)
 			r.Get("/{connectionID}/accounts", apiHandlers.HandleGetConnectionAccounts)
-			// TODO: Re-enable when River job client is properly initialized
-			// r.Post("/{id}/sync", jobHandlers.CreateSyncJob)
+			// Enable sync endpoint if River job client is available
+			if jobHandlers != nil {
+				r.Post("/{id}/sync", jobHandlers.CreateSyncJob)
+			}
 		})
 
-		// TODO: Re-enable job endpoints when River job client is properly initialized
-		// Job endpoints
-		// r.Route("/jobs", func(r chi.Router) {
-		//	r.Get("/", jobHandlers.ListJobs)
-		//	r.Get("/stats", jobHandlers.GetJobStats)
-		//	r.Get("/{id}", jobHandlers.GetJob)
-		//	r.Post("/{id}/cancel", jobHandlers.CancelJob)
-		//	r.Post("/{id}/pause", jobHandlers.PauseJob)
-		//	r.Post("/{id}/resume", jobHandlers.ResumeJob)
-		//	r.Post("/{id}/retry", jobHandlers.RetryJob)
-		// })
+		// Enable job endpoints if River job client is available
+		if jobHandlers != nil {
+			// Job endpoints
+			r.Route("/jobs", func(r chi.Router) {
+				r.Get("/", jobHandlers.ListJobs)
+				r.Get("/stats", jobHandlers.GetJobStats)
+				r.Get("/{id}", jobHandlers.GetJob)
+				r.Post("/{id}/cancel", jobHandlers.CancelJob)
+			})
 
-		// Worker endpoints
-		// r.Route("/workers", func(r chi.Router) {
-		//	r.Get("/", jobHandlers.ListWorkers)
-		//	r.Get("/stats", jobHandlers.GetWorkerStats)
-		// })
+			// Worker endpoints
+			r.Route("/workers", func(r chi.Router) {
+				r.Get("/", jobHandlers.ListWorkers)
+				r.Get("/stats", jobHandlers.GetWorkerStats)
+			})
+		}
 
 		// Bank account endpoints
 		r.Put("/bank-accounts/{accountID}/status", apiHandlers.HandleUpdateAccountStatus)
@@ -307,4 +359,33 @@ func (s *Server) healthHandler() http.HandlerFunc {
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		}
 	}
+}
+// createSQLXConnection creates a SQLX database connection
+func createSQLXConnection() (*sqlx.DB, error) {
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		return nil, fmt.Errorf("DATABASE_URL environment variable not set")
+	}
+	
+	db, err := sqlx.Connect("postgres", dbURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+	
+	return db, nil
+}
+
+// createPgxPool creates a pgx connection pool for River
+func createPgxPool() (*pgxpool.Pool, error) {
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		return nil, fmt.Errorf("DATABASE_URL environment variable not set")
+	}
+	
+	pool, err := pgxpool.New(context.Background(), dbURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create connection pool: %w", err)
+	}
+	
+	return pool, nil
 }

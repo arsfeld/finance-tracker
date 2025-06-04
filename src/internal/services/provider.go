@@ -2,8 +2,6 @@ package services
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 
 	"finance_tracker/src/providers"
@@ -11,11 +9,20 @@ import (
 )
 
 // ProviderService handles provider operations
-type ProviderService struct{}
+type ProviderService struct {
+	crypto *CryptoService
+}
 
 // NewProviderService creates a new provider service
-func NewProviderService() *ProviderService {
-	return &ProviderService{}
+func NewProviderService() (*ProviderService, error) {
+	crypto, err := NewCryptoService()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize crypto service: %w", err)
+	}
+	
+	return &ProviderService{
+		crypto: crypto,
+	}, nil
 }
 
 // ValidateCredentials validates provider credentials
@@ -55,30 +62,14 @@ func (s *ProviderService) TestConnection(ctx context.Context, providerType strin
 	return provider.HealthCheck(ctx, credentials)
 }
 
-// EncryptCredentials encrypts provider credentials
+// EncryptCredentials encrypts provider credentials using AES-256-GCM
 func (s *ProviderService) EncryptCredentials(credentials map[string]string) (string, error) {
-	// TODO: Use proper encryption in production
-	credentialsJSON, err := json.Marshal(credentials)
-	if err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(credentialsJSON), nil
+	return s.crypto.EncryptCredentials(credentials)
 }
 
-// DecryptCredentials decrypts provider credentials
+// DecryptCredentials decrypts provider credentials using AES-256-GCM
 func (s *ProviderService) DecryptCredentials(encrypted string) (map[string]string, error) {
-	// TODO: Use proper decryption in production
-	credentialsJSON, err := base64.StdEncoding.DecodeString(encrypted)
-	if err != nil {
-		return nil, err
-	}
-	
-	var credentials map[string]string
-	if err := json.Unmarshal(credentialsJSON, &credentials); err != nil {
-		return nil, err
-	}
-	
-	return credentials, nil
+	return s.crypto.DecryptCredentials(encrypted)
 }
 
 // getProvider returns a provider instance based on type

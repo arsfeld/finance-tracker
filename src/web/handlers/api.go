@@ -22,7 +22,14 @@ func NewAPIHandlers(client *config.Client) *APIHandlers {
 	transactionService := services.NewTransactionService(client)
 	connectionService := services.NewConnectionService(client)
 	accountService := services.NewAccountService(client)
-	providerService := services.NewProviderService()
+	
+	providerService, err := services.NewProviderService()
+	if err != nil {
+		// Log error but continue with a nil provider service for now
+		// In production, this should be handled more gracefully
+		providerService = nil
+	}
+	
 	analyticsService := services.NewAnalyticsService(client)
 
 	// Create use cases

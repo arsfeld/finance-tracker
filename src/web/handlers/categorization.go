@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/riverqueue/river"
 
+	"finance_tracker/src/internal/auth"
 	"finance_tracker/src/internal/jobs"
 	"finance_tracker/src/internal/models"
 	"finance_tracker/src/internal/services/categorization"
@@ -542,14 +543,14 @@ func (h *CategorizationHandler) UpdateBudget(w http.ResponseWriter, r *http.Requ
 // Helper functions (these would need to be implemented based on your auth middleware)
 
 func getOrganizationID(ctx context.Context) uuid.UUID {
-	// This would extract organization ID from context
-	// For now, return a placeholder
-	return uuid.New()
+	return auth.GetOrganization(ctx)
 }
 
 func getUserID(ctx context.Context) uuid.UUID {
-	// This would extract user ID from context
-	// For now, return a placeholder
-	return uuid.New()
+	user := auth.GetUser(ctx)
+	if user == nil {
+		return uuid.Nil
+	}
+	return user.ID
 }
 

@@ -12,14 +12,13 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 	
+	"finance_tracker/src/internal/auth"
 	"finance_tracker/src/internal/jobs"
 )
 
 // Helper function to get organization ID from request context
 func GetOrganizationID(r *http.Request) uuid.UUID {
-	// TODO: Extract this from the auth middleware context
-	// For now, return a placeholder UUID
-	return uuid.New()
+	return auth.GetOrganization(r.Context())
 }
 
 type RiverJobHandler struct {

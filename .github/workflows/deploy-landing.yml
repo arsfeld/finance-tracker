@@ -65,7 +65,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy landing/dist --project-name=finaro-landing
+          command: pages deploy landing/dist --project-name=finaro-landing --branch production
 
       - name: Deploy Preview (PR only)
         if: github.event_name == 'pull_request'

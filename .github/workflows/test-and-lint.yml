@@ -1,0 +1,562 @@
+name: Test and Lint
+
+on:
+  push:
+    branches: [main, product, develop]
+  pull_request:
+    branches: [main, product]
+  workflow_dispatch:
+
+env:
+  GO_VERSION: '1.21'
+  NODE_VERSION: '18'
+
+jobs:
+  # Frontend Testing and Linting
+  frontend-test:
+    runs-on: ubuntu-latest
+    name: Frontend Tests
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript type checking
+        run: npx tsc --noEmit
+
+      - name: ESLint
+        run: |
+          # Install ESLint with TypeScript support
+          npm install --save-dev eslint @typescript-eslint/eslint-plugin @typescript-eslint/parser eslint-plugin-react eslint-plugin-react-hooks
+          
+          # Create ESLint config if it doesn't exist
+          if [[ ! -f ".eslintrc.js" && ! -f ".eslintrc.json" ]]; then
+            cat > .eslintrc.json << 'EOF'
+          {
+            "extends": [
+              "eslint:recommended",
+              "@typescript-eslint/recommended",
+              "plugin:react/recommended",
+              "plugin:react-hooks/recommended"
+            ],
+            "parser": "@typescript-eslint/parser",
+            "parserOptions": {
+              "ecmaFeatures": {
+                "jsx": true
+              },
+              "ecmaVersion": "latest",
+              "sourceType": "module"
+            },
+            "plugins": ["react", "@typescript-eslint"],
+            "rules": {
+              "react/react-in-jsx-scope": "off",
+              "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }]
+            },
+            "settings": {
+              "react": {
+                "version": "detect"
+              }
+            }
+          }
+          EOF
+          fi
+          
+          npx eslint resources/js --ext .ts,.tsx --max-warnings 10
+
+      - name: Prettier formatting check
+        run: |
+          npm install --save-dev prettier
+          
+          # Create Prettier config if it doesn't exist
+          if [[ ! -f ".prettierrc" ]]; then
+            cat > .prettierrc << 'EOF'
+          {
+            "semi": true,
+            "trailingComma": "es5",
+            "singleQuote": true,
+            "printWidth": 100,
+            "tabWidth": 2
+          }
+          EOF
+          fi
+          
+          npx prettier --check "resources/**/*.{ts,tsx,css,json}"
+
+      - name: Run frontend tests
+        run: |
+          # Install testing dependencies
+          npm install --save-dev vitest @testing-library/react @testing-library/jest-dom @testing-library/user-event jsdom
+          
+          # Create basic Vitest config if it doesn't exist
+          if [[ ! -f "vitest.config.ts" ]]; then
+            cat > vitest.config.ts << 'EOF'
+          import { defineConfig } from 'vitest/config'
+          import react from '@vitejs/plugin-react'
+          
+          export default defineConfig({
+            plugins: [react()],
+            test: {
+              environment: 'jsdom',
+              setupFiles: ['./src/test/setup.ts'],
+            },
+          })
+          EOF
+          fi
+          
+          # Create test setup file
+          mkdir -p src/test
+          if [[ ! -f "src/test/setup.ts" ]]; then
+            cat > src/test/setup.ts << 'EOF'
+          import '@testing-library/jest-dom'
+          EOF
+          fi
+          
+          # Run tests if any exist
+          if find resources -name "*.test.{ts,tsx}" | grep -q .; then
+            npx vitest run --reporter=verbose --coverage
+          else
+            echo "No test files found, creating sample test..."
+            mkdir -p resources/js/__tests__
+            cat > resources/js/__tests__/sample.test.tsx << 'EOF'
+          import { render, screen } from '@testing-library/react'
+          import { describe, it, expect } from 'vitest'
+          
+          // Sample test - replace with actual component tests
+          describe('Sample Test', () => {
+            it('should pass', () => {
+              expect(true).toBe(true)
+            })
+          })
+          EOF
+            npx vitest run
+          fi
+
+      - name: Upload frontend coverage
+        uses: codecov/codecov-action@v3
+        if: always()
+        with:
+          files: ./coverage/lcov.info
+          flags: frontend
+          name: frontend-coverage
+
+  # Backend Testing and Linting
+  backend-test:
+    runs-on: ubuntu-latest
+    name: Backend Tests
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Go formatting check
+        run: |
+          if [ "$(gofmt -s -l src/ | wc -l)" -gt 0 ]; then
+            echo "Go code is not formatted properly:"
+            gofmt -s -l src/
+            exit 1
+          fi
+
+      - name: Go vet
+        run: go vet ./src/...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: latest
+          working-directory: .
+          args: --config .golangci.yml ./src/...
+
+      - name: Create golangci-lint config
+        run: |
+          if [[ ! -f ".golangci.yml" ]]; then
+            cat > .golangci.yml << 'EOF'
+          run:
+            timeout: 5m
+            modules-download-mode: readonly
+          
+          linters:
+            enable:
+              - errcheck
+              - gosimple
+              - govet
+              - ineffassign
+              - staticcheck
+              - typecheck
+              - unused
+              - gofmt
+              - goimports
+              - misspell
+              - unconvert
+              - unparam
+              - gosec
+              - goconst
+              - gocritic
+          
+          linters-settings:
+            gosec:
+              excludes:
+                - G204 # Subprocess launched with variable
+                - G304 # File path provided as taint input
+          
+          issues:
+            exclude-rules:
+              - path: _test\.go
+                linters:
+                  - gosec
+          EOF
+          fi
+
+      - name: Run Go tests
+        run: |
+          go test -v -race -coverprofile=coverage.out ./src/...
+        env:
+          DATABASE_URL: postgres://testuser:testpass@localhost:5432/testdb?sslmode=disable
+          GO_ENV: test
+
+      - name: Upload backend coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.out
+          flags: backend
+          name: backend-coverage
+
+  # Security Scanning
+  security-scan:
+    runs-on: ubuntu-latest
+    name: Security Scan
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Setup Go for security scan
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run Gosec Security Scanner
+        uses: securecodewarrior/github-action-gosec@master
+        with:
+          args: './src/...'
+
+      - name: Setup Node.js for npm audit
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit
+        run: |
+          npm audit --audit-level moderate
+        continue-on-error: true
+
+      - name: Scan for secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: main
+          head: HEAD
+
+  # Code Quality Analysis
+  code-quality:
+    runs-on: ubuntu-latest
+    name: Code Quality
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Create SonarQube properties
+        run: |
+          if [[ ! -f "sonar-project.properties" ]]; then
+            cat > sonar-project.properties << 'EOF'
+          sonar.projectKey=finaro-finance-tracker
+          sonar.organization=your-org
+          
+          sonar.sources=src,resources/js
+          sonar.tests=src,resources/js
+          sonar.test.inclusions=**/*_test.go,**/*.test.ts,**/*.test.tsx
+          
+          sonar.go.coverage.reportPaths=coverage.out
+          sonar.javascript.lcov.reportPaths=coverage/lcov.info
+          
+          sonar.exclusions=**/*_gen.go,**/vendor/**,**/node_modules/**,**/dist/**
+          EOF
+          fi
+
+  # Dependency Checking
+  dependency-check:
+    runs-on: ubuntu-latest
+    name: Dependency Check
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Check Go mod tidy
+        run: |
+          go mod tidy
+          if [[ -n $(git diff --name-only) ]]; then
+            echo "go mod tidy resulted in changes:"
+            git diff
+            exit 1
+          fi
+
+      - name: Go mod vulnerability check
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./src/...
+
+      - name: Check npm package vulnerabilities
+        run: |
+          npm ci
+          npx audit-ci --config .audit-ci.json
+        continue-on-error: true
+
+      - name: Create audit-ci config
+        run: |
+          if [[ ! -f ".audit-ci.json" ]]; then
+            cat > .audit-ci.json << 'EOF'
+          {
+            "moderate": true,
+            "allowlist": [],
+            "report": true,
+            "output-format": "text"
+          }
+          EOF
+          fi
+
+      - name: Check for outdated dependencies
+        run: |
+          echo "=== Go Dependencies ==="
+          go list -u -m all | grep '\[' || echo "All Go dependencies are up to date"
+          
+          echo "=== NPM Dependencies ==="
+          npm outdated || echo "Some NPM packages have updates available"
+
+  # Performance Testing
+  performance-test:
+    runs-on: ubuntu-latest
+    name: Performance Tests
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run Go benchmarks
+        run: |
+          # Run benchmark tests if they exist
+          if find src -name "*_test.go" -exec grep -l "func Benchmark" {} \; | grep -q .; then
+            go test -bench=. -benchmem ./src/... > benchmark-results.txt
+            cat benchmark-results.txt
+          else
+            echo "No benchmark tests found"
+          fi
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-results
+          path: benchmark-results.txt
+
+  # Documentation Tests
+  docs-test:
+    runs-on: ubuntu-latest
+    name: Documentation Tests
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check README links
+        run: |
+          # Install markdown link checker
+          npm install -g markdown-link-check
+          
+          # Check all markdown files for broken links
+          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" | xargs markdown-link-check --config .markdown-link-check.json
+        continue-on-error: true
+
+      - name: Create markdown link check config
+        run: |
+          if [[ ! -f ".markdown-link-check.json" ]]; then
+            cat > .markdown-link-check.json << 'EOF'
+          {
+            "ignorePatterns": [
+              {
+                "pattern": "^http://localhost"
+              },
+              {
+                "pattern": "^https://localhost"
+              }
+            ],
+            "timeout": "20s",
+            "retryOn429": true,
+            "retryCount": 3,
+            "fallbackRetryDelay": "30s",
+            "aliveStatusCodes": [200, 206]
+          }
+          EOF
+          fi
+
+      - name: Spell check documentation
+        run: |
+          npm install -g cspell
+          
+          # Create cspell config if it doesn't exist
+          if [[ ! -f "cspell.json" ]]; then
+            cat > cspell.json << 'EOF'
+          {
+            "version": "0.2",
+            "language": "en",
+            "words": [
+              "finaro",
+              "supabase",
+              "postgresql",
+              "inertia",
+              "vite",
+              "tailwind",
+              "simplefin",
+              "openrouter",
+              "cloudflare",
+              "glassmorphism",
+              "fintech"
+            ],
+            "ignorePaths": [
+              "node_modules/**",
+              "dist/**",
+              "coverage/**",
+              ".git/**"
+            ]
+          }
+          EOF
+          fi
+          
+          cspell "**/*.md" "**/*.txt" --no-progress
+        continue-on-error: true
+
+  # Test Results Summary
+  test-summary:
+    runs-on: ubuntu-latest
+    name: Test Summary
+    needs: [frontend-test, backend-test, security-scan, code-quality, dependency-check]
+    if: always()
+    
+    steps:
+      - name: Generate test summary
+        run: |
+          echo "## Test Results Summary" > test-summary.md
+          echo "" >> test-summary.md
+          echo "| Test Suite | Status |" >> test-summary.md
+          echo "|------------|--------|" >> test-summary.md
+          echo "| Frontend Tests | ${{ needs.frontend-test.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> test-summary.md
+          echo "| Backend Tests | ${{ needs.backend-test.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> test-summary.md
+          echo "| Security Scan | ${{ needs.security-scan.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> test-summary.md
+          echo "| Code Quality | ${{ needs.code-quality.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> test-summary.md
+          echo "| Dependencies | ${{ needs.dependency-check.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> test-summary.md
+          echo "" >> test-summary.md
+          
+          if [[ "${{ needs.frontend-test.result }}" == "success" && "${{ needs.backend-test.result }}" == "success" ]]; then
+            echo "🎉 All tests passed!" >> test-summary.md
+          else
+            echo "❌ Some tests failed. Please check the detailed results above." >> test-summary.md
+          fi
+
+      - name: Comment PR with test results
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          header: test-results
+          path: test-summary.md

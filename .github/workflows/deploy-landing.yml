@@ -1,0 +1,156 @@
+name: Deploy Landing Page
+
+on:
+  push:
+    branches: [main, product]
+    paths:
+      - 'landing/**'
+      - '.github/workflows/deploy-landing.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'landing/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy Landing Page to Cloudflare Pages
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          cd landing
+          # Install any build tools if needed
+          npm init -y
+          npm install --save-dev html-minifier-terser
+
+      - name: Optimize HTML
+        run: |
+          cd landing
+          # Minify HTML for production
+          npx html-minifier-terser \
+            --input-dir . \
+            --output-dir dist \
+            --file-ext html \
+            --collapse-whitespace \
+            --remove-comments \
+            --remove-redundant-attributes \
+            --use-short-doctype \
+            --minify-css true \
+            --minify-js true
+          
+          # Copy other assets
+          cp -r *.svg _headers README.md dist/ 2>/dev/null || true
+
+      - name: Validate HTML
+        run: |
+          cd landing
+          # Install HTML validator
+          npm install --save-dev html-validate
+          # Validate HTML structure
+          npx html-validate index.html || echo "HTML validation warnings (non-blocking)"
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: finaro-landing
+          directory: landing/dist
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          wranglerVersion: '3'
+
+      - name: Deploy Preview (PR only)
+        if: github.event_name == 'pull_request'
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: finaro-landing
+          directory: landing/dist
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          wranglerVersion: '3'
+        env:
+          CLOUDFLARE_PAGES_BRANCH: ${{ github.head_ref }}
+
+      - name: Lighthouse CI
+        if: github.event_name == 'pull_request'
+        uses: treosh/lighthouse-ci-action@v10
+        with:
+          configPath: './landing/.lighthouserc.json'
+          uploadArtifacts: true
+          temporaryPublicStorage: true
+
+      - name: Comment PR with Lighthouse results
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          header: lighthouse
+          path: '.lighthouseci/report.md'
+
+  security-scan:
+    runs-on: ubuntu-latest
+    name: Security Scan
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: 'landing/'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  accessibility-test:
+    runs-on: ubuntu-latest
+    name: Accessibility Testing
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: |
+          npm install -g @axe-core/cli http-server
+
+      - name: Start local server
+        run: |
+          cd landing
+          http-server . -p 8080 &
+          sleep 5
+
+      - name: Run accessibility tests
+        run: |
+          axe http://localhost:8080 --reporter json --output axe-results.json || true
+
+      - name: Upload accessibility results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: accessibility-results
+          path: axe-results.json

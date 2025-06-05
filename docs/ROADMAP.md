@@ -1,4 +1,4 @@
-# WalletMind - Product Roadmap
+# Finaro - Product Roadmap
 
 ## 🎯 Vision
 Transform financial management from a chore into an intelligent conversation that empowers better financial decisions.

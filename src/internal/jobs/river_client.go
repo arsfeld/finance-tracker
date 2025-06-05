@@ -18,6 +18,7 @@ import (
 	"finance_tracker/src/providers"
 )
 
+
 // RiverJobClient wraps River client with our custom methods
 type RiverJobClient struct {
 	client   *river.Client[pgx.Tx]
@@ -29,29 +30,43 @@ type RiverJobClient struct {
 }
 
 // NewRiverJobClient creates a new River-based job client
-func NewRiverJobClient(dbPool *pgxpool.Pool, syncService *services.SyncService, providers map[string]providers.FinancialProvider) (*RiverJobClient, error) {
+func NewRiverJobClient(dbPool *pgxpool.Pool, syncService *services.SyncService, providers map[string]providers.FinancialProvider, cryptoService *services.CryptoService, transactionRepo TransactionRepository) (*RiverJobClient, error) {
 	workers := river.NewWorkers()
 	
 	// Register all job workers with dependencies
 	river.AddWorker(workers, &SyncTransactionsJob{
-		syncService: syncService,
-		providers:   providers,
+		syncService:   syncService,
+		providers:     providers,
+		cryptoService: cryptoService,
 	})
 	river.AddWorker(workers, &SyncAccountsJob{
-		syncService: syncService,
-		providers:   providers,
+		syncService:   syncService,
+		providers:     providers,
+		cryptoService: cryptoService,
 	})
 	river.AddWorker(workers, &FullSyncJob{
-		syncService: syncService,
-		providers:   providers,
+		syncService:   syncService,
+		providers:     providers,
+		cryptoService: cryptoService,
 	})
 	river.AddWorker(workers, &TestConnectionJob{
-		syncService: syncService,
-		providers:   providers,
+		syncService:   syncService,
+		providers:     providers,
+		cryptoService: cryptoService,
 	})
 	river.AddWorker(workers, &AnalyzeSpendingJob{})
 	river.AddWorker(workers, &CleanupJob{})
 	river.AddWorker(workers, &BackupJob{})
+	
+	// Register categorization workers
+	// TODO: Initialize these with proper engines once categorization system is fully implemented
+	// For now, register placeholder workers that can be used for testing
+	river.AddWorker(workers, &RealtimeCategorizationWorker{
+		transactionRepo: transactionRepo,
+	})
+	river.AddWorker(workers, &BatchCategorizationWorker{
+		transactionRepo: transactionRepo,
+	})
 	
 	config := &river.Config{
 		Workers: workers,
@@ -61,6 +76,7 @@ func NewRiverJobClient(dbPool *pgxpool.Pool, syncService *services.SyncService, 
 			"analysis":        {MaxWorkers: 3},   // For LLM analysis
 			"maintenance":     {MaxWorkers: 2},   // For cleanup/backup
 			"high_priority":   {MaxWorkers: 8},   // For urgent jobs
+			"categorization":  {MaxWorkers: 4},   // For categorization jobs
 		},
 		JobTimeout:               15 * time.Minute,
 		MaxAttempts:              3,

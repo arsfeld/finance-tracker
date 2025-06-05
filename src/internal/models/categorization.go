@@ -193,6 +193,7 @@ type LLMModel struct {
 	MaxTokens   int     `json:"max_tokens"`
 	Accuracy    float64 `json:"accuracy"`
 	IsDefault   bool    `json:"is_default"`
+	IsAvailable bool    `json:"is_available"`
 	Provider    string  `json:"provider"`
 }
 

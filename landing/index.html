@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Finaro - AI-Powered Financial Intelligence</title>
+    <meta name="description" content="Transform how you understand and manage your money with AI-powered financial insights. Natural language queries, multi-account aggregation, and collaborative finance management.">
+    <meta name="keywords" content="AI finance, financial intelligence, expense tracking, budget management, personal finance">
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://finaro.finance/">
+    <meta property="og:title" content="Finaro - AI-Powered Financial Intelligence">
+    <meta property="og:description" content="Transform how you understand and manage your money with AI-powered financial insights.">
+    <meta property="og:image" content="https://finaro.finance/og-image.png">
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="https://finaro.finance/">
+    <meta property="twitter:title" content="Finaro - AI-Powered Financial Intelligence">
+    <meta property="twitter:description" content="Transform how you understand and manage your money with AI-powered financial insights.">
+    <meta property="twitter:image" content="https://finaro.finance/og-image.png">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="icon" type="image/png" href="/favicon.png">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        'inter': ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+                    },
+                    colors: {
+                        primary: {
+                            start: '#667eea',
+                            end: '#764ba2'
+                        },
+                        energy: {
+                            start: '#f093fb',
+                            end: '#f5576c'
+                        },
+                        trust: {
+                            start: '#4facfe',
+                            end: '#00f2fe'
+                        },
+                        success: {
+                            start: '#84fab0',
+                            end: '#8fd3f4'
+                        }
+                    },
+                    backgroundImage: {
+                        'gradient-primary': 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                        'gradient-energy': 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+                        'gradient-trust': 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
+                        'gradient-success': 'linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%)',
+                    },
+                    animation: {
+                        'float': 'float 6s ease-in-out infinite',
+                        'glow': 'glow 2s ease-in-out infinite alternate',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-20px); }
+        }
+        
+        @keyframes glow {
+            from { box-shadow: 0 0 20px rgba(102, 126, 234, 0.3); }
+            to { box-shadow: 0 0 40px rgba(102, 126, 234, 0.6); }
+        }
+
+        .glass {
+            background: rgba(255, 255, 255, 0.35);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+        }
+
+        .glass-dark {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+    </style>
+</head>
+<body class="font-inter antialiased">
+    <!-- Background -->
+    <div class="fixed inset-0 bg-gradient-primary -z-10"></div>
+
+    <!-- Navigation -->
+    <nav class="relative z-50 glass rounded-2xl mx-6 mt-6">
+        <div class="container mx-auto px-6 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <!-- Logo -->
+                    <div class="w-10 h-10">
+                        <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" class="w-full h-full">
+                            <defs>
+                                <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                                    <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+                                    <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+                                </linearGradient>
+                            </defs>
+                            <g transform="translate(60, 60)">
+                                <path d="M -20,-15 Q -25,-20 -15,-25 L -10,-25 L -5,-30 L 5,-30 L 10,-25 L 15,-25 
+                                         Q 25,-20 20,-15 L 20,-10 L 25,-5 L 25,5 L 20,10 L 20,15 
+                                         Q 25,20 15,20 L 10,20 L 5,25 L -5,25 L -10,20 L -15,20 
+                                         Q -25,15 -20,10 L -20,5 L -25,0 L -25,-10 L -20,-15 Z" 
+                                      fill="none" 
+                                      stroke="url(#logoGradient)" 
+                                      stroke-width="2"/>
+                                <rect x="-12" y="-7.5" width="24" height="15" rx="2" ry="2" 
+                                      fill="rgba(102,126,234,0.1)" 
+                                      stroke="url(#logoGradient)" 
+                                      stroke-width="1.5"/>
+                                <rect x="-9" y="-4.5" width="5" height="4" rx="0.5" ry="0.5" 
+                                      fill="url(#logoGradient)"/>
+                                <g stroke="url(#logoGradient)" stroke-width="0.8" opacity="0.6">
+                                    <line x1="-9" y1="1.5" x2="-1" y2="1.5"/>
+                                    <line x1="1" y1="1.5" x2="9" y2="1.5"/>
+                                    <line x1="-9" y1="3.5" x2="-1" y2="3.5"/>
+                                    <line x1="1" y1="3.5" x2="9" y2="3.5"/>
+                                </g>
+                            </g>
+                        </svg>
+                    </div>
+                    <span class="text-2xl font-bold text-white">Finaro</span>
+                </div>
+                
+                <div class="hidden md:flex items-center space-x-8">
+                    <a href="#features" class="text-white hover:text-blue-200 transition-colors">Features</a>
+                    <a href="#pricing" class="text-white hover:text-blue-200 transition-colors">Pricing</a>
+                    <a href="#about" class="text-white hover:text-blue-200 transition-colors">About</a>
+                    <button class="bg-white text-purple-600 px-6 py-2 rounded-full font-semibold hover:bg-blue-50 transition-colors">
+                        Get Started
+                    </button>
+                </div>
+
+                <!-- Mobile menu button -->
+                <button class="md:hidden text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="relative min-h-screen flex items-center justify-center px-6 py-20">
+        <div class="container mx-auto text-center">
+            <div class="max-w-4xl mx-auto">
+                <h1 class="text-6xl md:text-8xl font-extrabold text-white mb-6 leading-tight">
+                    AI-Powered<br>
+                    <span class="bg-gradient-to-r from-white to-blue-200 bg-clip-text text-transparent">
+                        Financial Intelligence
+                    </span>
+                </h1>
+                
+                <p class="text-xl md:text-2xl text-blue-100 mb-12 max-w-3xl mx-auto leading-relaxed">
+                    Transform how you understand and manage your money. Ask questions in plain English, get AI-powered insights, and make smarter financial decisions with your team.
+                </p>
+
+                <div class="flex flex-col sm:flex-row gap-4 justify-center items-center mb-16">
+                    <button class="bg-white text-purple-600 px-8 py-4 rounded-full font-semibold text-lg hover:bg-blue-50 transition-all transform hover:scale-105 animate-glow">
+                        Start Free Trial
+                    </button>
+                    <button class="glass text-white px-8 py-4 rounded-full font-semibold text-lg hover:bg-white hover:bg-opacity-20 transition-all">
+                        Watch Demo
+                    </button>
+                </div>
+
+                <!-- Demo Chat Bubble -->
+                <div class="glass rounded-3xl p-8 max-w-2xl mx-auto animate-float">
+                    <div class="text-left">
+                        <div class="flex items-start space-x-3 mb-4">
+                            <div class="w-8 h-8 bg-gradient-energy rounded-full flex items-center justify-center">
+                                <span class="text-white text-sm font-semibold">You</span>
+                            </div>
+                            <div class="glass-dark rounded-2xl px-4 py-3 flex-1">
+                                <p class="text-white">"How much did I spend on dining out last month?"</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start space-x-3">
+                            <div class="w-8 h-8 bg-gradient-success rounded-full flex items-center justify-center">
+                                <span class="text-white text-sm font-semibold">AI</span>
+                            </div>
+                            <div class="bg-white bg-opacity-90 rounded-2xl px-4 py-3 flex-1">
+                                <p class="text-gray-800">"You spent <strong>$342</strong> on dining out last month across 23 transactions. That's 15% more than your average. Your top spots were Chipotle ($87) and local restaurants ($156)."</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="relative py-20 px-6">
+        <div class="container mx-auto">
+            <div class="text-center mb-16">
+                <h2 class="text-4xl md:text-5xl font-bold text-white mb-6">
+                    Everything you need for smart money management
+                </h2>
+                <p class="text-xl text-blue-100 max-w-3xl mx-auto">
+                    Finaro combines the latest AI technology with financial best practices to give you unprecedented insight into your money.
+                </p>
+            </div>
+
+            <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+                <!-- Feature 1 -->
+                <div class="glass rounded-3xl p-8 hover:bg-white hover:bg-opacity-40 transition-all transform hover:scale-105">
+                    <div class="w-12 h-12 bg-gradient-trust rounded-xl flex items-center justify-center mb-6">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-bold text-white mb-4">AI-Powered Chat</h3>
+                    <p class="text-blue-100">Ask questions about your finances in plain English. Get instant insights, spending analysis, and personalized recommendations.</p>
+                </div>
+
+                <!-- Feature 2 -->
+                <div class="glass rounded-3xl p-8 hover:bg-white hover:bg-opacity-40 transition-all transform hover:scale-105">
+                    <div class="w-12 h-12 bg-gradient-success rounded-xl flex items-center justify-center mb-6">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-bold text-white mb-4">Multi-Bank Sync</h3>
+                    <p class="text-blue-100">Connect all your accounts in one place. Automatic synchronization keeps your financial picture always up-to-date.</p>
+                </div>
+
+                <!-- Feature 3 -->
+                <div class="glass rounded-3xl p-8 hover:bg-white hover:bg-opacity-40 transition-all transform hover:scale-105">
+                    <div class="w-12 h-12 bg-gradient-energy rounded-xl flex items-center justify-center mb-6">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-bold text-white mb-4">Team Collaboration</h3>
+                    <p class="text-blue-100">Share insights with family or business partners. Role-based access keeps everyone informed while maintaining privacy.</p>
+                </div>
+
+                <!-- Feature 4 -->
+                <div class="glass rounded-3xl p-8 hover:bg-white hover:bg-opacity-40 transition-all transform hover:scale-105">
+                    <div class="w-12 h-12 bg-gradient-primary rounded-xl flex items-center justify-center mb-6">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-bold text-white mb-4">Smart Analytics</h3>
+                    <p class="text-blue-100">Beautiful visualizations that make your financial data clear. Track trends, spot patterns, and understand your money flow.</p>
+                </div>
+
+                <!-- Feature 5 -->
+                <div class="glass rounded-3xl p-8 hover:bg-white hover:bg-opacity-40 transition-all transform hover:scale-105">
+                    <div class="w-12 h-12 bg-gradient-trust rounded-xl flex items-center justify-center mb-6">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-bold text-white mb-4">Bank-Level Security</h3>
+                    <p class="text-blue-100">Your data is encrypted end-to-end. We only read your transactions - never move money or store sensitive credentials.</p>
+                </div>
+
+                <!-- Feature 6 -->
+                <div class="glass rounded-3xl p-8 hover:bg-white hover:bg-opacity-40 transition-all transform hover:scale-105">
+                    <div class="w-12 h-12 bg-gradient-energy rounded-xl flex items-center justify-center mb-6">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-5 5v-5zM4.5 19L9 14.5l4 4L17.5 14zM2 4h20v2H2V4z"></path>
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-bold text-white mb-4">Smart Notifications</h3>
+                    <p class="text-blue-100">Get alerted to unusual spending, low balances, and financial opportunities. Only the notifications that matter.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing Section -->
+    <section id="pricing" class="relative py-20 px-6">
+        <div class="container mx-auto">
+            <div class="text-center mb-16">
+                <h2 class="text-4xl md:text-5xl font-bold text-white mb-6">
+                    Simple, transparent pricing
+                </h2>
+                <p class="text-xl text-blue-100 max-w-3xl mx-auto">
+                    Start free and upgrade as you grow. No hidden fees, no surprises.
+                </p>
+            </div>
+
+            <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-8 max-w-6xl mx-auto">
+                <!-- Free Tier -->
+                <div class="glass rounded-3xl p-8 text-center">
+                    <h3 class="text-2xl font-bold text-white mb-4">Free</h3>
+                    <div class="text-4xl font-bold text-white mb-6">$0<span class="text-lg">/month</span></div>
+                    <ul class="text-blue-100 space-y-3 mb-8">
+                        <li>• 1 bank connection</li>
+                        <li>• 3 months history</li>
+                        <li>• Basic AI insights</li>
+                        <li>• 5 chat questions/month</li>
+                    </ul>
+                    <button class="w-full bg-white text-purple-600 py-3 rounded-full font-semibold hover:bg-blue-50 transition-colors">
+                        Get Started
+                    </button>
+                </div>
+
+                <!-- Personal Tier -->
+                <div class="glass rounded-3xl p-8 text-center ring-2 ring-white ring-opacity-50">
+                    <div class="bg-gradient-energy text-white px-3 py-1 rounded-full text-sm font-semibold mb-4 inline-block">
+                        Most Popular
+                    </div>
+                    <h3 class="text-2xl font-bold text-white mb-4">Personal</h3>
+                    <div class="text-4xl font-bold text-white mb-6">$9<span class="text-lg">/month</span></div>
+                    <ul class="text-blue-100 space-y-3 mb-8">
+                        <li>• Unlimited connections</li>
+                        <li>• Full history</li>
+                        <li>• Unlimited AI chat</li>
+                        <li>• Email notifications</li>
+                        <li>• Data export</li>
+                    </ul>
+                    <button class="w-full bg-gradient-energy text-white py-3 rounded-full font-semibold hover:opacity-90 transition-opacity">
+                        Start Free Trial
+                    </button>
+                </div>
+
+                <!-- Family Tier -->
+                <div class="glass rounded-3xl p-8 text-center">
+                    <h3 class="text-2xl font-bold text-white mb-4">Family</h3>
+                    <div class="text-4xl font-bold text-white mb-6">$15<span class="text-lg">/month</span></div>
+                    <ul class="text-blue-100 space-y-3 mb-8">
+                        <li>• Everything in Personal</li>
+                        <li>• 5 users per organization</li>
+                        <li>• Shared categories</li>
+                        <li>• Family insights</li>
+                    </ul>
+                    <button class="w-full bg-white text-purple-600 py-3 rounded-full font-semibold hover:bg-blue-50 transition-colors">
+                        Start Free Trial
+                    </button>
+                </div>
+
+                <!-- Business Tier -->
+                <div class="glass rounded-3xl p-8 text-center">
+                    <h3 class="text-2xl font-bold text-white mb-4">Business</h3>
+                    <div class="text-4xl font-bold text-white mb-6">$29<span class="text-lg">/month</span></div>
+                    <ul class="text-blue-100 space-y-3 mb-8">
+                        <li>• Everything in Family</li>
+                        <li>• Unlimited users</li>
+                        <li>• Admin controls</li>
+                        <li>• API access</li>
+                        <li>• Priority support</li>
+                    </ul>
+                    <button class="w-full bg-white text-purple-600 py-3 rounded-full font-semibold hover:bg-blue-50 transition-colors">
+                        Contact Sales
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="relative py-20 px-6">
+        <div class="container mx-auto text-center">
+            <div class="glass rounded-3xl p-12 max-w-4xl mx-auto">
+                <h2 class="text-4xl md:text-5xl font-bold text-white mb-6">
+                    Ready to transform your financial intelligence?
+                </h2>
+                <p class="text-xl text-blue-100 mb-8 max-w-2xl mx-auto">
+                    Join thousands of users who have discovered the power of AI-driven financial insights. Start your free trial today.
+                </p>
+                <div class="flex flex-col sm:flex-row gap-4 justify-center items-center">
+                    <button class="bg-white text-purple-600 px-8 py-4 rounded-full font-semibold text-lg hover:bg-blue-50 transition-all transform hover:scale-105">
+                        Start Free Trial
+                    </button>
+                    <button class="text-white underline hover:text-blue-200 transition-colors">
+                        Schedule a demo
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="relative py-12 px-6">
+        <div class="container mx-auto">
+            <div class="glass rounded-3xl p-8">
+                <div class="grid md:grid-cols-4 gap-8">
+                    <div class="md:col-span-2">
+                        <div class="flex items-center space-x-3 mb-4">
+                            <div class="w-8 h-8">
+                                <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" class="w-full h-full">
+                                    <defs>
+                                        <linearGradient id="footerGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                                            <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+                                            <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+                                        </linearGradient>
+                                    </defs>
+                                    <g transform="translate(60, 60)">
+                                        <rect x="-12" y="-7.5" width="24" height="15" rx="2" ry="2" 
+                                              fill="url(#footerGradient)"/>
+                                    </g>
+                                </svg>
+                            </div>
+                            <span class="text-xl font-bold text-white">Finaro</span>
+                        </div>
+                        <p class="text-blue-100 mb-4 max-w-md">
+                            AI-powered financial intelligence that transforms how you understand and manage your money.
+                        </p>
+                        <p class="text-blue-200 text-sm">
+                            © 2024 Finaro. All rights reserved.
+                        </p>
+                    </div>
+
+                    <div>
+                        <h4 class="text-white font-semibold mb-4">Product</h4>
+                        <ul class="space-y-2 text-blue-100">
+                            <li><a href="#" class="hover:text-white transition-colors">Features</a></li>
+                            <li><a href="#" class="hover:text-white transition-colors">Pricing</a></li>
+                            <li><a href="#" class="hover:text-white transition-colors">Security</a></li>
+                            <li><a href="#" class="hover:text-white transition-colors">API</a></li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <h4 class="text-white font-semibold mb-4">Company</h4>
+                        <ul class="space-y-2 text-blue-100">
+                            <li><a href="#" class="hover:text-white transition-colors">About</a></li>
+                            <li><a href="#" class="hover:text-white transition-colors">Blog</a></li>
+                            <li><a href="#" class="hover:text-white transition-colors">Careers</a></li>
+                            <li><a href="#" class="hover:text-white transition-colors">Contact</a></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // Smooth scrolling for navigation links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                document.querySelector(this.getAttribute('href')).scrollIntoView({
+                    behavior: 'smooth'
+                });
+            });
+        });
+
+        // Add scroll effect to navbar
+        window.addEventListener('scroll', function() {
+            const nav = document.querySelector('nav');
+            if (window.scrollY > 100) {
+                nav.classList.add('bg-white', 'bg-opacity-10');
+            } else {
+                nav.classList.remove('bg-white', 'bg-opacity-10');
+            }
+        });
+    </script>
+</body>
+</html>

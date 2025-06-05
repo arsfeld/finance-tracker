@@ -6,6 +6,8 @@ import (
 
 	"github.com/google/uuid"
 	supa "github.com/supabase-community/supabase-go"
+	
+	"finance_tracker/src/internal/models"
 )
 
 // OrganizationService handles organization-related operations
@@ -20,25 +22,9 @@ func NewOrganizationService(client *supa.Client) *OrganizationService {
 	}
 }
 
-// Organization represents an organization
-type Organization struct {
-	ID        uuid.UUID              `json:"id" db:"id"`
-	Name      string                 `json:"name" db:"name"`
-	Settings  map[string]interface{} `json:"settings" db:"settings"`
-	CreatedAt string                 `json:"created_at" db:"created_at"`
-	UpdatedAt string                 `json:"updated_at" db:"updated_at"`
-}
-
-// OrganizationMember represents a member of an organization
-type OrganizationMember struct {
-	OrganizationID uuid.UUID `json:"organization_id" db:"organization_id"`
-	UserID         uuid.UUID `json:"user_id" db:"user_id"`
-	Role           string    `json:"role" db:"role"`
-	JoinedAt       string    `json:"joined_at" db:"joined_at"`
-}
 
 // CreateOrganizationWithOwner creates a new organization and adds the user as owner
-func (s *OrganizationService) CreateOrganizationWithOwner(ctx context.Context, userID string, orgName string) (*Organization, error) {
+func (s *OrganizationService) CreateOrganizationWithOwner(ctx context.Context, userID string, orgName string) (*models.Organization, error) {
 	// Parse user ID
 	userUUID, err := uuid.Parse(userID)
 	if err != nil {
@@ -50,7 +36,7 @@ func (s *OrganizationService) CreateOrganizationWithOwner(ctx context.Context, u
 		"name": orgName,
 	}
 
-	var result []Organization
+	var result []models.Organization
 	_, err = s.client.From("organizations").
 		Insert(orgData, false, "", "*", "").
 		ExecuteTo(&result)
@@ -82,28 +68,30 @@ func (s *OrganizationService) CreateOrganizationWithOwner(ctx context.Context, u
 		return nil, fmt.Errorf("failed to add user as owner: %w", err)
 	}
 
+	// Create default categories for the organization
+	if err := s.createDefaultCategories(ctx, result[0].ID); err != nil {
+		// Log error but don't fail organization creation
+		fmt.Printf("Failed to create default categories for organization %s: %v\n", result[0].ID, err)
+	}
+
 	return &result[0], nil
 }
 
 // createDefaultCategories creates default categories for a new organization
 func (s *OrganizationService) createDefaultCategories(ctx context.Context, orgID uuid.UUID) error {
-	type Category struct {
-		OrganizationID uuid.UUID `json:"organization_id" db:"organization_id"`
-		Name           string    `json:"name" db:"name"`
-		Color          string    `json:"color" db:"color"`
-		Icon           string    `json:"icon" db:"icon"`
-	}
+	// Helper function to create string pointers
+	stringPtr := func(s string) *string { return &s }
 
-	categories := []Category{
-		{OrganizationID: orgID, Name: "Food & Dining", Color: "#FF6B6B", Icon: "utensils"},
-		{OrganizationID: orgID, Name: "Transportation", Color: "#4ECDC4", Icon: "car"},
-		{OrganizationID: orgID, Name: "Shopping", Color: "#45B7D1", Icon: "shopping-bag"},
-		{OrganizationID: orgID, Name: "Entertainment", Color: "#96CEB4", Icon: "film"},
-		{OrganizationID: orgID, Name: "Bills & Utilities", Color: "#FECA57", Icon: "file-text"},
-		{OrganizationID: orgID, Name: "Healthcare", Color: "#FF9FF3", Icon: "heart"},
-		{OrganizationID: orgID, Name: "Education", Color: "#54A0FF", Icon: "book"},
-		{OrganizationID: orgID, Name: "Travel", Color: "#48DBFB", Icon: "plane"},
-		{OrganizationID: orgID, Name: "Other", Color: "#A0A0A0", Icon: "dots-horizontal"},
+	categories := []models.Category{
+		{OrganizationID: orgID, Name: "Food & Dining", Color: stringPtr("#FF6B6B"), Icon: stringPtr("utensils")},
+		{OrganizationID: orgID, Name: "Transportation", Color: stringPtr("#4ECDC4"), Icon: stringPtr("car")},
+		{OrganizationID: orgID, Name: "Shopping", Color: stringPtr("#45B7D1"), Icon: stringPtr("shopping-bag")},
+		{OrganizationID: orgID, Name: "Entertainment", Color: stringPtr("#96CEB4"), Icon: stringPtr("film")},
+		{OrganizationID: orgID, Name: "Bills & Utilities", Color: stringPtr("#FECA57"), Icon: stringPtr("file-text")},
+		{OrganizationID: orgID, Name: "Healthcare", Color: stringPtr("#FF9FF3"), Icon: stringPtr("heart")},
+		{OrganizationID: orgID, Name: "Education", Color: stringPtr("#54A0FF"), Icon: stringPtr("book")},
+		{OrganizationID: orgID, Name: "Travel", Color: stringPtr("#48DBFB"), Icon: stringPtr("plane")},
+		{OrganizationID: orgID, Name: "Other", Color: stringPtr("#A0A0A0"), Icon: stringPtr("dots-horizontal")},
 	}
 
 	_, err := s.client.From("categories").
@@ -114,7 +102,7 @@ func (s *OrganizationService) createDefaultCategories(ctx context.Context, orgID
 }
 
 // GetUserOrganizations gets all organizations for a user
-func (s *OrganizationService) GetUserOrganizations(ctx context.Context, userID string) ([]Organization, error) {
+func (s *OrganizationService) GetUserOrganizations(ctx context.Context, userID string) ([]models.Organization, error) {
 	// Parse user ID
 	userUUID, err := uuid.Parse(userID)
 	if err != nil {
@@ -123,7 +111,7 @@ func (s *OrganizationService) GetUserOrganizations(ctx context.Context, userID s
 
 	// Query organizations through organization_members
 	var result []struct {
-		Organization Organization `json:"organizations"`
+		Organization models.Organization `json:"organizations"`
 		Role         string       `json:"role"`
 	}
 
@@ -136,7 +124,7 @@ func (s *OrganizationService) GetUserOrganizations(ctx context.Context, userID s
 	}
 
 	// Extract organizations
-	orgs := make([]Organization, len(result))
+	orgs := make([]models.Organization, len(result))
 	for i, r := range result {
 		orgs[i] = r.Organization
 	}
@@ -145,14 +133,14 @@ func (s *OrganizationService) GetUserOrganizations(ctx context.Context, userID s
 }
 
 // GetOrganization gets a single organization by ID
-func (s *OrganizationService) GetOrganization(ctx context.Context, orgID string) (*Organization, error) {
+func (s *OrganizationService) GetOrganization(ctx context.Context, orgID string) (*models.Organization, error) {
 	// Parse org ID
 	orgUUID, err := uuid.Parse(orgID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid organization ID: %w", err)
 	}
 
-	var result []Organization
+	var result []models.Organization
 	_, err = s.client.From("organizations").
 		Select("*", "", false).
 		Eq("id", orgUUID.String()).
@@ -206,10 +194,10 @@ func (s *OrganizationService) InviteMember(ctx context.Context, orgID string, us
 	}
 
 	// Add member to organization
-	member := OrganizationMember{
+	member := models.OrganizationMember{
 		OrganizationID: orgUUID,
 		UserID:         userUUID,
-		Role:           role,
+		Role:           models.Role(role),
 	}
 
 	_, err = s.client.From("organization_members").
@@ -223,14 +211,14 @@ func (s *OrganizationService) InviteMember(ctx context.Context, orgID string, us
 }
 
 // GetOrganizationMembers gets all members of an organization
-func (s *OrganizationService) GetOrganizationMembers(ctx context.Context, orgID string) ([]OrganizationMember, error) {
+func (s *OrganizationService) GetOrganizationMembers(ctx context.Context, orgID string) ([]models.OrganizationMember, error) {
 	// Parse org ID
 	orgUUID, err := uuid.Parse(orgID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid organization ID: %w", err)
 	}
 
-	var members []OrganizationMember
+	var members []models.OrganizationMember
 	_, err = s.client.From("organization_members").
 		Select("*", "", false).
 		Eq("organization_id", orgUUID.String()).

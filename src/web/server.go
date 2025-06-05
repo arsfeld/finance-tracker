@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -92,6 +93,30 @@ func (s *Server) Start() error {
 	authHandlers := handlers.NewInertiaAuthHandlers(s.config.Client, s.inertia)
 	orgHandlers := handlers.NewInertiaOrganizationHandlers(s.config.Client, s.inertia)
 	
+	// Initialize category service and handler
+	var categoryHandler *handlers.CategoryHandler
+	if s.config.Client != nil {
+		categoryService := services.NewCategoryService(s.config.Client)
+		categoryHandler = handlers.NewCategoryHandler(categoryService)
+	}
+
+	// Initialize AI service and handler
+	var aiHandler *handlers.AIHandler
+	if openRouterKey := os.Getenv("OPENROUTER_API_KEY"); openRouterKey != "" && s.config.Client != nil {
+		openRouterURL := os.Getenv("OPENROUTER_URL")
+		modelsStr := os.Getenv("OPENROUTER_MODELS")
+		var models []string
+		if modelsStr != "" {
+			models = strings.Split(modelsStr, ",")
+		}
+		
+		aiService := services.NewAIService(s.config.Client, openRouterKey, openRouterURL, models)
+		aiHandler = handlers.NewAIHandler(aiService)
+		log.Info().Msg("AI service initialized successfully")
+	} else {
+		log.Warn().Msg("AI service disabled - OPENROUTER_API_KEY not configured")
+	}
+	
 	// Initialize River job client and handlers
 	var jobHandlers *handlers.RiverJobHandler
 	
@@ -117,23 +142,31 @@ func (s *Server) Start() error {
 				jobService := services.NewJobService(sqlxDB)
 				syncService := services.NewSyncService(sqlxDB, jobService)
 				
-				// Initialize providers (optional)
-				financialProviders := make(map[string]providers.FinancialProvider)
-				if bridgeURL := os.Getenv("SIMPLEFIN_BRIDGE_URL"); bridgeURL != "" {
-					sfProvider := simplefin.NewSimpleFin()
-					financialProviders["simplefin"] = sfProvider
-					syncService.RegisterProvider("simplefin", sfProvider)
-					log.Info().Msg("SimpleFin provider registered for job management")
-				}
-				
-				// Initialize River job client
-				riverClient, err := jobs.NewRiverJobClient(dbPool, syncService, financialProviders)
+				// Initialize crypto service
+				cryptoService, err := services.NewCryptoService()
 				if err != nil {
-					log.Warn().Err(err).Msg("Failed to create River job client - job endpoints disabled")
+					log.Warn().Err(err).Msg("Failed to create crypto service - job endpoints disabled")
 				} else {
-					syncService.SetRiverClient(riverClient)
-					jobHandlers = handlers.NewRiverJobHandler(riverClient)
-					log.Info().Msg("River job client initialized successfully")
+					// Initialize transaction repository for categorization jobs
+					transactionRepo := services.NewTransactionRepository(s.config.Client)
+					// Initialize providers (optional)
+					financialProviders := make(map[string]providers.FinancialProvider)
+					if bridgeURL := os.Getenv("SIMPLEFIN_BRIDGE_URL"); bridgeURL != "" {
+						sfProvider := simplefin.NewSimpleFin()
+						financialProviders["simplefin"] = sfProvider
+						syncService.RegisterProvider("simplefin", sfProvider)
+						log.Info().Msg("SimpleFin provider registered for job management")
+					}
+					
+					// Initialize River job client
+					riverClient, err := jobs.NewRiverJobClient(dbPool, syncService, financialProviders, cryptoService, transactionRepo)
+					if err != nil {
+						log.Warn().Err(err).Msg("Failed to create River job client - job endpoints disabled")
+					} else {
+						syncService.SetRiverClient(riverClient)
+						jobHandlers = handlers.NewRiverJobHandler(riverClient)
+						log.Info().Msg("River job client initialized successfully")
+					}
 				}
 			}
 		}
@@ -142,7 +175,7 @@ func (s *Server) Start() error {
 	}
 
 	// Setup routes
-	s.setupRoutes(r, pageHandlers, apiHandlers, authHandlers, orgHandlers, jobHandlers, authMiddleware)
+	s.setupRoutes(r, pageHandlers, apiHandlers, authHandlers, orgHandlers, jobHandlers, categoryHandler, aiHandler, authMiddleware)
 
 	// Server configuration
 	s.httpServer = &http.Server{
@@ -188,6 +221,8 @@ func (s *Server) setupRoutes(
 	authHandlers *handlers.AuthHandlers,
 	orgHandlers *handlers.OrganizationHandlers,
 	jobHandlers *handlers.RiverJobHandler,
+	categoryHandler *handlers.CategoryHandler,
+	aiHandler *handlers.AIHandler,
 	authMiddleware *auth.Middleware,
 ) {
 	// Public routes
@@ -252,14 +287,30 @@ func (s *Server) setupRoutes(
 			r.Route("/jobs", func(r chi.Router) {
 				r.Get("/", jobHandlers.ListJobs)
 				r.Get("/stats", jobHandlers.GetJobStats)
+				r.Get("/health", jobHandlers.HealthCheck)
 				r.Get("/{id}", jobHandlers.GetJob)
 				r.Post("/{id}/cancel", jobHandlers.CancelJob)
+			})
+
+			// Analysis job endpoints
+			r.Route("/analysis", func(r chi.Router) {
+				r.Post("/jobs", jobHandlers.CreateAnalysisJob)
+			})
+
+			// Maintenance job endpoints
+			r.Route("/maintenance", func(r chi.Router) {
+				r.Post("/jobs", jobHandlers.CreateMaintenanceJob)
 			})
 
 			// Worker endpoints
 			r.Route("/workers", func(r chi.Router) {
 				r.Get("/", jobHandlers.ListWorkers)
 				r.Get("/stats", jobHandlers.GetWorkerStats)
+			})
+
+			// Queue endpoints
+			r.Route("/queues", func(r chi.Router) {
+				r.Get("/", jobHandlers.GetQueues)
 			})
 		}
 
@@ -311,7 +362,24 @@ func (s *Server) setupRoutes(
 		}
 		r.Get("/", pageHandlers.SettingsPage)
 		r.Get("/connections", pageHandlers.ConnectionsPage)
+		r.Get("/categories", pageHandlers.CategoriesPage)
 	})
+
+	// Register category API routes
+	if categoryHandler != nil {
+		categoryHandler.RegisterRoutes(r)
+	}
+
+	// Register AI API routes (with auth middleware)
+	if aiHandler != nil {
+		r.Group(func(r chi.Router) {
+			if authMiddleware != nil {
+				r.Use(authMiddleware.RequireAuth)
+				r.Use(authMiddleware.RequireOrganization)
+			}
+			aiHandler.RegisterRoutes(r)
+		})
+	}
 
 	// Static files for production build
 	if !s.config.IsDevelopment {

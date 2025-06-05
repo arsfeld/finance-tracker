@@ -1,4 +1,4 @@
--- WalletMind Initial Schema Migration
+-- Finaro Initial Schema Migration
 
 -- Enable required extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";

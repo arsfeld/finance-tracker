@@ -13,11 +13,12 @@ import (
 
 // llmEngine implements the LLMEngine interface
 type llmEngine struct {
-	repo         LLMRepository
-	costManager  CostManager
-	llmClient    LLMClient // Interface for LLM API calls
-	models       []models.LLMModel
-	batchConfig  models.BatchConfig
+	repo            LLMRepository
+	costManager     CostManager
+	llmClient       LLMClient // Interface for LLM API calls
+	categoryService CategoryService
+	models          []models.LLMModel
+	batchConfig     models.BatchConfig
 }
 
 // LLMClient interface for making LLM API calls
@@ -50,13 +51,44 @@ type LLMCategorizationResult struct {
 }
 
 // NewLLMEngine creates a new LLM-based categorization engine
-func NewLLMEngine(repo LLMRepository, costManager CostManager, llmClient LLMClient, batchConfig models.BatchConfig) LLMEngine {
+func NewLLMEngine(repo LLMRepository, costManager CostManager, llmClient LLMClient, categoryService CategoryService, batchConfig models.BatchConfig) LLMEngine {
 	return &llmEngine{
-		repo:        repo,
-		costManager: costManager,
-		llmClient:   llmClient,
-		models:      models.DefaultLLMModels,
-		batchConfig: batchConfig,
+		repo:            repo,
+		costManager:     costManager,
+		llmClient:       llmClient,
+		categoryService: categoryService,
+		models:          getDefaultLLMModels(),
+		batchConfig:     batchConfig,
+	}
+}
+
+// getDefaultLLMModels returns the default LLM models configuration
+func getDefaultLLMModels() []models.LLMModel {
+	return []models.LLMModel{
+		{
+			Name:        "anthropic/claude-3.5-sonnet",
+			Provider:    "Anthropic",
+			CostPer1K:   0.003,
+			Accuracy:    0.95,
+			IsDefault:   true,
+			IsAvailable: true,
+		},
+		{
+			Name:        "openai/gpt-4o-mini",
+			Provider:    "OpenAI",
+			CostPer1K:   0.0001,
+			Accuracy:    0.85,
+			IsDefault:   false,
+			IsAvailable: true,
+		},
+		{
+			Name:        "google/gemini-pro-1.5",
+			Provider:    "Google",
+			CostPer1K:   0.0005,
+			Accuracy:    0.88,
+			IsDefault:   false,
+			IsAvailable: true,
+		},
 	}
 }
 
@@ -327,59 +359,37 @@ func (e *llmEngine) RecordBatch(ctx context.Context, batch *models.LLMCategoriza
 	return e.repo.CreateBatch(ctx, batch)
 }
 
-// getCategoriesForOrganization gets categories for an organization (placeholder)
+// getCategoriesForOrganization gets categories for an organization from the database
 func (e *llmEngine) getCategoriesForOrganization(ctx context.Context, organizationID uuid.UUID) ([]*models.Category, error) {
-	// This would need to be implemented to get categories from the category repository
-	// For now, return default categories
-	return []*models.Category{
-		{ID: 1, Name: "Food & Dining", OrganizationID: organizationID},
-		{ID: 2, Name: "Transportation", OrganizationID: organizationID},
-		{ID: 3, Name: "Shopping", OrganizationID: organizationID},
-		{ID: 4, Name: "Entertainment", OrganizationID: organizationID},
-		{ID: 5, Name: "Bills & Utilities", OrganizationID: organizationID},
-		{ID: 6, Name: "Healthcare", OrganizationID: organizationID},
-		{ID: 7, Name: "Education", OrganizationID: organizationID},
-		{ID: 8, Name: "Travel", OrganizationID: organizationID},
-		{ID: 9, Name: "Other", OrganizationID: organizationID},
-	}, nil
+	// Get categories from the category service
+	categories, err := e.categoryService.GetCategoriesByOrganization(ctx, organizationID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get categories from database: %w", err)
+	}
+	
+	// If no categories exist, create default ones
+	if len(categories) == 0 {
+		defaultCategories := []string{
+			"Food & Dining",
+			"Transportation",
+			"Shopping",
+			"Entertainment",
+			"Bills & Utilities",
+			"Healthcare",
+			"Education",
+			"Travel",
+			"Other",
+		}
+		
+		for _, categoryName := range defaultCategories {
+			category, err := e.categoryService.GetOrCreateCategory(ctx, organizationID, categoryName)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create default category %s: %w", categoryName, err)
+			}
+			categories = append(categories, category)
+		}
+	}
+	
+	return categories, nil
 }
 
-// buildCategorizationPrompt builds the prompt for LLM categorization
-func (e *llmEngine) buildCategorizationPrompt(transactions []*models.Transaction, categories []*models.Category) string {
-	var prompt strings.Builder
-	
-	prompt.WriteString("You are a financial transaction categorization expert. ")
-	prompt.WriteString("Your task is to categorize each transaction into the most appropriate category.\n\n")
-	
-	prompt.WriteString("Available Categories:\n")
-	for _, category := range categories {
-		prompt.WriteString(fmt.Sprintf("- %s (ID: %d)\n", category.Name, category.ID))
-	}
-	
-	prompt.WriteString("\nTransactions to categorize:\n")
-	for i, tx := range transactions {
-		prompt.WriteString(fmt.Sprintf("%d. ID: %s\n", i+1, tx.ID))
-		prompt.WriteString(fmt.Sprintf("   Amount: $%.2f\n", tx.Amount))
-		
-		if tx.MerchantName != nil {
-			prompt.WriteString(fmt.Sprintf("   Merchant: %s\n", *tx.MerchantName))
-		}
-		
-		if tx.Description != nil {
-			prompt.WriteString(fmt.Sprintf("   Description: %s\n", *tx.Description))
-		}
-		
-		prompt.WriteString(fmt.Sprintf("   Date: %s\n", tx.Date.Format("2006-01-02")))
-		prompt.WriteString("\n")
-	}
-	
-	prompt.WriteString("For each transaction, respond with a JSON object containing:\n")
-	prompt.WriteString("- transaction_id: the transaction ID\n")
-	prompt.WriteString("- category_id: the most appropriate category ID\n")
-	prompt.WriteString("- confidence: your confidence level (0.0 to 1.0)\n")
-	prompt.WriteString("- reasoning: brief explanation of your choice\n\n")
-	
-	prompt.WriteString("Respond with a JSON array of these objects, one for each transaction.")
-	
-	return prompt.String()
-}

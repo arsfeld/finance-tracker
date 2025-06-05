@@ -26,6 +26,7 @@ type CategorizationHandler struct {
 	costManager     categorization.CostManager
 	feedbackManager categorization.FeedbackManager
 	riverClient     *river.Client[any]
+	txnRepo         categorization.TransactionRepository
 }
 
 // NewCategorizationHandler creates a new categorization handler
@@ -37,6 +38,7 @@ func NewCategorizationHandler(
 	costManager categorization.CostManager,
 	feedbackManager categorization.FeedbackManager,
 	riverClient *river.Client[any],
+	txnRepo categorization.TransactionRepository,
 ) *CategorizationHandler {
 	return &CategorizationHandler{
 		engine:          engine,
@@ -46,6 +48,7 @@ func NewCategorizationHandler(
 		costManager:     costManager,
 		feedbackManager: feedbackManager,
 		riverClient:     riverClient,
+		txnRepo:         txnRepo,
 	}
 }
 
@@ -264,11 +267,29 @@ func (h *CategorizationHandler) TestRule(w http.ResponseWriter, r *http.Request)
 func (h *CategorizationHandler) GetPatterns(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	orgID := getOrganizationID(ctx)
-	_ = orgID // TODO: use this when pattern method is implemented
 	
-	// This would need a method to get all patterns
-	// For now, return empty array
-	respondWithJSON(w, r, http.StatusOK, []interface{}{})
+	// Get patterns from the pattern engine
+	patterns, err := h.patternEngine.GetPatterns(ctx, orgID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get patterns: %v", err), http.StatusInternalServerError)
+		return
+	}
+	
+	// Convert to response format
+	response := make([]map[string]interface{}, len(patterns))
+	for i, pattern := range patterns {
+		response[i] = map[string]interface{}{
+			"id":               pattern.ID,
+			"merchant_pattern": pattern.MerchantPattern,
+			"category_id":      pattern.CategoryID,
+			"confidence":       pattern.Confidence,
+			"usage_count":      pattern.UsageCount,
+			"last_used_at":     pattern.LastUsedAt,
+			"created_at":       pattern.CreatedAt,
+		}
+	}
+	
+	respondWithJSON(w, r, http.StatusOK, response)
 }
 
 // GetSimilarPatterns returns similar patterns for a merchant name
@@ -359,13 +380,55 @@ func (h *CategorizationHandler) EstimateBatchCost(w http.ResponseWriter, r *http
 		return
 	}
 	
-	// This would need to get the actual transactions to estimate properly
-	// For now, return a placeholder estimation
+	// Get the actual transactions to estimate cost
+	txnRepo := h.getTransactionRepository()
+	if txnRepo == nil {
+		http.Error(w, "Transaction repository not available", http.StatusInternalServerError)
+		return
+	}
+	
+	var transactions []*models.Transaction
+	
+	// Determine which transactions to get based on request
+	if len(request.TransactionIDs) > 0 {
+		// Get specific transactions
+		transactions, err = txnRepo.GetByIDs(ctx, request.TransactionIDs)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get transactions: %v", err), http.StatusInternalServerError)
+			return
+		}
+	} else if request.DateRange != nil {
+		// Get transactions by date range
+		transactions, err = txnRepo.GetByDateRange(ctx, orgID, request.DateRange.StartDate, request.DateRange.EndDate)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get transactions: %v", err), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// Get uncategorized transactions
+		transactions, err = txnRepo.GetUncategorized(ctx, orgID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get uncategorized transactions: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+	
+	// Estimate cost
+	estimatedCost, err := h.llmEngine.EstimateCost(ctx, transactions, model)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to estimate cost: %v", err), http.StatusInternalServerError)
+		return
+	}
+	
+	// Estimate tokens (simplified - would need actual token counting)
+	avgTokensPerTransaction := 150 // Rough estimate
+	estimatedTokens := len(transactions) * avgTokensPerTransaction
+	
 	respondWithJSON(w, r, http.StatusOK, map[string]interface{}{
-		"estimated_cost":    0.0,
-		"estimated_tokens":  0,
+		"estimated_cost":    estimatedCost,
+		"estimated_tokens":  estimatedTokens,
 		"model":            model.Name,
-		"transaction_count": 0,
+		"transaction_count": len(transactions),
 	})
 }
 
@@ -552,5 +615,9 @@ func getUserID(ctx context.Context) uuid.UUID {
 		return uuid.Nil
 	}
 	return user.ID
+}
+
+func (h *CategorizationHandler) getTransactionRepository() categorization.TransactionRepository {
+	return h.txnRepo
 }
 

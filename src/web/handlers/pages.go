@@ -26,7 +26,7 @@ func NewInertiaPageHandlers(inertia *config.InertiaConfig) *PageHandlers {
 // HomePage renders the home page
 func (h *PageHandlers) HomePage(w http.ResponseWriter, r *http.Request) {
 	err := h.inertia.Render(w, r, "Home/Index", gonertia.Props{
-		"title": "Welcome to WalletMind",
+		"title": "Welcome to Finaro",
 	})
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to render home page")
@@ -132,5 +132,19 @@ func (h *PageHandlers) ConnectionsPage(w http.ResponseWriter, r *http.Request) {
 		"title": "Account Connections",
 		"user":  user,
 		"organization": org,
+	})
+}
+
+// CategoriesPage renders the categories and rules management page
+func (h *PageHandlers) CategoriesPage(w http.ResponseWriter, r *http.Request) {
+	user, _ := r.Context().Value(auth.UserContextKey).(map[string]interface{})
+	org, _ := r.Context().Value(auth.OrgContextKey).(map[string]interface{})
+
+	h.inertia.Render(w, r, "Settings/Categories", gonertia.Props{
+		"title": "Categories & Rules",
+		"user":  user,
+		"organization": org,
+		"categories": []interface{}{}, // Will be loaded via API
+		"rules": []interface{}{},      // Will be loaded via API
 	})
 }

@@ -217,8 +217,8 @@ CREATE POLICY "Jobs are accessible through organization membership" ON river_job
         id IN (
             SELECT job_id 
             FROM river_job_organization rjo
-            INNER JOIN organization_users ou ON rjo.organization_id = ou.organization_id
-            WHERE ou.user_id = auth.uid()
+            INNER JOIN organization_members om ON rjo.organization_id = om.organization_id
+            WHERE om.user_id = auth.uid()
         )
     );
 
@@ -227,7 +227,7 @@ CREATE POLICY "Job organization links are accessible by organization members" ON
     USING (
         organization_id IN (
             SELECT organization_id 
-            FROM organization_users 
+            FROM organization_members 
             WHERE user_id = auth.uid()
         )
     );

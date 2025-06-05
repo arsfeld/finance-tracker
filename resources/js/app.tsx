@@ -2,7 +2,7 @@ import { createRoot } from 'react-dom/client'
 import { createInertiaApp } from '@inertiajs/react'
 import '../css/app.css'
 
-const appName = 'WalletMind'
+const appName = 'Finaro'
 
 createInertiaApp({
   title: (title: string) => `${title} - ${appName}`,

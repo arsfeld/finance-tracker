@@ -15,13 +15,15 @@ import (
 
 // ruleEngine implements the RuleEngine interface
 type ruleEngine struct {
-	repo RuleRepository
+	repo     RuleRepository
+	txnRepo  TransactionRepository
 }
 
 // NewRuleEngine creates a new rule-based categorization engine
-func NewRuleEngine(repo RuleRepository) RuleEngine {
+func NewRuleEngine(repo RuleRepository, txnRepo TransactionRepository) RuleEngine {
 	return &ruleEngine{
-		repo: repo,
+		repo:    repo,
+		txnRepo: txnRepo,
 	}
 }
 
@@ -327,13 +329,51 @@ func (e *ruleEngine) GetRules(ctx context.Context, organizationID uuid.UUID) ([]
 
 // TestRule tests a rule against historical transactions
 func (e *ruleEngine) TestRule(ctx context.Context, rule *models.EnhancedCategoryRule) (*RuleTestResult, error) {
-	// This would require access to transaction repository to test against historical data
-	// For now, return a placeholder implementation
+	if e.txnRepo == nil {
+		return nil, fmt.Errorf("transaction repository not available")
+	}
+	
+	// Get recent transactions from the organization (last 90 days)
+	endDate := time.Now()
+	startDate := endDate.AddDate(0, 0, -90)
+	
+	transactions, err := e.txnRepo.GetByDateRange(ctx, rule.OrganizationID, startDate, endDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get transactions for testing: %w", err)
+	}
+	
+	// Test the rule against each transaction
+	var matchedTransactions []*models.Transaction
+	var correctMatches int
+	
+	for _, txn := range transactions {
+		matches, _ := e.evaluateRule(rule, txn)
+		if matches {
+			matchedTransactions = append(matchedTransactions, txn)
+			// Check if the transaction is already categorized with the rule's category
+			if txn.CategoryID != nil && *txn.CategoryID == rule.CategoryID {
+				correctMatches++
+			}
+		}
+	}
+	
+	// Calculate accuracy rate
+	var accuracyRate float64
+	if len(matchedTransactions) > 0 {
+		accuracyRate = float64(correctMatches) / float64(len(matchedTransactions))
+	}
+	
+	// Get up to 5 examples
+	examples := matchedTransactions
+	if len(examples) > 5 {
+		examples = examples[:5]
+	}
+	
 	return &RuleTestResult{
 		Rule:                rule,
-		MatchedTransactions: 0,
-		AccuracyRate:        0.0,
-		Examples:            []*models.Transaction{},
+		MatchedTransactions: len(matchedTransactions),
+		AccuracyRate:        accuracyRate,
+		Examples:            examples,
 	}, nil
 }
 

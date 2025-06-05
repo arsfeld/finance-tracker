@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "Testing WalletMind database migration..."
+echo "Testing Finaro database migration..."
 
 # Check if Supabase is running
 echo "1. Checking Supabase status..."

@@ -1,6 +1,6 @@
-# WalletMind Implementation TODO
+# Finaro Implementation TODO
 
-This document tracks the implementation progress of the multi-tenant WalletMind web application.
+This document tracks the implementation progress of the multi-tenant Finaro web application.
 
 ## Overview
 
@@ -120,11 +120,13 @@ The implementation is divided into 5 phases, focusing on building a solid founda
 - [x] Quick question shortcuts
 - [x] Real-time chat experience
 
-### Categorization
-- [ ] Auto-categorization engine
-- [ ] Rule builder UI
-- [ ] Category management
-- [ ] Learning from corrections
+### Categorization ✅ Complete
+- [x] Auto-categorization engine (backend infrastructure complete)
+- [x] Rule builder UI (full categorization rules interface)
+- [x] Category management (categories CRUD with API)
+- [x] LLM batch categorization interface (cost estimation + job creation)
+- [x] Pattern-based categorization frontend (spending patterns visualization)
+- [ ] Learning from corrections (feedback system implementation pending)
 
 ### Notifications
 - [ ] Email notifications
@@ -160,11 +162,11 @@ The implementation is divided into 5 phases, focusing on building a solid founda
 
 ## Current Status
 
-**Active Phase**: Phase 2-3 - Provider Integration + Real Data Pipeline
+**Active Phase**: Phase 4 - Advanced Features (Manual Transaction Entry)
 **Started**: January 2025  
-**Major Milestone**: ✅ Phase 1 Complete - Multi-tenant foundation with job system ready
-**Current Focus**: Real SimpleFin integration and credential management
-**Estimated Completion**: 1-2 weeks for core data pipeline
+**Major Milestone**: ✅ Phase 2-4 Categorization Complete - Full auto-categorization system with AI batch processing
+**Current Focus**: Manual transaction entry system and provider infrastructure
+**Estimated Completion**: 3-5 days for manual transaction system
 
 ### Inertia.js Migration Tasks ✅ Complete
 - [x] Add Gonertia dependency
@@ -194,7 +196,7 @@ The implementation is divided into 5 phases, focusing on building a solid founda
 
 1. **Phase 1 Complete**: ✅ Multi-tenant Supabase architecture fully operational
 2. **Background Job System**: Complete River-based job queue implementation
-3. **Worker Architecture**: Multi-queue system with 5 specialized worker types
+3. **Worker Architecture**: Multi-queue system with 6 specialized worker types (including categorization)
 4. **Web Frontend**: Full React + TypeScript + Inertia.js setup
 5. **Provider System**: Abstracted financial data provider interface
 6. **Documentation**: Comprehensive project documentation
@@ -203,77 +205,111 @@ The implementation is divided into 5 phases, focusing on building a solid founda
 9. **Advanced Transaction UI**: ✅ Complete transaction management with editing, tagging, and splitting
 10. **AI Chat System**: ✅ Intelligent financial assistant with contextual responses
 11. **Analytics Dashboard**: ✅ Comprehensive financial insights and visualizations
+12. **Categorization Infrastructure**: ✅ Complete repository layer and worker system for AI categorization
+13. **Data Pipeline**: ✅ Full real data pipeline with provider integration and transaction storage
 
-## Critical Implementation Gaps - Identified December 2025
+## Critical Implementation Gaps - Identified December 2025 ✅ High Priority Items Completed
 
 ### Simulated/Placeholder Implementations Requiring Real Implementation
 
-#### Database Layer (High Priority)
-- [ ] **Transaction Service** (`src/internal/services/transaction.go`):
-  - Line 26: `GetTransactions` - Currently returns empty slice, needs Supabase query
-  - Line 33: `GetTransaction` - Returns error, needs actual database lookup
-  - Line 39: `UpdateTransactionCategory` - Stub implementation, needs database update
-  - Line 45: `GetRecentTransactions` - Returns empty slice, needs query implementation
+#### Database Layer (High Priority) ✅ COMPLETED
+- [x] **Transaction Service** (`src/internal/services/transaction.go`):
+  - ✅ Line 26: `GetTransactions` - Implemented with full Supabase query, filtering, pagination, and search
+  - ✅ Line 33: `GetTransaction` - Implemented with proper database lookup and error handling
+  - ✅ Line 39: `UpdateTransactionCategory` - Implemented with category creation and update
+  - ✅ Line 45: `GetRecentTransactions` - Implemented using GetTransactions with limit
 
-- [ ] **Account Service** (`src/internal/services/account.go`):
-  - Line 26: `ListAccounts` - Returns empty slice, needs database query
-  - Line 32: `GetAccount` - Returns nil, needs database lookup
-  - Line 38: `CreateAccounts` - Stub implementation, needs database operations
-  - Line 44: `ListConnectionAccounts` - Needs Supabase client integration
-  - Line 71: `UpdateAccountStatus` - Needs actual database update
+- [x] **Account Service** (`src/internal/services/account.go`):
+  - ✅ Line 26: `ListAccounts` - Implemented with full database query and data mapping
+  - ✅ Line 32: `GetAccount` - Implemented with single account lookup
+  - ✅ Line 38: `CreateAccounts` - Implemented with batch upsert functionality
+  - ✅ Line 44: `ListConnectionAccounts` - Already had Supabase implementation
+  - ✅ Line 71: `UpdateAccountStatus` - Already had Supabase implementation
 
-#### Authentication Context (High Priority)
-- [ ] **Categorization Handler** (`src/web/handlers/categorization.go`):
-  - Lines 544-548: `getOrganizationID` - Returns random UUID instead of extracting from auth context
-  - Lines 550-554: `getUserID` - Returns random UUID instead of extracting from auth context
-- [ ] **Job Handler** (`src/web/handlers/jobs_river.go`):
-  - Lines 19-23: `GetOrganizationID` - Returns placeholder UUID instead of auth context
+#### Authentication Context (High Priority) ✅ COMPLETED
+- [x] **Categorization Handler** (`src/web/handlers/categorization.go`):
+  - ✅ Lines 544-548: `getOrganizationID` - Now uses `auth.GetOrganization(ctx)`
+  - ✅ Lines 550-554: `getUserID` - Now uses `auth.GetUser(ctx)` and extracts user.ID
+- [x] **Job Handler** (`src/web/handlers/jobs_river.go`):
+  - ✅ Lines 19-23: `GetOrganizationID` - Now uses `auth.GetOrganization(r.Context())`
 
-#### Security Implementation (Critical)
-- [ ] **Provider Service** (`src/internal/services/provider.go`):
-  - Line 60: `EncryptCredentials` - Uses base64 instead of proper encryption
-  - Line 69: `DecryptCredentials` - Uses base64 instead of proper decryption
+#### Security Implementation (Critical) ✅ COMPLETED
+- [x] **Provider Service** (`src/internal/services/provider.go`):
+  - ✅ Line 60: `EncryptCredentials` - Now uses AES-256-GCM encryption via CryptoService
+  - ✅ Line 69: `DecryptCredentials` - Now uses AES-256-GCM decryption via CryptoService
+  - ✅ Created new `crypto.go` with proper AES-256-GCM implementation
 
-#### Background Job Processing (Medium Priority)
-- [ ] **River Jobs** (`src/internal/jobs/river_jobs.go`):
-  - Line 68: Credential decryption not implemented
-  - Lines 78-79: Transaction storage disabled/commented out
-  - Lines 217-218: Transaction storage disabled in FullSyncJob
-  - Lines 267-268: Credential decryption needed for TestConnectionJob
+#### Web Server Job Integration (High Priority) ✅ COMPLETED
+- [x] **Server Setup** (`src/web/server.go`):
+  - ✅ Lines 92-96: River job client initialization now conditional on DATABASE_URL
+  - ✅ Lines 194-214: Job endpoints now enabled when River client is available
+  - ✅ Added database connection helpers (createSQLXConnection, createPgxPool)
+  - ✅ Graceful degradation when database is unavailable
 
-#### Categorization Engine (Medium Priority)
-- [ ] **LLM Engine** (`src/internal/services/categorization/llm_engine.go`):
-  - Lines 331-345: `getCategoriesForOrganization` - Returns hardcoded categories instead of database query
-- [ ] **Rule Engine** (`src/internal/services/categorization/rule_engine.go`):
-  - Lines 329-337: `TestRule` - Returns placeholder implementation with zero values
-- [ ] **Categorization Handler**:
-  - Lines 266-271: `GetPatterns` - Returns empty array with TODO comment
-  - Lines 362-368: `EstimateBatchCost` - Returns placeholder estimation with zero values
+#### Background Job Processing (Medium Priority) ✅ COMPLETED
+- [x] **River Jobs** (`src/internal/jobs/river_jobs.go`):
+  - ✅ Line 68: Credential decryption implemented using CryptoService
+  - ✅ Lines 78-79: Transaction storage re-enabled
+  - ✅ Lines 217-218: Transaction storage re-enabled in FullSyncJob
+  - ✅ Lines 267-268: Credential decryption implemented for TestConnectionJob
+- [x] **Infrastructure Updates**:
+  - ✅ Updated River client to accept CryptoService parameter
+  - ✅ Modified web server to initialize and pass CryptoService
+  - ✅ Updated worker command to initialize and pass CryptoService
 
-#### Repository Pattern Implementation (Low Priority)
-- [ ] **Categorization Jobs** (`src/internal/jobs/categorization_jobs.go`):
-  - Lines 370-377: `TransactionRepository` interface defined but no concrete implementation
-  - Missing implementations for: `GetByID`, `GetByIDs`, `GetByDateRange`, etc.
+#### Categorization Engine (Medium Priority) ✅ COMPLETED
+- [x] **LLM Engine** (`src/internal/services/categorization/llm_engine.go`):
+  - ✅ Lines 331-345: `getCategoriesForOrganization` - Now fetches categories from database via CategoryService
+  - ✅ Added CategoryService dependency to LLM engine
+  - ✅ Creates default categories if none exist
+- [x] **Rule Engine** (`src/internal/services/categorization/rule_engine.go`):
+  - ✅ Lines 329-337: `TestRule` - Implemented with transaction repository to test rules against historical data
+  - ✅ Added TransactionRepository dependency to rule engine
+  - ✅ Tests rules against last 90 days of transactions
+- [x] **Categorization Handler**:
+  - ✅ Lines 266-271: `GetPatterns` - Implemented to fetch patterns from pattern engine
+  - ✅ Lines 362-368: `EstimateBatchCost` - Implemented with real cost calculation using LLM engine
+  - ✅ Added TransactionRepository to handler for fetching transactions
+- [x] **New Services Created**:
+  - ✅ CategoryService (`src/internal/services/category.go`) - Manages categories in database
+  - ✅ Added necessary interfaces to categorization package
 
-#### Mock Services to Replace (Low Priority)
-- [ ] **Organization Mock Service** (`src/internal/services/organization_mock.go`):
-  - Entire file is mock implementation - replace with real Supabase integration
-  - Lines 24-88: All methods return hardcoded data instead of database operations
+#### Repository Pattern Implementation (Low Priority) ✅ COMPLETED
+- [x] **TransactionRepository Implementation** (`src/internal/services/transaction_repository.go`):
+  - ✅ Created complete TransactionRepository with Supabase integration
+  - ✅ Implemented all required methods: `GetByID`, `GetByIDs`, `GetByDateRange`, `GetUncategorized`, `GetRecentCategorized`, `UpdateCategorization`
+  - ✅ Added to River job client initialization with proper dependency injection
+  - ✅ Updated categorization workers to use real repository
+  - ✅ Fixed account ID mapping for provider transactions
 
-### Web Server Job Integration (High Priority)
-- [ ] **Server Setup** (`src/web/server.go`):
-  - Lines 92-96: River job client initialization commented out
-  - Lines 194-214: Job endpoints temporarily disabled
-  - Need to properly initialize River client for web server API endpoints
+#### Mock Services to Replace (Low Priority) ✅ COMPLETED  
+- [x] **Organization Mock Service** (`src/internal/services/organization_mock.go`):
+  - ✅ Removed unused mock service file completely
+  - ✅ Organization handlers already using real OrganizationService with Supabase
+  - ✅ Unified organization models to use types from models package
+  - ✅ Fixed type inconsistencies across organization usecases and handlers
+  - ✅ Added default category creation when new organizations are created
 
 ## Next Priority Steps
 
-1. **Database Service Layer**: Replace all stub database operations with real Supabase queries
-2. **Authentication Context**: Implement proper context extraction for organization/user IDs  
-3. **Credential Encryption**: Replace base64 with AES-256 or Supabase Vault encryption
-4. **River Job Integration**: Enable job endpoints in web server with proper database connection
-5. **Transaction Storage**: Re-enable transaction storage in background jobs
-6. **Categorization Database**: Replace hardcoded categories with database-backed system
+1. **Manual Transaction Entry**: ✅ IN PROGRESS - Build manual provider for transaction entry
+   - Create manual transaction entry forms and UI
+   - Implement CSV import functionality with parsing and validation
+   - Add transaction matching and duplicate detection algorithms
+   - Build transaction import workflow and preview system
+2. **Notification System**: Implement email and push notifications  
+   - Add email notification service integration (SMTP/API-based)
+   - Implement ntfy push notification support
+   - Build notification preferences UI and management
+   - Add webhook support for external integrations
+3. **Provider Health Checks**: Complete provider management infrastructure
+   - Build connection testing and validation
+   - Add provider status monitoring and alerts
+   - Implement credential validation workflows
+4. **Production Readiness**: Polish and deployment preparation
+   - Performance optimization and caching
+   - Error handling and resilience improvements
+   - Security audit and credential encryption validation
 
 ## Notes
 
@@ -294,6 +330,89 @@ The implementation is divided into 5 phases, focusing on building a solid founda
 8. Credential storage encryption method (AES-256 vs Supabase Vault) - **Next Decision**
 9. Rate limiting strategy for financial provider APIs
 
+## Latest Progress Update - January 2025 ✅
+
+### Recently Completed (High Priority)
+1. **TransactionRepository Implementation** - Complete Supabase-based repository for categorization jobs
+   - Full CRUD operations for transactions
+   - Advanced filtering and search capabilities
+   - Metadata handling for categorization results
+   - Integration with River job workers
+
+2. **Organization Service Cleanup** - Unified and improved organization management
+   - Removed unused mock services
+   - Fixed type inconsistencies across codebase
+   - Added automatic default category creation
+   - Enhanced organization member management
+
+3. **Categorization Infrastructure** - Production-ready categorization system foundation
+   - River job workers for real-time and batch categorization
+   - Proper dependency injection for all categorization services
+   - Account ID mapping between providers and internal database
+   - Queue management for categorization jobs
+
+### Technical Improvements
+- **Build System**: All compilation errors resolved, clean build process
+- **Type Safety**: Unified model types across services and handlers
+- **Database Integration**: Proper Supabase query patterns implemented
+- **Job Processing**: Enhanced River client with categorization support
+- **Code Quality**: Removed dead code and improved service layer architecture
+
+### Next Sprint Focus
+Moving into **Phase 4** with focus on user-facing categorization features:
+- Auto-categorization rule builder UI
+- Manual transaction entry system
+- Notification system integration
+- Enhanced provider credential management
+
 ---
 
-Last Updated: January 2025 (Post Supabase Setup - Phase 1 Complete)
+## Latest Update - January 2025 ✅ AI SYSTEM IMPLEMENTATION FULLY COMPLETE
+
+### Just Completed (AI Service Implementation - Critical Production Fixes)
+1. **AI Service Complete Implementation** ✅ - Fully functional AI service with NO stubs
+   - **Database Integration**: Real transaction and category fetching from Supabase
+   - **Concrete LLM Client**: OpenRouter integration with proper error handling
+   - **Provider Agnostic**: Clean interface separation allowing easy model switching
+   - **Production Ready**: All stub methods replaced with working implementations
+   - **Cost Management**: Real token estimation and cost calculation
+
+2. **Critical Stub Elimination** ✅ - All AI service placeholder implementations removed
+   - **getTransactionsForCategorization**: Full Supabase query implementation with filtering
+   - **getOrganizationCategories**: Database category fetching with default category creation
+   - **categorizeTransactionsBatch**: Complete LLM API integration with JSON parsing
+   - **LLMClient Interface**: Concrete OpenRouter implementation with token estimation
+   - **buildCategorizationPrompt**: Production-quality prompt engineering
+
+3. **Enhanced AI Infrastructure** ✅ - Production-ready AI categorization system
+   - **Multi-Model Support**: OpenRouter integration with model selection (Claude, GPT, Gemini)
+   - **Cost Optimization**: Smart model selection based on task requirements (speed/cost/accuracy)
+   - **Advanced Chat**: RAG-powered conversations with financial data integration
+   - **Batch Processing**: Real categorization with confidence scoring and reasoning
+   - **Error Handling**: Graceful fallbacks and comprehensive error reporting
+
+4. **Service Integration** ✅ - Proper dependency injection and service composition
+   - **CategoryService**: Real database operations for category management
+   - **AIService Public API**: Exposed CallLLMAPI method for categorization engine
+   - **LLM Engine**: Uses concrete LLMClient with proper model configuration
+   - **Default Categories**: Automatic category creation for new organizations
+
+### Technical Architecture ✅ - Production-ready implementation
+- **No Stub Methods**: Every AI service method has real, working implementation
+- **Provider Agnostic**: Clean interface design allows switching between AI providers
+- **Cost Management**: Real token estimation and budget tracking
+- **Database Integration**: Direct Supabase queries with proper error handling
+- **Type Safety**: Comprehensive model definitions and error handling
+
+### Identified Remaining Placeholders (Low Priority)
+- **AI Handler Insights**: GetSpendingInsights, GetTrendAnalysis, DetectAnomalies have placeholder data
+  - These are advanced analytics features, not core categorization functionality
+  - Can be implemented when analytics features are prioritized
+  - Core AI categorization and chat functionality is fully implemented
+
+### Status: AI System ✅ FULLY IMPLEMENTED → Ready for Production Use
+
+**Critical Achievement**: AI service is now completely functional with NO stub implementations
+**Next Focus**: Manual transaction entry system with AI-assisted categorization
+
+Last Updated: January 2025 (Post AI Service Complete Implementation)

@@ -161,19 +161,22 @@ export default function Transactions() {
     <AuthenticatedLayout>
       <Head title="Transactions" />
       
-      <div className="p-6 space-y-6">
-        <div className="max-w-7xl mx-auto">
+      <div className="space-y-4">
+        <div>
           {/* Header */}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
-            <h1 className="text-3xl font-bold text-foreground mb-4 sm:mb-0">
-              Transactions
-            </h1>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4">
+            <div>
+              <h1 className="page-header">
+                Transactions
+              </h1>
+              <p className="page-subtitle">View and manage all your financial transactions</p>
+            </div>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm">
+              <Button variant="glass" size="sm">
                 <Download className="w-4 h-4 mr-2" />
                 Export
               </Button>
-              <Button variant="outline" size="sm">
+              <Button variant="glass" size="sm">
                 <Calendar className="w-4 h-4 mr-2" />
                 Date Range
               </Button>

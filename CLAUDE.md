@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-WalletMind is now a multi-tenant web application using Supabase for the backend. It allows multiple users to track their finances collaboratively within organizations.
+Finaro is now a multi-tenant web application using Supabase for the backend. It allows multiple users to track their finances collaboratively within organizations.
 
 ## Memories
 

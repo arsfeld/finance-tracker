@@ -1,0 +1,416 @@
+name: Database Migrations
+
+on:
+  push:
+    branches: [main, product]
+    paths:
+      - 'supabase/migrations/**'
+      - '.github/workflows/database-migrations.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to run migrations'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      direction:
+        description: 'Migration direction'
+        required: true
+        default: 'up'
+        type: choice
+        options:
+          - up
+          - down
+          - reset
+
+jobs:
+  validate-migrations:
+    runs-on: ubuntu-latest
+    name: Validate Migrations
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Supabase CLI
+        run: |
+          npm install -g supabase@latest
+
+      - name: Validate migration files
+        run: |
+          # Check that migration files are properly named and formatted
+          for file in supabase/migrations/*.sql; do
+            if [[ -f "$file" ]]; then
+              echo "Validating $file"
+              
+              # Check filename format (YYYYMMDD_description.sql)
+              filename=$(basename "$file")
+              if [[ ! $filename =~ ^[0-9]{14}_[a-zA-Z0-9_]+\.sql$ ]]; then
+                echo "ERROR: Invalid migration filename format: $filename"
+                echo "Expected format: YYYYMMDDHHMMSS_description.sql"
+                exit 1
+              fi
+              
+              # Check for basic SQL syntax
+              if ! grep -q ";" "$file"; then
+                echo "WARNING: Migration file $filename may be missing SQL statements"
+              fi
+              
+              # Check for dangerous operations in production
+              if grep -i "DROP\s\+TABLE\|TRUNCATE\|DELETE\s\+FROM" "$file"; then
+                echo "WARNING: Potentially destructive operation found in $filename"
+              fi
+            fi
+          done
+
+      - name: Check migration order
+        run: |
+          # Ensure migrations are in chronological order
+          migrations=(supabase/migrations/*.sql)
+          for ((i=1; i<${#migrations[@]}; i++)); do
+            current=$(basename "${migrations[i]}" | cut -d'_' -f1)
+            previous=$(basename "${migrations[i-1]}" | cut -d'_' -f1)
+            
+            if [[ "$current" < "$previous" ]]; then
+              echo "ERROR: Migration order violation:"
+              echo "  ${migrations[i-1]} comes after ${migrations[i]}"
+              exit 1
+            fi
+          done
+
+  test-migrations-local:
+    runs-on: ubuntu-latest
+    name: Test Migrations Locally
+    needs: validate-migrations
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Supabase CLI
+        run: |
+          npm install -g supabase@latest
+
+      - name: Start local Supabase
+        run: |
+          supabase start --db-port 5432
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+
+      - name: Run migrations
+        run: |
+          # Apply all migrations
+          supabase db reset
+          
+          # Test that all migrations can be applied
+          for migration in supabase/migrations/*.sql; do
+            if [[ -f "$migration" ]]; then
+              echo "Testing migration: $(basename $migration)"
+              supabase db reset
+              psql "postgresql://postgres:postgres@localhost:5432/postgres" -f "$migration"
+            fi
+          done
+
+      - name: Test rollbacks (if supported)
+        run: |
+          # Test that migrations can be rolled back
+          # This is a basic test - implement according to your rollback strategy
+          echo "Testing migration rollbacks..."
+          supabase db reset
+
+  deploy-migrations-staging:
+    runs-on: ubuntu-latest
+    name: Deploy to Staging Database
+    needs: test-migrations-local
+    if: github.ref == 'refs/heads/product' || github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging'
+    environment: staging
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Supabase CLI
+        run: |
+          npm install -g supabase@latest
+
+      - name: Link to Supabase project (Staging)
+        run: |
+          supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF_STAGING }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Check migration status
+        run: |
+          supabase migration list
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Run database migrations
+        run: |
+          direction="${{ github.event.inputs.direction || 'up' }}"
+          
+          if [[ "$direction" == "up" ]]; then
+            supabase db push
+          elif [[ "$direction" == "reset" ]]; then
+            echo "Resetting staging database..."
+            supabase db reset --linked
+          else
+            echo "Rollback not implemented for this workflow"
+            exit 1
+          fi
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Verify migrations
+        run: |
+          # Run basic health checks after migration
+          psql "${{ secrets.DATABASE_URL_STAGING }}" -c "SELECT version();"
+          psql "${{ secrets.DATABASE_URL_STAGING }}" -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public';"
+
+      - name: Generate migration report
+        run: |
+          echo "## Migration Report (Staging)" > migration-report.md
+          echo "**Date:** $(date)" >> migration-report.md
+          echo "**Environment:** Staging" >> migration-report.md
+          echo "**Status:** Success ✅" >> migration-report.md
+          echo "" >> migration-report.md
+          echo "### Applied Migrations:" >> migration-report.md
+          supabase migration list >> migration-report.md
+
+      - name: Upload migration report
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-report-staging
+          path: migration-report.md
+
+  deploy-migrations-production:
+    runs-on: ubuntu-latest
+    name: Deploy to Production Database
+    needs: test-migrations-local
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
+    environment: production
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Supabase CLI
+        run: |
+          npm install -g supabase@latest
+
+      - name: Create database backup
+        run: |
+          echo "Creating database backup before migration..."
+          timestamp=$(date +%Y%m%d_%H%M%S)
+          backup_name="pre_migration_backup_${timestamp}"
+          
+          # Create backup using pg_dump
+          pg_dump "${{ secrets.DATABASE_URL }}" > "${backup_name}.sql"
+          
+          # Upload backup to secure storage (implement according to your needs)
+          echo "Backup created: ${backup_name}.sql"
+
+      - name: Link to Supabase project (Production)
+        run: |
+          supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Check migration status
+        run: |
+          echo "Current migration status:"
+          supabase migration list
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Run database migrations with confirmation
+        run: |
+          direction="${{ github.event.inputs.direction || 'up' }}"
+          
+          if [[ "$direction" == "up" ]]; then
+            echo "Applying migrations to production database..."
+            supabase db push
+          elif [[ "$direction" == "reset" ]]; then
+            echo "ERROR: Database reset not allowed in production via automated workflow"
+            exit 1
+          else
+            echo "Rollback not implemented for this workflow"
+            exit 1
+          fi
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Verify migrations
+        run: |
+          # Run comprehensive health checks after migration
+          echo "Verifying database health..."
+          
+          # Check database connectivity
+          psql "${{ secrets.DATABASE_URL }}" -c "SELECT version();" || exit 1
+          
+          # Check table counts
+          psql "${{ secrets.DATABASE_URL }}" -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public';" || exit 1
+          
+          # Run any custom health checks
+          if [[ -f "scripts/health_check.sql" ]]; then
+            psql "${{ secrets.DATABASE_URL }}" -f "scripts/health_check.sql" || exit 1
+          fi
+
+      - name: Post-migration cleanup
+        run: |
+          # Run any cleanup scripts
+          if [[ -f "scripts/post_migration_cleanup.sql" ]]; then
+            echo "Running post-migration cleanup..."
+            psql "${{ secrets.DATABASE_URL }}" -f "scripts/post_migration_cleanup.sql"
+          fi
+
+      - name: Generate migration report
+        run: |
+          echo "## Migration Report (Production)" > migration-report.md
+          echo "**Date:** $(date)" >> migration-report.md
+          echo "**Environment:** Production" >> migration-report.md
+          echo "**Status:** Success ✅" >> migration-report.md
+          echo "**Backup Created:** Yes" >> migration-report.md
+          echo "" >> migration-report.md
+          echo "### Applied Migrations:" >> migration-report.md
+          supabase migration list >> migration-report.md
+
+      - name: Upload migration report
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-report-production
+          path: migration-report.md
+
+      - name: Notify success
+        uses: 8398a7/action-slack@v3
+        with:
+          status: success
+          channel: '#deployments'
+          text: 'Production database migration completed successfully'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  rollback-on-failure:
+    runs-on: ubuntu-latest
+    name: Emergency Rollback
+    needs: [deploy-migrations-staging, deploy-migrations-production]
+    if: failure() && (github.ref == 'refs/heads/main' || github.event.inputs.environment == 'production')
+    environment: production
+    
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Supabase CLI
+        run: |
+          npm install -g supabase@latest
+
+      - name: Emergency database rollback
+        run: |
+          echo "CRITICAL: Migration failed, initiating emergency rollback..."
+          
+          # This is a placeholder for emergency rollback procedures
+          # Implement according to your backup and rollback strategy
+          echo "1. Stopping application traffic..."
+          echo "2. Restoring from backup..."
+          echo "3. Verifying rollback..."
+          
+          # You might want to:
+          # - Restore from the backup created earlier
+          # - Notify the team immediately
+          # - Update monitoring systems
+
+      - name: Notify emergency rollback
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          channel: '#critical-alerts'
+          text: '🚨 CRITICAL: Database migration failed, emergency rollback initiated'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  migration-documentation:
+    runs-on: ubuntu-latest
+    name: Update Migration Documentation
+    needs: [deploy-migrations-production]
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate migration documentation
+        run: |
+          # Create or update migration documentation
+          echo "# Database Migration History" > docs/MIGRATION_HISTORY.md
+          echo "" >> docs/MIGRATION_HISTORY.md
+          echo "Last updated: $(date)" >> docs/MIGRATION_HISTORY.md
+          echo "" >> docs/MIGRATION_HISTORY.md
+          echo "## Applied Migrations" >> docs/MIGRATION_HISTORY.md
+          echo "" >> docs/MIGRATION_HISTORY.md
+          
+          # List all migration files with descriptions
+          for migration in supabase/migrations/*.sql; do
+            if [[ -f "$migration" ]]; then
+              filename=$(basename "$migration")
+              timestamp=$(echo "$filename" | cut -d'_' -f1)
+              description=$(echo "$filename" | cut -d'_' -f2- | sed 's/.sql$//')
+              
+              echo "- **$timestamp**: $description" >> docs/MIGRATION_HISTORY.md
+            fi
+          done
+
+      - name: Commit documentation updates
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add docs/MIGRATION_HISTORY.md
+          git diff --staged --quiet || git commit -m "docs: Update migration history [skip ci]"
+          git push

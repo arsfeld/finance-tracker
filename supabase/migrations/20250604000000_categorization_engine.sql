@@ -1,4 +1,4 @@
--- WalletMind Categorization Engine Migration
+-- Finaro Categorization Engine Migration
 -- This migration adds the enhanced categorization system with multi-layer processing
 
 -- Enable pg_trgm extension for fuzzy text matching
@@ -30,7 +30,6 @@ CREATE INDEX IF NOT EXISTS idx_transactions_description_search ON transactions U
 
 -- Transaction embeddings for RAG (when vector extension is available)
 -- Commented out until vector extension is confirmed available
-/*
 CREATE TABLE IF NOT EXISTS transaction_embeddings (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
@@ -45,7 +44,6 @@ CREATE TABLE IF NOT EXISTS transaction_embeddings (
 -- Vector similarity index
 CREATE INDEX IF NOT EXISTS idx_transaction_embeddings_vector ON transaction_embeddings USING ivfflat (embedding vector_cosine_ops);
 CREATE INDEX IF NOT EXISTS idx_transaction_embeddings_org ON transaction_embeddings (organization_id);
-*/
 
 -- LLM batch tracking for cost optimization
 CREATE TABLE IF NOT EXISTS llm_categorization_batches (

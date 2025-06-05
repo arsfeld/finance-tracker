@@ -36,7 +36,7 @@ func main() {
 	var rootCmd = &cobra.Command{
 		Use:   "finance_tracker",
 		Short: "Track your finances with AI-powered analysis",
-		Long: fmt.Sprintf(`WalletMind is a powerful tool that analyzes your financial transactions using AI.
+		Long: fmt.Sprintf(`Finaro is a powerful tool that analyzes your financial transactions using AI.
 It connects to your SimpleFin account to fetch transactions and uses OpenAI's LLM to provide
 insightful analysis of your spending patterns.
 
@@ -110,14 +110,14 @@ Example usage:
 	}
 }
 
-// run is the main function that runs the WalletMind
+// run is the main function that runs the Finaro
 func run(config RunConfig) error {
 	// Initialize logger
 	initLogger(config.Verbose)
 
 	log.Info().Msg("🔧 Starting " + GetVersion())
 
-	log.Debug().Interface("config", config).Msg("Starting WalletMind")
+	log.Debug().Interface("config", config).Msg("Starting Finaro")
 
 	log.Info().Msg("🔧 Loading configuration...")
 	settings, err := NewSettings(config.EnvFile)
@@ -333,7 +333,7 @@ func run(config RunConfig) error {
 		log.Info().Msg("ℹ️ Notifications disabled")
 	}
 
-	log.Debug().Msg("WalletMind completed successfully")
+	log.Debug().Msg("Finaro completed successfully")
 	return nil
 }
 

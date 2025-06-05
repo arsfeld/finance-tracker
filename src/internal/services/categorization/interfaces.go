@@ -50,6 +50,9 @@ type PatternEngine interface {
 	// UpdatePatternCache updates the pattern cache with new transaction data
 	UpdatePatternCache(ctx context.Context, transaction *models.Transaction, categoryID int, confidence float64) error
 	
+	// GetPatterns returns all patterns for an organization
+	GetPatterns(ctx context.Context, organizationID uuid.UUID) ([]*models.MerchantPatternCache, error)
+	
 	// GetSimilarPatterns returns similar merchant patterns for a transaction
 	GetSimilarPatterns(ctx context.Context, organizationID uuid.UUID, merchantName string, threshold float64) ([]*models.SimilarMerchantPattern, error)
 	
@@ -120,7 +123,46 @@ type FeedbackManager interface {
 	AnalyzeFeedback(ctx context.Context, organizationID uuid.UUID) (*FeedbackAnalysis, error)
 }
 
+// CategoryService defines the interface for category management
+type CategoryService interface {
+	// GetCategoriesByOrganization returns all categories for an organization
+	GetCategoriesByOrganization(ctx context.Context, organizationID uuid.UUID) ([]*models.Category, error)
+	
+	// GetOrCreateCategory gets a category by name or creates it if it doesn't exist
+	GetOrCreateCategory(ctx context.Context, organizationID uuid.UUID, name string) (*models.Category, error)
+	
+	// CreateCategory creates a new category
+	CreateCategory(ctx context.Context, category *models.Category) (*models.Category, error)
+	
+	// UpdateCategory updates an existing category
+	UpdateCategory(ctx context.Context, category *models.Category) error
+	
+	// DeleteCategory deletes a category
+	DeleteCategory(ctx context.Context, organizationID uuid.UUID, categoryID int) error
+}
+
 // Repository interfaces for data access
+
+// TransactionRepository defines the interface for transaction data access
+type TransactionRepository interface {
+	// GetByID returns a transaction by ID
+	GetByID(ctx context.Context, id uuid.UUID) (*models.Transaction, error)
+	
+	// GetByIDs returns transactions by IDs
+	GetByIDs(ctx context.Context, ids []uuid.UUID) ([]*models.Transaction, error)
+	
+	// GetByDateRange returns transactions for an organization within a date range
+	GetByDateRange(ctx context.Context, organizationID uuid.UUID, startDate, endDate time.Time) ([]*models.Transaction, error)
+	
+	// GetUncategorized returns uncategorized transactions for an organization
+	GetUncategorized(ctx context.Context, organizationID uuid.UUID) ([]*models.Transaction, error)
+	
+	// GetRecentCategorized returns recently categorized transactions
+	GetRecentCategorized(ctx context.Context, organizationID uuid.UUID, since time.Duration) ([]*models.Transaction, error)
+	
+	// UpdateCategorization updates the categorization of a transaction
+	UpdateCategorization(ctx context.Context, transactionID uuid.UUID, categoryID int, metadata models.CategorizationMetadata) error
+}
 
 // RuleRepository defines the interface for rule data access
 type RuleRepository interface {

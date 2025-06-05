@@ -1,6 +1,6 @@
 # Supabase Setup Guide
 
-This guide walks through setting up Supabase for the WalletMind application.
+This guide walks through setting up Supabase for the Finaro application.
 
 ## Prerequisites
 

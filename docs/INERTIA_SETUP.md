@@ -1,10 +1,10 @@
 # Inertia.js Setup Guide
 
-This guide explains how to set up and work with Inertia.js in the WalletMind application.
+This guide explains how to set up and work with Inertia.js in the Finaro application.
 
 ## Overview
 
-WalletMind uses Inertia.js to create a modern single-page application (SPA) experience while maintaining server-side routing. The stack includes:
+Finaro uses Inertia.js to create a modern single-page application (SPA) experience while maintaining server-side routing. The stack includes:
 
 - **Backend**: Go with Gonertia adapter
 - **Frontend**: React with Vite

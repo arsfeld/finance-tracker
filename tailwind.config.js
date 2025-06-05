@@ -48,7 +48,7 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
-        // WalletMind Brand Colors
+        // Finaro Brand Colors
         'mind-purple': '#6B46C1',
         'wealth-green': '#10B981',
         'trust-blue': '#3B82F6',

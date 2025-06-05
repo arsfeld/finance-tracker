@@ -2,7 +2,7 @@
 
 ## Overview
 
-The WalletMind Transaction Categorization Engine is a sophisticated multi-layer system that automatically categorizes financial transactions using a combination of rule-based matching, pattern recognition, batch LLM processing, and RAG-enhanced learning. The engine is designed to be cost-efficient, accurate, and continuously improving through user feedback.
+The Finaro Transaction Categorization Engine is a sophisticated multi-layer system that automatically categorizes financial transactions using a combination of rule-based matching, pattern recognition, batch LLM processing, and RAG-enhanced learning. The engine is designed to be cost-efficient, accurate, and continuously improving through user feedback.
 
 ## Architecture
 

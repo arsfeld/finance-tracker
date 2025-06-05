@@ -1,7 +1,7 @@
-# WalletMind 🧠💰
+# Finaro 🧠💰
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/arsfeld/finance-tracker/refs/heads/main/logo.jpg" alt="WalletMind Logo" width="200" height="200">
+  <img src="https://raw.githubusercontent.com/arsfeld/finance-tracker/refs/heads/main/logo.jpg" alt="Finaro Logo" width="200" height="200">
   
   **Your AI-Powered Financial Intelligence Platform**
   
@@ -14,9 +14,9 @@
 
 ---
 
-## 🎯 What is WalletMind?
+## 🎯 What is Finaro?
 
-WalletMind transforms how you understand and manage your money by combining automatic bank synchronization with conversational AI. Simply ask questions about your finances in plain English and get intelligent, actionable insights.
+Finaro transforms how you understand and manage your money by combining automatic bank synchronization with conversational AI. Simply ask questions about your finances in plain English and get intelligent, actionable insights.
 
 ### 🌟 Key Features
 
@@ -39,8 +39,8 @@ WalletMind transforms how you understand and manage your money by combining auto
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/walletmind.git
-   cd walletmind
+   git clone https://github.com/yourusername/Finaro.git
+   cd Finaro
    ```
 
 2. **Set up Supabase**
@@ -73,7 +73,7 @@ WalletMind transforms how you understand and manage your money by combining auto
 ## 🏗️ Architecture Overview
 
 ```
-WalletMind
+Finaro
 ├── 🧠 AI Layer (OpenRouter)
 │   ├── Natural language processing
 │   ├── Financial insights generation
@@ -131,9 +131,9 @@ See our [detailed roadmap](docs/ROADMAP.md) for more information.
 
 ## 💬 Community
 
-- [Discord](https://discord.gg/walletmind) - Join our community
-- [Twitter](https://twitter.com/walletmind) - Follow for updates
-- [Blog](https://blog.walletmind.io) - Financial insights and tips
+- [Discord](https://discord.gg/Finaro) - Join our community
+- [Twitter](https://twitter.com/Finaro) - Follow for updates
+- [Blog](https://blog.Finaro.io) - Financial insights and tips
 
 ## 🔒 Security
 
@@ -142,11 +142,11 @@ See our [detailed roadmap](docs/ROADMAP.md) for more information.
 - SOC2 compliance (in progress)
 - Regular security audits
 
-Found a security issue? Please email security@walletmind.io
+Found a security issue? Please email security@Finaro.io
 
 ## 📄 License
 
-WalletMind is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Finaro is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
@@ -158,7 +158,7 @@ WalletMind is licensed under the MIT License - see the [LICENSE](LICENSE) file f
 ---
 
 <div align="center">
-  Made with ❤️ by the WalletMind team
+  Made with ❤️ by the Finaro team
   
-  **[Website](https://walletmind.io) • [Documentation](https://docs.walletmind.io) • [Support](mailto:support@walletmind.io)**
+  **[Website](https://Finaro.io) • [Documentation](https://docs.Finaro.io) • [Support](mailto:support@Finaro.io)**
 </div>

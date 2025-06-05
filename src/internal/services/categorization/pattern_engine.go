@@ -184,6 +184,11 @@ func (e *patternEngine) UpdatePatternCache(ctx context.Context, transaction *mod
 	return e.repo.UpdatePattern(ctx, transaction.OrganizationID, merchantName, categoryID, confidence)
 }
 
+// GetPatterns returns all patterns for an organization
+func (e *patternEngine) GetPatterns(ctx context.Context, organizationID uuid.UUID) ([]*models.MerchantPatternCache, error) {
+	return e.repo.GetPatternsByOrganization(ctx, organizationID)
+}
+
 // GetSimilarPatterns returns similar merchant patterns for a transaction
 func (e *patternEngine) GetSimilarPatterns(ctx context.Context, organizationID uuid.UUID, merchantName string, threshold float64) ([]*models.SimilarMerchantPattern, error) {
 	return e.repo.GetSimilarPatterns(ctx, organizationID, merchantName, threshold)

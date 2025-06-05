@@ -78,5 +78,3 @@ CREATE POLICY "Admins can remove members" ON organization_members
 -- Grant execute permission on the helper functions
 GRANT EXECUTE ON FUNCTION is_organization_admin(uuid, uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION is_organization_member(uuid, uuid) TO authenticated;
-GRANT EXECUTE ON FUNCTION is_organization_admin(uuid) TO authenticated;  
-GRANT EXECUTE ON FUNCTION is_organization_member(uuid) TO authenticated;

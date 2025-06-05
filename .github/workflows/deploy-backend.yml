@@ -1,0 +1,391 @@
+name: Deploy Backend API
+
+on:
+  push:
+    branches: [main, product]
+    paths:
+      - 'src/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Dockerfile'
+      - 'fly.toml'
+      - '.github/workflows/deploy-backend.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'go.mod'
+      - 'Dockerfile'
+  workflow_dispatch:
+
+env:
+  GO_VERSION: '1.21'
+  FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: Test Backend
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Run vet
+        run: go vet ./src/...
+
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: latest
+          working-directory: src
+
+      - name: Run tests
+        run: |
+          go test -v -race -coverprofile=coverage.out ./src/...
+        env:
+          DATABASE_URL: postgres://testuser:testpass@localhost:5432/testdb?sslmode=disable
+          GO_ENV: test
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.out
+          flags: backend
+          name: backend-coverage
+
+      - name: Generate test report
+        uses: dorny/test-reporter@v1
+        if: success() || failure()
+        with:
+          name: Go Test Results
+          path: '*.json'
+          reporter: 'golang-json'
+
+  security-scan:
+    runs-on: ubuntu-latest
+    name: Security Scan
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run Gosec Security Scanner
+        uses: securecodewarrior/github-action-gosec@master
+        with:
+          args: './src/...'
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Scan for secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./src/
+          base: main
+          head: HEAD
+
+  build:
+    runs-on: ubuntu-latest
+    name: Build Docker Image
+    needs: test
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: finaro-api:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=docker,dest=/tmp/finaro-api.tar
+
+      - name: Upload Docker image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp/finaro-api.tar
+          retention-days: 1
+
+  deploy-staging:
+    runs-on: ubuntu-latest
+    name: Deploy to Staging
+    needs: [test, build]
+    if: github.ref == 'refs/heads/product' || github.event_name == 'pull_request'
+    environment: staging
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Create staging fly.toml
+        run: |
+          cp fly.toml fly.staging.toml
+          sed -i 's/app = "finaro-api"/app = "finaro-api-staging"/' fly.staging.toml
+          sed -i 's/primary_region = "iad"/primary_region = "iad"/' fly.staging.toml
+
+      - name: Deploy to Fly.io (Staging)
+        run: |
+          flyctl deploy --config fly.staging.toml --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Run health check
+        run: |
+          sleep 30
+          curl -f https://finaro-api-staging.fly.dev/health || exit 1
+
+      - name: Run database migrations (Staging)
+        run: |
+          flyctl ssh console --config fly.staging.toml -C './main migrate up'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+  deploy-production:
+    runs-on: ubuntu-latest
+    name: Deploy to Production
+    needs: [test, build]
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy to Fly.io (Production)
+        run: |
+          flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Run health check
+        run: |
+          sleep 30
+          curl -f https://api.finaro.finance/health || exit 1
+
+      - name: Run database migrations (Production)
+        run: |
+          flyctl ssh console -C './main migrate up'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Scale application
+        run: |
+          flyctl scale count 2 --yes
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+  deploy-worker:
+    runs-on: ubuntu-latest
+    name: Deploy Worker Process
+    needs: deploy-production
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Create worker fly.toml
+        run: |
+          cp fly.toml fly.worker.toml
+          sed -i 's/app = "finaro-api"/app = "finaro-worker"/' fly.worker.toml
+          sed -i 's/\[processes\]/[processes]/' fly.worker.toml
+          sed -i 's/app = ".\/main web"/worker = ".\/main worker"/' fly.worker.toml
+          # Remove HTTP service for worker
+          sed -i '/\[http_service\]/,/^$/d' fly.worker.toml
+
+      - name: Deploy Worker to Fly.io
+        run: |
+          flyctl deploy --config fly.worker.toml --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Scale worker
+        run: |
+          flyctl scale count 1 --config fly.worker.toml --yes
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    name: Integration Tests
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/product' || github.event_name == 'pull_request'
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run integration tests
+        run: |
+          # Create integration test script
+          cat > integration_test.go << 'EOF'
+          package main
+          
+          import (
+              "fmt"
+              "net/http"
+              "testing"
+              "time"
+          )
+          
+          func TestHealthEndpoint(t *testing.T) {
+              client := &http.Client{Timeout: 10 * time.Second}
+              resp, err := client.Get("https://finaro-api-staging.fly.dev/health")
+              if err != nil {
+                  t.Fatalf("Health check failed: %v", err)
+              }
+              defer resp.Body.Close()
+              
+              if resp.StatusCode != http.StatusOK {
+                  t.Fatalf("Expected status 200, got %d", resp.StatusCode)
+              }
+          }
+          
+          func TestAPIVersion(t *testing.T) {
+              client := &http.Client{Timeout: 10 * time.Second}
+              resp, err := client.Get("https://finaro-api-staging.fly.dev/api/v1/health")
+              if err != nil {
+                  t.Fatalf("API version check failed: %v", err)
+              }
+              defer resp.Body.Close()
+              
+              if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotFound {
+                  t.Fatalf("Unexpected status %d", resp.StatusCode)
+              }
+          }
+          EOF
+          
+          go test -v ./integration_test.go
+
+      - name: Load testing with k6
+        uses: grafana/k6-action@v0.3.1
+        with:
+          filename: .github/k6/load-test.js
+        env:
+          API_BASE_URL: https://finaro-api-staging.fly.dev
+
+  performance-monitoring:
+    runs-on: ubuntu-latest
+    name: Performance Monitoring
+    needs: deploy-production
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Monitor API performance
+        run: |
+          # Simple performance monitoring script
+          for i in {1..5}; do
+            start_time=$(date +%s%N)
+            curl -s -o /dev/null -w "%{http_code}" https://api.finaro.finance/health
+            end_time=$(date +%s%N)
+            duration=$((($end_time - $start_time) / 1000000))
+            echo "Request $i: ${duration}ms"
+            sleep 2
+          done
+
+      - name: Notify on performance degradation
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          channel: '#alerts'
+          text: 'API performance degradation detected in production'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  rollback:
+    runs-on: ubuntu-latest
+    name: Rollback on Failure
+    needs: deploy-production
+    if: failure() && github.ref == 'refs/heads/main'
+    environment: production
+    
+    steps:
+      - name: Setup Flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Rollback deployment
+        run: |
+          # Get previous release and rollback
+          PREVIOUS_VERSION=$(flyctl releases --json | jq -r '.[1].version')
+          flyctl releases rollback $PREVIOUS_VERSION --yes
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Notify rollback
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          channel: '#alerts'
+          text: 'Production deployment failed, rollback initiated'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

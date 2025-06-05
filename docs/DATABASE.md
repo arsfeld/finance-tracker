@@ -2,7 +2,7 @@
 
 ## Overview
 
-WalletMind uses SQLite as its primary database. The schema is designed for multi-tenancy, data integrity, and query performance.
+Finaro uses SQLite as its primary database. The schema is designed for multi-tenancy, data integrity, and query performance.
 
 ## Design Principles
 

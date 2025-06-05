@@ -2,7 +2,7 @@
 
 ## Overview
 
-The WalletMind API is a RESTful API that provides access to financial data and analytics. All endpoints require authentication except for auth endpoints.
+The Finaro API is a RESTful API that provides access to financial data and analytics. All endpoints require authentication except for auth endpoints.
 
 ## Base URL
 

@@ -24,7 +24,7 @@ func webCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "web",
 		Short: "Run the web server",
-		Long:  `Start the WalletMind web server with health check and API endpoints.`,
+		Long:  `Start the Finaro web server with health check and API endpoints.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWebServer(cfg)
 		},
@@ -41,7 +41,7 @@ func runWebServer(cfg WebConfig) error {
 	// Initialize logger
 	initLogger(cfg.Environment == "development")
 
-	log.Info().Str("version", GetVersion()).Msg("🚀 Starting WalletMind Web Server")
+	log.Info().Str("version", GetVersion()).Msg("🚀 Starting Finaro Web Server")
 
 	// Load settings
 	_, err := NewSettings(cfg.EnvFile)

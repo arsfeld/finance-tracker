@@ -1,8 +1,8 @@
-# WalletMind - Product Documentation
+# Finaro - Product Documentation
 
 ## 🧠 Product Vision
 
-WalletMind is an AI-powered financial intelligence platform that transforms how individuals and teams understand and manage their money. By combining automatic transaction tracking with conversational AI, WalletMind makes financial insights accessible, actionable, and collaborative.
+Finaro is an AI-powered financial intelligence platform that transforms how individuals and teams understand and manage their money. By combining automatic transaction tracking with conversational AI, Finaro makes financial insights accessible, actionable, and collaborative.
 
 ## 🎯 Mission Statement
 
@@ -50,7 +50,7 @@ To democratize financial intelligence by making sophisticated financial analysis
 ## 🔑 Key Differentiators
 
 1. **ChatGPT for Finance**: Natural language financial analysis
-2. **Team Finance**: First WalletMind built for collaboration
+2. **Team Finance**: First Finaro built for collaboration
 3. **Smart Notifications**: Only alerts that matter
 4. **No Manual Entry**: Automatic sync with bank accounts
 5. **Pattern Recognition**: AI learns your habits and alerts anomalies

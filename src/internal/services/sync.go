@@ -146,7 +146,7 @@ func (s *SyncService) GetAccountsByConnection(ctx context.Context, connectionID 
 func (s *SyncService) StoreAccounts(ctx context.Context, organizationID, connectionID uuid.UUID, accounts []providers.ProviderAccount) error {
 	for _, account := range accounts {
 		// Check if account already exists
-		existingID, err := s.getAccountByProviderID(ctx, connectionID, account.ID)
+		existingID, err := s.GetAccountByProviderID(ctx, connectionID, account.ID)
 		if err == nil {
 			// Update existing account
 			query := `
@@ -224,7 +224,8 @@ func (s *SyncService) UpdateConnectionStatus(ctx context.Context, connectionID u
 
 // Helper methods
 
-func (s *SyncService) getAccountByProviderID(ctx context.Context, connectionID uuid.UUID, providerID string) (uuid.UUID, error) {
+// GetAccountByProviderID gets the internal account UUID by provider account ID
+func (s *SyncService) GetAccountByProviderID(ctx context.Context, connectionID uuid.UUID, providerID string) (uuid.UUID, error) {
 	var accountID uuid.UUID
 	query := `SELECT id FROM bank_accounts WHERE connection_id = $1 AND provider_account_id = $2`
 	err := s.db.GetContext(ctx, &accountID, query, connectionID, providerID)

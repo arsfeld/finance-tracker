@@ -7,6 +7,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"finance_tracker/src/internal/config"
+	"finance_tracker/src/internal/models"
 	"finance_tracker/src/internal/services"
 )
 
@@ -55,7 +56,7 @@ func (uc *OrganizationUseCase) ListUserOrganizations(ctx context.Context, userID
 }
 
 // CreateOrganization creates a new organization with the user as owner
-func (uc *OrganizationUseCase) CreateOrganization(ctx context.Context, req CreateOrganizationRequest) (*services.Organization, error) {
+func (uc *OrganizationUseCase) CreateOrganization(ctx context.Context, req CreateOrganizationRequest) (*models.Organization, error) {
 	if req.Name == "" {
 		return nil, fmt.Errorf("organization name is required")
 	}
@@ -89,7 +90,7 @@ func (uc *OrganizationUseCase) CreateOrganization(ctx context.Context, req Creat
 }
 
 // GetOrganization retrieves an organization by ID
-func (uc *OrganizationUseCase) GetOrganization(ctx context.Context, orgID string) (*services.Organization, error) {
+func (uc *OrganizationUseCase) GetOrganization(ctx context.Context, orgID string) (*models.Organization, error) {
 	if orgID == "" {
 		return nil, fmt.Errorf("organization ID is required")
 	}
@@ -152,7 +153,7 @@ type MemberRequest struct {
 }
 
 // GetOrganizationMembers retrieves all members of an organization
-func (uc *OrganizationUseCase) GetOrganizationMembers(ctx context.Context, orgID string) ([]services.OrganizationMember, error) {
+func (uc *OrganizationUseCase) GetOrganizationMembers(ctx context.Context, orgID string) ([]models.OrganizationMember, error) {
 	if orgID == "" {
 		return nil, fmt.Errorf("organization ID is required")
 	}

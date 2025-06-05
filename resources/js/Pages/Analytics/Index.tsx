@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import AIChat from '@/components/AIChat'
+import AIInsights from '@/components/AIInsights'
 import { 
   TrendingUp,
   TrendingDown,
@@ -301,8 +302,10 @@ export default function Analytics() {
               </Card>
             </div>
 
-            {/* Right Column - AI Chat */}
+            {/* Right Column - AI Features */}
             <div className="space-y-6">
+              <AIInsights />
+              
               <AIChat
                 title="AI Financial Assistant"
                 placeholder="Ask about your spending, budgets, or analytics..."

@@ -14,8 +14,9 @@ import (
 // SyncTransactionsJob handles transaction synchronization
 type SyncTransactionsJob struct {
 	river.WorkerDefaults[SyncTransactionsArgs]
-	syncService *services.SyncService
-	providers   map[string]providers.FinancialProvider
+	syncService   *services.SyncService
+	providers     map[string]providers.FinancialProvider
+	cryptoService *services.CryptoService
 }
 
 func (SyncTransactionsJob) Kind() string { return "sync_transactions" }
@@ -64,19 +65,23 @@ func (job *SyncTransactionsJob) Work(ctx context.Context, j *river.Job[SyncTrans
 	for _, account := range accounts {
 		log.Printf("Syncing transactions for account %s (%s)", account.Name, account.ID)
 		
-		// Get transactions from provider  
-		// TODO: Implement credential decryption
-		credentials := make(map[string]string)
+		// Get transactions from provider
+		// Decrypt credentials
+		credentials, err := job.cryptoService.DecryptCredentials(connection.CredentialsEncrypted)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt credentials: %w", err)
+		}
 		transactions, err := provider.GetTransactions(ctx, credentials, account.ProviderAccountID, *startDate, *endDate)
 		if err != nil {
 			log.Printf("Warning: failed to get transactions for account %s: %v", account.ID, err)
 			continue
 		}
 		
+		// Use the account ID directly (it's already a UUID in our database)
+		accountUUID := account.ID
+		
 		// Store transactions in database
-		// Convert account ID string to UUID - this needs proper implementation
-		// For now, skip storing transactions
-		// err = job.syncService.StoreTransactions(ctx, args.OrganizationID, account.ID, transactions)
+		err = job.syncService.StoreTransactions(ctx, args.OrganizationID, accountUUID, transactions)
 		if err != nil {
 			log.Printf("Warning: failed to store transactions for account %s: %v", account.ID, err)
 			continue
@@ -100,8 +105,9 @@ func (job *SyncTransactionsJob) Work(ctx context.Context, j *river.Job[SyncTrans
 // SyncAccountsJob handles account synchronization
 type SyncAccountsJob struct {
 	river.WorkerDefaults[SyncAccountsArgs]
-	syncService *services.SyncService
-	providers   map[string]providers.FinancialProvider
+	syncService   *services.SyncService
+	providers     map[string]providers.FinancialProvider
+	cryptoService *services.CryptoService
 }
 
 func (SyncAccountsJob) Kind() string { return "sync_accounts" }
@@ -122,8 +128,11 @@ func (job *SyncAccountsJob) Work(ctx context.Context, j *river.Job[SyncAccountsA
 	}
 	
 	// Step 2: Fetch accounts from provider
-	// TODO: Implement credential decryption
-	credentials := make(map[string]string)
+	// Decrypt credentials
+	credentials, err := job.cryptoService.DecryptCredentials(connection.CredentialsEncrypted)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt credentials: %w", err)
+	}
 	accounts, err := provider.ListAccounts(ctx, credentials)
 	if err != nil {
 		return fmt.Errorf("failed to fetch accounts from provider: %w", err)
@@ -150,8 +159,9 @@ func (job *SyncAccountsJob) Work(ctx context.Context, j *river.Job[SyncAccountsA
 // FullSyncJob handles comprehensive synchronization of both accounts and transactions
 type FullSyncJob struct {
 	river.WorkerDefaults[FullSyncArgs]
-	syncService *services.SyncService
-	providers   map[string]providers.FinancialProvider
+	syncService   *services.SyncService
+	providers     map[string]providers.FinancialProvider
+	cryptoService *services.CryptoService
 }
 
 func (FullSyncJob) Kind() string { return "full_sync" }
@@ -174,8 +184,11 @@ func (job *FullSyncJob) Work(ctx context.Context, j *river.Job[FullSyncArgs]) er
 	
 	// Step 2: Sync accounts
 	log.Printf("Full sync step 2/4: Syncing accounts")
-	// TODO: Implement credential decryption
-	credentials := make(map[string]string)
+	// Decrypt credentials
+	credentials, err := job.cryptoService.DecryptCredentials(connection.CredentialsEncrypted)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt credentials: %w", err)
+	}
 	accounts, err := provider.ListAccounts(ctx, credentials)
 	if err != nil {
 		return fmt.Errorf("failed to fetch accounts from provider: %w", err)
@@ -213,9 +226,15 @@ func (job *FullSyncJob) Work(ctx context.Context, j *river.Job[FullSyncArgs]) er
 			continue
 		}
 		
-		// Convert account ID string to UUID - this needs proper implementation
-		// For now, skip storing transactions
-		// err = job.syncService.StoreTransactions(ctx, args.OrganizationID, account.ID, transactions)
+		// Get the UUID for this account from our database (accounts here are from provider)
+		accountUUID, err := job.syncService.GetAccountByProviderID(ctx, args.ConnectionID, account.ID)
+		if err != nil {
+			log.Printf("Warning: failed to get account UUID for provider account %s: %v", account.ID, err)
+			continue
+		}
+		
+		// Store transactions in database
+		err = job.syncService.StoreTransactions(ctx, args.OrganizationID, accountUUID, transactions)
 		if err != nil {
 			log.Printf("Warning: failed to store transactions for account %s: %v", account.ID, err)
 			continue
@@ -240,8 +259,9 @@ func (job *FullSyncJob) Work(ctx context.Context, j *river.Job[FullSyncArgs]) er
 // TestConnectionJob validates provider connectivity
 type TestConnectionJob struct {
 	river.WorkerDefaults[TestConnectionArgs]
-	syncService *services.SyncService
-	providers   map[string]providers.FinancialProvider
+	syncService   *services.SyncService
+	providers     map[string]providers.FinancialProvider
+	cryptoService *services.CryptoService
 }
 
 func (TestConnectionJob) Kind() string { return "test_connection" }
@@ -264,8 +284,11 @@ func (job *TestConnectionJob) Work(ctx context.Context, j *river.Job[TestConnect
 	
 	// Step 3: Test connection by listing accounts
 	log.Printf("Testing connection by fetching accounts...")
-	// TODO: Implement credential decryption
-	credentials := make(map[string]string)
+	// Decrypt credentials
+	credentials, err := job.cryptoService.DecryptCredentials(connection.CredentialsEncrypted)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt credentials: %w", err)
+	}
 	accounts, err := provider.ListAccounts(ctx, credentials)
 	if err != nil {
 		return fmt.Errorf("connection test failed: %w", err)

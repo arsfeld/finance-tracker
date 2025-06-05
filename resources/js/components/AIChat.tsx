@@ -173,17 +173,62 @@ Could you be more specific about what aspect of your finances you'd like to expl
     // Call callback if provided
     onMessageSent?.(currentMessage)
 
-    // Simulate AI processing time
-    setTimeout(() => {
+    try {
+      // Call the enhanced AI API with RAG
+      const response = await fetch('/api/v1/ai/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: currentMessage,
+          conversation_history: chatHistory.slice(-10).map(msg => ({
+            role: msg.type === 'user' ? 'user' : 'assistant',
+            content: msg.message
+          })),
+          use_rag: true,
+          context: context
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const data = await response.json()
+      
+      const aiResponse: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        type: 'ai',
+        message: data.response,
+        timestamp: new Date().toLocaleString(),
+        metadata: {
+          suggestions: data.suggestions || ["Tell me more", "Show breakdown", "What's next?"],
+          insights: data.insights || [],
+          charts: data.charts || []
+        }
+      }
+      
+      setChatHistory(prev => [...prev, aiResponse])
+      
+    } catch (error) {
+      console.error('Failed to get AI response:', error)
+      
+      // Fallback to mock response if API fails
       const aiResponse: ChatMessage = {
         id: (Date.now() + 1).toString(),
         type: 'ai',
         message: generateAIResponse(currentMessage),
-        timestamp: new Date().toLocaleString()
+        timestamp: new Date().toLocaleString(),
+        metadata: {
+          suggestions: ["Try again", "Check connection", "Contact support"]
+        }
       }
+      
       setChatHistory(prev => [...prev, aiResponse])
+    } finally {
       setIsLoading(false)
-    }, 1000 + Math.random() * 1000) // 1-2 second delay
+    }
   }
 
   const handleQuickQuestion = (question: string) => {

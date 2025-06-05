@@ -44,7 +44,7 @@ func workerCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&cfg.EnvFile, "env-file", ".env", "Path to environment file")
 	cmd.Flags().StringVar(&cfg.Environment, "environment", "development", "Environment (development/production)")
-	cmd.Flags().StringSliceVar(&cfg.Queues, "queues", []string{"sync", "analysis", "maintenance", "default", "high_priority"}, "Queues to process")
+	cmd.Flags().StringSliceVar(&cfg.Queues, "queues", []string{"sync", "analysis", "maintenance", "default", "high_priority", "categorization"}, "Queues to process")
 	cmd.Flags().IntVar(&cfg.Concurrency, "concurrency", 5, "Number of concurrent jobs to process")
 
 	return cmd
@@ -54,7 +54,7 @@ func runWorker(cfg WorkerConfig) error {
 	// Initialize logger
 	initLogger(cfg.Environment == "development")
 
-	log.Info().Str("version", GetVersion()).Msg("🚀 Starting WalletMind Worker")
+	log.Info().Str("version", GetVersion()).Msg("🚀 Starting Finaro Worker")
 
 	// Load settings
 	settings, err := NewSettings(cfg.EnvFile)
@@ -63,7 +63,7 @@ func runWorker(cfg WorkerConfig) error {
 	}
 
 	// Initialize Supabase client (optional for now)
-	_, err = config.NewSupabaseClient()
+	supabaseClient, err := config.NewSupabaseClient()
 	if err != nil {
 		log.Warn().Err(err).Msg("Failed to initialize Supabase client - continuing without it")
 	}
@@ -85,6 +85,21 @@ func runWorker(cfg WorkerConfig) error {
 	// Initialize services
 	jobService := services.NewJobService(sqlxDB)
 	syncService := services.NewSyncService(sqlxDB, jobService)
+	
+	// Initialize crypto service
+	cryptoService, err := services.NewCryptoService()
+	if err != nil {
+		return fmt.Errorf("failed to create crypto service: %w", err)
+	}
+	
+	// Initialize transaction repository for categorization jobs
+	var transactionRepo *services.TransactionRepository
+	if supabaseClient != nil {
+		transactionRepo = services.NewTransactionRepository(supabaseClient)
+		log.Info().Msg("Transaction repository initialized for categorization jobs")
+	} else {
+		log.Warn().Msg("Transaction repository not available - categorization jobs will be disabled")
+	}
 
 	// Initialize providers
 	financialProviders := make(map[string]providers.FinancialProvider)
@@ -96,7 +111,7 @@ func runWorker(cfg WorkerConfig) error {
 	}
 
 	// Initialize River job client
-	riverClient, err := jobs.NewRiverJobClient(dbPool, syncService, financialProviders)
+	riverClient, err := jobs.NewRiverJobClient(dbPool, syncService, financialProviders, cryptoService, transactionRepo)
 	if err != nil {
 		return fmt.Errorf("failed to create River job client: %w", err)
 	}

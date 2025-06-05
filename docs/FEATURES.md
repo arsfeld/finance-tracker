@@ -1,4 +1,4 @@
-# WalletMind - Feature Specification
+# Finaro - Feature Specification
 
 ## 🎯 MVP Features (Version 1.0)
 

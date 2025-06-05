@@ -1,8 +1,8 @@
-# WalletMind Architecture
+# Finaro Architecture
 
 ## Overview
 
-WalletMind is a multi-tenant web application that helps users track and analyze their financial transactions. It supports multiple financial data providers, AI-powered insights, and collaborative features for organizations.
+Finaro is a multi-tenant web application that helps users track and analyze their financial transactions. It supports multiple financial data providers, AI-powered insights, and collaborative features for organizations.
 
 ## Technology Stack
 

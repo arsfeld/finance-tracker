@@ -61,27 +61,19 @@ jobs:
           npx html-validate index.html || echo "HTML validation warnings (non-blocking)"
 
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/pages-action@v1
+        uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: finaro-landing
-          directory: landing/dist
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
-          wranglerVersion: '3'
+          command: pages deploy landing/dist --project-name=finaro-landing
 
       - name: Deploy Preview (PR only)
         if: github.event_name == 'pull_request'
-        uses: cloudflare/pages-action@v1
+        uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: finaro-landing
-          directory: landing/dist
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
-          wranglerVersion: '3'
-        env:
-          CLOUDFLARE_PAGES_BRANCH: ${{ github.head_ref }}
+          command: pages deploy landing/dist --project-name=finaro-landing --compatibility-date=2024-01-01
 
       - name: Lighthouse CI
         if: github.event_name == 'pull_request'

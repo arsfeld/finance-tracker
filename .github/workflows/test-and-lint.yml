@@ -2,9 +2,9 @@ name: Test and Lint
 
 on:
   push:
-    branches: [main, product, develop]
+    branches: [main, develop]
   pull_request:
-    branches: [main, product]
+    branches: [main]
   workflow_dispatch:
 
 env:

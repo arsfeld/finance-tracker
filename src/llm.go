@@ -15,10 +15,11 @@ import (
 
 // OpenRouterRequest represents a request to the OpenRouter API
 type OpenRouterRequest struct {
-	Model     string    `json:"model"`
-	Models    []string  `json:"models"`
-	Messages  []Message `json:"messages"`
-	Reasoning Reasoning `json:"reasoning"`
+	Model       string    `json:"model"`
+	Models      []string  `json:"models"`
+	Messages    []Message `json:"messages"`
+	Reasoning   Reasoning `json:"reasoning"`
+	Temperature float64   `json:"temperature,omitempty"`
 }
 
 // Message represents a message in the OpenRouter API request/response
@@ -71,22 +72,32 @@ func shuffleModels(models []string) {
 }
 
 // getLLMResponse sends a prompt to the OpenRouter API and returns the response
-func getLLMResponse(settings *Settings, prompt string) (string, error) {
+func getLLMResponse(settings *Settings, prompt string, isComplexAnalysis bool) (string, error) {
 	models := strings.Split(settings.OpenRouterModel, ",")
-	shuffleModels(models)
 
-	log.Debug().Msgf("Using models: %v", models)
+	log.Debug().Msgf("Using models in order: %v", models)
+
+	// System message to prime the model with financial analyst role
+	systemMessage := Message{
+		Role: "system",
+		Content: `You are an expert financial analyst specializing in personal finance and spending pattern analysis.
+Your role is to provide clear, actionable insights from transaction data. Focus on identifying trends,
+categorizing expenses accurately, and highlighting notable patterns or concerns. Be concise, specific,
+and use data to support your observations.`,
+	}
 
 	reqBody := OpenRouterRequest{
-		Models: models,
+		Models:      models,
+		Temperature: 0.4, // Lower temperature for more consistent, factual responses
 		Messages: []Message{
+			systemMessage,
 			{
 				Role:    "user",
 				Content: prompt,
 			},
 		},
 		Reasoning: Reasoning{
-			Exclude: true,
+			Exclude: !isComplexAnalysis, // Enable reasoning for complex analysis (multi-month, etc.)
 		},
 	}
 
@@ -194,41 +205,209 @@ func formatAccounts(accounts []Account) string {
 	return result
 }
 
+// getTopExpenses returns the top N expenses sorted by amount (most negative first)
+func getTopExpenses(transactions []Transaction, n int) []Transaction {
+	if len(transactions) == 0 {
+		return []Transaction{}
+	}
+
+	// Create a copy to avoid modifying the original slice
+	sorted := make([]Transaction, len(transactions))
+	copy(sorted, transactions)
+
+	// Sort by amount (most negative first)
+	for i := 0; i < len(sorted)-1; i++ {
+		for j := i + 1; j < len(sorted); j++ {
+			if sorted[j].Amount < sorted[i].Amount {
+				sorted[i], sorted[j] = sorted[j], sorted[i]
+			}
+		}
+	}
+
+	// Return top N
+	if n > len(sorted) {
+		n = len(sorted)
+	}
+	return sorted[:n]
+}
+
+// formatTopExpenses formats the top expenses as a bulleted list
+func formatTopExpenses(transactions []Transaction) string {
+	topExpenses := getTopExpenses(transactions, 10)
+	var result string
+
+	for _, txn := range topExpenses {
+		timestamp := txn.TransactedAt
+		if timestamp == nil {
+			timestamp = &txn.Posted
+		}
+		date := time.Unix(*timestamp, 0).Format("2006-01-02")
+		result += fmt.Sprintf("   - $%.2f at %s on %s\n", -txn.Amount, txn.Description, date)
+	}
+
+	return result
+}
+
+// formatChange formats a percentage change with a descriptive label
+func formatChange(percentChange float64) string {
+	if percentChange > 0 {
+		return "increase"
+	} else if percentChange < 0 {
+		return "decrease"
+	}
+	return "no change"
+}
+
+// calculateBillingPeriodTotals calculates expense totals for each billing period in a multi-month analysis (3 periods)
+func calculateBillingPeriodTotals(transactions []Transaction, split1 time.Time, split2 time.Time) (float64, float64, float64) {
+	var period1Total, period2Total, period3Total float64
+
+	for _, txn := range transactions {
+		timestamp := txn.TransactedAt
+		if timestamp == nil {
+			timestamp = &txn.Posted
+		}
+		txnDate := time.Unix(*timestamp, 0)
+
+		if txnDate.Before(split1) {
+			period1Total += -float64(txn.Amount) // Convert to positive - oldest period
+		} else if txnDate.Before(split2) {
+			period2Total += -float64(txn.Amount) // Convert to positive - middle period
+		} else {
+			period3Total += -float64(txn.Amount) // Convert to positive - current period
+		}
+	}
+
+	return period1Total, period2Total, period3Total
+}
+
+// calculateTotalExpenses calculates the total expenses for all transactions
+func calculateTotalExpenses(transactions []Transaction) float64 {
+	var total float64
+	for _, txn := range transactions {
+		total += -float64(txn.Amount) // Convert to positive
+	}
+	return total
+}
+
 // generateAnalysisPrompt generates a prompt for the AI to analyze transactions
-func generateAnalysisPrompt(accounts []Account, transactions []Transaction, startDate, endDate time.Time) string {
+func generateAnalysisPrompt(accounts []Account, transactions []Transaction, startDate, endDate time.Time, dateRangeType DateRangeType, billingDay int) string {
 	transactionsFormatted := formatTransactions(transactions)
 	accountsFormatted := formatAccounts(accounts)
+	topExpensesFormatted := formatTopExpenses(transactions)
+
+	// Calculate period details
+	periodDays := int(endDate.Sub(startDate).Hours() / 24)
+	totalExpenses := calculateTotalExpenses(transactions)
+
+	// Determine if this is a multi-month analysis
+	isMultiMonth := dateRangeType == DateRangeTypeCurrentAndLastMonth
+	periodDescription := fmt.Sprintf("Billing Period: %s to %s (%d days)\nTotal Expenses: $%.2f", startDate.Format("2006-01-02"), endDate.Format("2006-01-02"), periodDays, totalExpenses)
+
+	summaryInstructions := "Provide a human-friendly overview of spending patterns during this period. Be specific about trends and notable observations."
+	trendAnalysisSection := ""
+
+	if isMultiMonth {
+		// Calculate the split points between billing periods (3 periods total)
+		currentYear, currentMonth, _ := endDate.Date()
+		var currentCycleStart time.Time
+		if endDate.Day() >= billingDay {
+			currentCycleStart = time.Date(currentYear, currentMonth, billingDay, 0, 0, 0, 0, time.UTC)
+		} else {
+			currentCycleStart = time.Date(currentYear, currentMonth, billingDay, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 0)
+		}
+		previousCycleStart := currentCycleStart.AddDate(0, -1, 0)
+
+		// Calculate totals for each of the 3 billing periods
+		period1Total, period2Total, period3Total := calculateBillingPeriodTotals(transactions, previousCycleStart, currentCycleStart)
+
+		// Period 1 (oldest completed cycle)
+		period1Start := startDate
+		period1End := previousCycleStart.Add(-24 * time.Hour)
+		period1Days := int(period1End.Sub(period1Start).Hours()/24) + 1
+
+		// Period 2 (previous completed cycle)
+		period2Start := previousCycleStart
+		period2End := currentCycleStart.Add(-24 * time.Hour)
+		period2Days := int(period2End.Sub(period2Start).Hours()/24) + 1
+
+		// Period 3 (current incomplete cycle)
+		period3Start := currentCycleStart
+		period3End := endDate
+		period3Days := int(period3End.Sub(period3Start).Hours()/24) + 1
+
+		// Calculate percentage changes
+		period2Change := 0.0
+		if period1Total > 0 {
+			period2Change = ((period2Total - period1Total) / period1Total) * 100
+		}
+		period3Change := 0.0
+		if period2Total > 0 {
+			period3Change = ((period3Total - period2Total) / period2Total) * 100
+		}
+
+		// Format cycle labels with month names
+		cycle1Label := fmt.Sprintf("%s %d - %s %d", period1Start.Format("Jan"), period1Start.Day(), period1End.Format("Jan"), period1End.Day())
+		cycle2Label := fmt.Sprintf("%s %d - %s %d", period2Start.Format("Jan"), period2Start.Day(), period2End.Format("Jan"), period2End.Day())
+		cycle3Label := fmt.Sprintf("%s %d - %s %d", period3Start.Format("Jan"), period3Start.Day(), period3End.Format("Jan"), period3End.Day())
+
+		periodDescription = fmt.Sprintf(`Multi-Cycle Analysis (3 Billing Periods):
+- %s: %s to %s (%d days) - $%.2f [completed]
+- %s: %s to %s (%d days) - $%.2f [completed] - Change: %.1f%% (%s)
+- %s: %s to %s (%d days) - $%.2f [in progress] - Change: %.1f%% (%s)
+- Grand Total: $%.2f`,
+			cycle1Label, period1Start.Format("2006-01-02"), period1End.Format("2006-01-02"), period1Days, period1Total,
+			cycle2Label, period2Start.Format("2006-01-02"), period2End.Format("2006-01-02"), period2Days, period2Total, period2Change, formatChange(period2Change),
+			cycle3Label, period3Start.Format("2006-01-02"), period3End.Format("2006-01-02"), period3Days, period3Total, period3Change, formatChange(period3Change),
+			totalExpenses)
+
+		summaryInstructions = fmt.Sprintf("Provide a human-friendly overview of spending patterns across the 3 billing cycles (%s, %s, %s). Focus on comparing the two completed cycles and note that the current cycle is still in progress. Use the provided billing period totals for accurate comparisons.", cycle1Label, cycle2Label, cycle3Label)
+		trendAnalysisSection = fmt.Sprintf(`4. **📈 Spending Trends** (use pre-calculated totals above):
+   - Compare the two completed cycles (%s vs %s)
+   - Note current cycle (%s) progress relative to completed cycles
+   - Identify which categories changed significantly between cycles
+5. `, cycle1Label, cycle2Label, cycle3Label)
+	} else {
+		trendAnalysisSection = "4. "
+	}
+
+	// Determine category description based on analysis type
+	categoryDescription := "List the top 4-5 spending categories with their totals for the LATEST billing cycle only"
+	if !isMultiMonth {
+		categoryDescription = "List the top 4-5 spending categories with their totals for this period"
+	}
+
 	return fmt.Sprintf(`## Financial Transaction Analysis
-Billing Period: %s to %s
+%s
 
 I need a structured analysis of the provided financial transactions. Use emojis to make the report more engaging.
-Please create a concise report (max 150 words total) with the following sections:
+Please create a concise report (max 180 words total) with the following sections:
 
 ### Summary
-Provide a human-friendly overview of spending patterns during this period. Be specific about trends and notable observations.
+%s
 
 ### Analysis Breakdown
-1. **Total Expenses**: ${{total}} (Sum of all purchases, excluding payments, credits, and refunds)
-2. **Major Categories**: List the top 4-5 spending categories with their totals
+1. **Total Expenses**: Per billing cycle totals shown above
+2. **Major Categories** (latest cycle only): %s
    - Category 1: ${{amount}}
    - Category 2: ${{amount}}
    - ...
-3. **Largest Expenses**: 
-   - ${{expense 1}}: ${{amount}} at ${{merchant}} on ${{date}}
-   - ${{expense 2}}: ${{amount}} at ${{merchant}} on ${{date}}
-   - ${{expense 3}}: ${{amount}} at ${{merchant}} on ${{date}}
-4. **Account Status**:
-   - ${{account name}}: Balance ${{amount}}, Last synced ${{date}}
-   - ...
+3. **Top 10 Largest Expenses** (across all periods):
+%s%s**🔍 Key Insights**: Provide 1-2 actionable insights such as:
+   - Daily burn rate: ${{rate}}/day (based on completed cycles)
+   - Notable patterns or anomalies worth mentioning
+   - Recurring charges or subscription reminders if relevant
 
 Notes:
 - Consider only outgoing expenses in your analysis (ignore incoming payments, credits, refunds)
 - Format all monetary values consistently (e.g., $1,234.56)
+- Keep insights brief and actionable
+- Category totals should be for the LATEST billing cycle only (not combined across periods)
 - If a category has no transactions, indicate 'No spending in this category'
 
-Accounts Information: 
+Accounts Information:
 %s
 
-Transactions: 
-%s`, startDate.Format("2006-01-02"), endDate.Format("2006-01-02"), accountsFormatted, transactionsFormatted)
+All Transactions:
+%s`, periodDescription, summaryInstructions, categoryDescription, topExpensesFormatted, trendAnalysisSection, accountsFormatted, transactionsFormatted)
 }

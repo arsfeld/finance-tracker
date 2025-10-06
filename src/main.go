@@ -47,13 +47,14 @@ detailed breakdowns of your spending habits.
 Version: %s
 
 Example usage:
-  finance_tracker                    # Analyze current month's transactions (billing day 15)
-  finance_tracker --billing-day 1    # Analyze current month's transactions (billing day 1)
-  finance_tracker --date-range last_month  # Analyze last month's transactions
-  finance_tracker --notifications ntfy     # Send notifications via ntfy
-  finance_tracker --disable-cache          # Force fresh analysis without caching
-  finance_tracker --max-retries 5          # Set maximum number of retries for LLM calls
-  finance_tracker --retry-delay 2          # Set initial retry delay in seconds`, GetVersion()),
+  finance_tracker                    # Analyze 3 billing cycles (default: cycles based on day 15)
+  finance_tracker --billing-day 1    # Analyze 3 billing cycles starting from day 1
+  finance_tracker --date-range current_month  # Analyze only current billing cycle
+  finance_tracker --date-range last_month     # Analyze only previous billing cycle
+  finance_tracker --notifications ntfy        # Send notifications via ntfy
+  finance_tracker --disable-cache             # Force fresh analysis without caching
+  finance_tracker --max-retries 5             # Set maximum number of retries for LLM calls
+  finance_tracker --retry-delay 2             # Set initial retry delay in seconds`, GetVersion()),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			notifications, _ := cmd.Flags().GetStringSlice("notifications")
 			disableNotifications, _ := cmd.Flags().GetBool("disable-notifications")
@@ -90,7 +91,7 @@ Example usage:
 	rootCmd.Flags().Bool("disable-notifications", false, "Disable all notifications")
 	rootCmd.Flags().Bool("disable-cache", false, "Disable database caching")
 	rootCmd.Flags().Bool("verbose", false, "Enable verbose logging")
-	rootCmd.Flags().String("date-range", string(DateRangeTypeCurrentMonth), "Date range type")
+	rootCmd.Flags().String("date-range", string(DateRangeTypeCurrentAndLastMonth), "Date range type (default: 3 billing cycles)")
 	rootCmd.Flags().String("start-date", "", "Start date for custom range (YYYY-MM-DD)")
 	rootCmd.Flags().String("end-date", "", "End date for custom range (YYYY-MM-DD)")
 	rootCmd.Flags().Bool("force", false, "Force analysis even if database is up to date")
@@ -281,13 +282,19 @@ func run(config RunConfig) error {
 
 	// Process transactions with AI
 	log.Info().Msg("🤖 Analyzing transactions with AI...")
-	prompt := generateAnalysisPrompt(accounts, allTransactions, billingStart, billingEnd)
+	prompt := generateAnalysisPrompt(accounts, allTransactions, billingStart, billingEnd, dateRangeType, config.BillingDay)
 	log.Debug().Str("prompt", prompt).Msg("Generated analysis prompt")
+
+	// Determine if this is complex analysis requiring reasoning
+	isComplexAnalysis := dateRangeType == DateRangeTypeCurrentAndLastMonth ||
+		dateRangeType == DateRangeTypeLast3Months ||
+		dateRangeType == DateRangeTypeCurrentYear ||
+		dateRangeType == DateRangeTypeLastYear
 
 	// Get LLM response with retry
 	analysis, err := retryWithBackoff(
 		func() (string, error) {
-			return getLLMResponse(settings, prompt)
+			return getLLMResponse(settings, prompt, isComplexAnalysis)
 		},
 		config.MaxRetries,
 		config.RetryDelay,

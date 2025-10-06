@@ -68,6 +68,14 @@ func calculateDateRange(
 
 		return start, end, nil
 
+	case DateRangeTypeCurrentAndLastMonth:
+		// End is today
+		end := today
+		// Start is the beginning of two billing cycles ago
+		// Go back two full cycles from the current cycle start to get 3 total cycles
+		start := currentCycleStart.AddDate(0, -2, 0)
+		return start, end, nil
+
 	case DateRangeTypeLast3Months:
 		// End is today
 		end := today

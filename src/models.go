@@ -52,12 +52,13 @@ type DateRangeType string
 
 // Available date range types
 const (
-	DateRangeTypeCurrentMonth DateRangeType = "current_month"
-	DateRangeTypeLastMonth    DateRangeType = "last_month"
-	DateRangeTypeLast3Months  DateRangeType = "last_3_months"
-	DateRangeTypeCurrentYear  DateRangeType = "current_year"
-	DateRangeTypeLastYear     DateRangeType = "last_year"
-	DateRangeTypeCustom       DateRangeType = "custom"
+	DateRangeTypeCurrentMonth        DateRangeType = "current_month"
+	DateRangeTypeLastMonth           DateRangeType = "last_month"
+	DateRangeTypeCurrentAndLastMonth DateRangeType = "current_and_last_month"
+	DateRangeTypeLast3Months         DateRangeType = "last_3_months"
+	DateRangeTypeCurrentYear         DateRangeType = "current_year"
+	DateRangeTypeLastYear            DateRangeType = "last_year"
+	DateRangeTypeCustom              DateRangeType = "custom"
 )
 
 // Organization represents a financial institution or organization

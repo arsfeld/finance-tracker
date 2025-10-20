@@ -29,15 +29,15 @@ func sendNtfyNotification(settings *Settings, message string, notificationTopic 
 	topic := *settings.NtfyTopic
 	log.Debug().
 		Str("received_topic_type", notificationTopic).
-		Str("default_topic", *settings.NtfyTopic).
-		Str("warning_topic_config", getStringValue(settings.NtfyTopicWarning)). // Use helper to handle nil pointer
-		Msg("Checking which ntfy topic to use")
+		Str("base_topic", *settings.NtfyTopic).
+		Str("warning_suffix", settings.NtfyWarningSuffix).
+		Msg("Determining ntfy topic")
 
-	if notificationTopic == "warning" && settings.NtfyTopicWarning != nil {
-		topic = *settings.NtfyTopicWarning
-		log.Debug().Str("final_topic", topic).Msg("Using warning topic for ntfy notification")
+	if notificationTopic == "warning" {
+		topic = *settings.NtfyTopic + settings.NtfyWarningSuffix
+		log.Debug().Str("final_topic", topic).Msg("Using base topic with warning suffix")
 	} else {
-		log.Debug().Str("final_topic", topic).Msg("Using default topic for ntfy notification")
+		log.Debug().Str("final_topic", topic).Msg("Using base topic for ntfy notification")
 	}
 
 	// Strip markdown formatting from the message

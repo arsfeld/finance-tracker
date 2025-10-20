@@ -18,7 +18,7 @@ type Settings struct {
 	MailerFrom         *string
 	MailerTo           *string
 	NtfyTopic          *string
-	NtfyTopicWarning   *string // Added field for warning notifications
+	NtfyWarningSuffix  string // Suffix appended to NtfyTopic for warning notifications (default: "-warnings")
 }
 
 // NewSettings creates a new Settings instance from environment variables
@@ -34,6 +34,7 @@ func NewSettings(env_file string) (*Settings, error) {
 		OpenRouterAPIKey:   os.Getenv("OPENROUTER_API_KEY"),
 		OpenRouterModel:    os.Getenv("OPENROUTER_MODEL"),
 		NtfyServer:         "https://ntfy.sh",
+		NtfyWarningSuffix:  "-warnings", // Default suffix for warning notifications
 	}
 
 	// Optional fields
@@ -49,9 +50,9 @@ func NewSettings(env_file string) (*Settings, error) {
 	if ntfyTopic := os.Getenv("NTFY_TOPIC"); ntfyTopic != "" {
 		settings.NtfyTopic = &ntfyTopic
 	}
-	// TODO: Add loading for NtfyTopicWarning if needed from env
-	if ntfyTopicWarning := os.Getenv("NTFY_TOPIC_WARNING"); ntfyTopicWarning != "" {
-		settings.NtfyTopicWarning = &ntfyTopicWarning
+	// Allow customizing the warning suffix (optional)
+	if ntfyWarningSuffix := os.Getenv("NTFY_WARNING_SUFFIX"); ntfyWarningSuffix != "" {
+		settings.NtfyWarningSuffix = ntfyWarningSuffix
 	}
 
 	return settings, nil

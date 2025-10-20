@@ -102,7 +102,12 @@ Models are tried in order (R1 for reasoning, V3.1 as fallback).
 #### Notifications (`notifications.go`)
 - **Email**: Generates HTML email with logo, transaction table, and markdown-converted analysis
 - **Ntfy**: Sends plain-text notifications with stripped markdown
-- **Warning topic**: Supports separate ntfy topic for API errors (`NTFY_TOPIC_WARNING`)
+- **Warning notifications**:
+  - Warning notifications use the base topic with a suffix appended
+  - Suffix is configurable via `NTFY_WARNING_SUFFIX` (default: `"-warnings"`)
+  - Example: `NTFY_TOPIC=finance` → warnings sent to `finance-warnings`
+  - Allows filtering/routing warnings separately from regular transaction summaries
+  - Email notifications don't differentiate between regular and warning notifications
 - Both channels require specific environment variables to be active
 
 #### Transaction Filtering
@@ -124,15 +129,32 @@ Optional (Email):
 - `MAILER_TO`: Recipient email address
 
 Optional (Ntfy):
-- `NTFY_TOPIC`: Default ntfy topic for regular notifications
-- `NTFY_TOPIC_WARNING`: Separate topic for API error warnings
+- `NTFY_TOPIC`: Base ntfy topic for notifications
+- `NTFY_WARNING_SUFFIX`: Suffix appended to base topic for warnings (default: `"-warnings"`)
 
 ### Important Patterns
 
 #### Error Handling
-- API errors from SimpleFin are collected and sent as warning notifications separately
-- Notifications continue even if some accounts have errors
-- Retry logic with exponential backoff for LLM calls
+
+**SimpleFin API Errors:**
+- API errors are collected at the response level (`AccountsResponse.Errors`)
+- Each error is sent as a separate warning notification via configured channels
+- Ntfy warnings are sent to `{NTFY_TOPIC}{NTFY_WARNING_SUFFIX}` (e.g., `finance-warnings`)
+- Email warnings (if configured) use the same SMTP settings as regular notifications
+- Error messages from SimpleFin API are passed through with minimal formatting
+- System continues processing successfully fetched accounts even when some accounts fail
+- Warning notification failures are logged but don't stop the main process
+
+**Error Flow:**
+1. SimpleFin API call returns: `(accounts, apiErrors, err)`
+2. If fatal error: process stops immediately
+3. If API errors: send warning notification for each error, then continue
+4. Process successfully fetched accounts for analysis
+5. Send regular notifications with analysis results
+
+**LLM Errors:**
+- Retry logic with exponential backoff for LLM calls (default: 5 retries, 2s initial delay)
+- Multiple models can be specified as fallbacks in `OPENROUTER_MODEL`
 
 #### Billing Cycle Behavior
 - If today is within 5 days of previous billing day, automatically uses last month's cycle

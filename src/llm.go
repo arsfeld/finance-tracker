@@ -300,9 +300,18 @@ func generateAnalysisPrompt(accounts []Account, transactions []Transaction, star
 	periodDays := int(endDate.Sub(startDate).Hours() / 24)
 	totalExpenses := calculateTotalExpenses(transactions)
 
+	// Calculate daily burn rate
+	dailyBurnRate := 0.0
+	if periodDays > 0 {
+		dailyBurnRate = totalExpenses / float64(periodDays)
+	}
+
+	// Calculate monthly projection (assuming 30-day month)
+	monthlyProjection := dailyBurnRate * 30
+
 	// Determine if this is a multi-month analysis
 	isMultiMonth := dateRangeType == DateRangeTypeCurrentAndLastMonth
-	periodDescription := fmt.Sprintf("Billing Period: %s to %s (%d days)\nTotal Expenses: $%.2f", startDate.Format("2006-01-02"), endDate.Format("2006-01-02"), periodDays, totalExpenses)
+	periodDescription := fmt.Sprintf("Billing Period: %s to %s (%d days)\nTotal Expenses: $%.2f\nDaily Burn Rate: $%.2f/day\nMonthly Projection: $%.2f (at current rate)", startDate.Format("2006-01-02"), endDate.Format("2006-01-02"), periodDays, totalExpenses, dailyBurnRate, monthlyProjection)
 
 	summaryInstructions := "Provide a human-friendly overview of spending patterns during this period. Be specific about trends and notable observations."
 	trendAnalysisSection := ""
@@ -351,15 +360,40 @@ func generateAnalysisPrompt(accounts []Account, transactions []Transaction, star
 		cycle2Label := fmt.Sprintf("%s %d - %s %d", period2Start.Format("Jan"), period2Start.Day(), period2End.Format("Jan"), period2End.Day())
 		cycle3Label := fmt.Sprintf("%s %d - %s %d", period3Start.Format("Jan"), period3Start.Day(), period3End.Format("Jan"), period3End.Day())
 
+		// Calculate burn rates for each period
+		period1BurnRate := 0.0
+		if period1Days > 0 {
+			period1BurnRate = period1Total / float64(period1Days)
+		}
+		period2BurnRate := 0.0
+		if period2Days > 0 {
+			period2BurnRate = period2Total / float64(period2Days)
+		}
+		period3BurnRate := 0.0
+		if period3Days > 0 {
+			period3BurnRate = period3Total / float64(period3Days)
+		}
+
+		// Calculate average burn rate from completed cycles
+		avgCompletedBurnRate := 0.0
+		if period1Days > 0 && period2Days > 0 {
+			avgCompletedBurnRate = (period1BurnRate + period2BurnRate) / 2
+		}
+
+		// Monthly projection based on average of completed cycles
+		completedMonthlyProjection := avgCompletedBurnRate * 30
+
 		periodDescription = fmt.Sprintf(`Multi-Cycle Analysis (3 Billing Periods):
-- %s: %s to %s (%d days) - $%.2f [completed]
-- %s: %s to %s (%d days) - $%.2f [completed] - Change: %.1f%% (%s)
-- %s: %s to %s (%d days) - $%.2f [in progress] - Change: %.1f%% (%s)
-- Grand Total: $%.2f`,
-			cycle1Label, period1Start.Format("2006-01-02"), period1End.Format("2006-01-02"), period1Days, period1Total,
-			cycle2Label, period2Start.Format("2006-01-02"), period2End.Format("2006-01-02"), period2Days, period2Total, period2Change, formatChange(period2Change),
-			cycle3Label, period3Start.Format("2006-01-02"), period3End.Format("2006-01-02"), period3Days, period3Total, period3Change, formatChange(period3Change),
-			totalExpenses)
+- %s: %s to %s (%d days) - $%.2f [completed] - Burn rate: $%.2f/day
+- %s: %s to %s (%d days) - $%.2f [completed] - Burn rate: $%.2f/day - Change: %.1f%% (%s)
+- %s: %s to %s (%d days) - $%.2f [in progress] - Burn rate: $%.2f/day - Change: %.1f%% (%s)
+- Grand Total: $%.2f
+- Average Burn Rate (completed cycles): $%.2f/day
+- Monthly Projection: $%.2f (based on completed cycles)`,
+			cycle1Label, period1Start.Format("2006-01-02"), period1End.Format("2006-01-02"), period1Days, period1Total, period1BurnRate,
+			cycle2Label, period2Start.Format("2006-01-02"), period2End.Format("2006-01-02"), period2Days, period2Total, period2BurnRate, period2Change, formatChange(period2Change),
+			cycle3Label, period3Start.Format("2006-01-02"), period3End.Format("2006-01-02"), period3Days, period3Total, period3BurnRate, period3Change, formatChange(period3Change),
+			totalExpenses, avgCompletedBurnRate, completedMonthlyProjection)
 
 		summaryInstructions = fmt.Sprintf("Provide a human-friendly overview of spending patterns across the 3 billing cycles (%s, %s, %s). Focus on comparing the two completed cycles and note that the current cycle is still in progress. Use the provided billing period totals for accurate comparisons.", cycle1Label, cycle2Label, cycle3Label)
 		trendAnalysisSection = fmt.Sprintf(`4. **📈 Spending Trends** (use pre-calculated totals above):
@@ -394,7 +428,7 @@ Please create a concise report (max 180 words total) with the following sections
    - ...
 3. **Top 10 Largest Expenses** (across all periods):
 %s%s**🔍 Key Insights**: Provide 1-2 actionable insights such as:
-   - Daily burn rate: ${{rate}}/day (based on completed cycles)
+   - Reference the daily burn rate and monthly projection provided above
    - Notable patterns or anomalies worth mentioning
    - Recurring charges or subscription reminders if relevant
 
@@ -402,6 +436,7 @@ Notes:
 - Consider only outgoing expenses in your analysis (ignore incoming payments, credits, refunds)
 - Format all monetary values consistently (e.g., $1,234.56)
 - Keep insights brief and actionable
+- Use the pre-calculated burn rates and projections provided in the period description above
 - Category totals should be for the LATEST billing cycle only (not combined across periods)
 - If a category has no transactions, indicate 'No spending in this category'
 

@@ -30,6 +30,7 @@ type RunConfig struct {
 	MaxRetries           int
 	RetryDelay           int
 	BillingDay           int
+	AllAccounts          bool
 }
 
 func main() {
@@ -44,6 +45,8 @@ The tool supports multiple notification channels and includes a caching mechanis
 duplicate notifications. It can analyze transactions for various time periods and provides
 detailed breakdowns of your spending habits.
 
+By default, only credit card accounts are analyzed. Use --all-accounts to include all account types.
+
 Version: %s
 
 Example usage:
@@ -51,6 +54,7 @@ Example usage:
   finance_tracker --billing-day 1    # Analyze 3 billing cycles starting from day 1
   finance_tracker --date-range current_month  # Analyze only current billing cycle
   finance_tracker --date-range last_month     # Analyze only previous billing cycle
+  finance_tracker --all-accounts              # Include all account types (not just credit cards)
   finance_tracker --notifications ntfy        # Send notifications via ntfy
   finance_tracker --disable-cache             # Force fresh analysis without caching
   finance_tracker --max-retries 5             # Set maximum number of retries for LLM calls
@@ -68,6 +72,7 @@ Example usage:
 			maxRetries, _ := cmd.Flags().GetInt("max-retries")
 			retryDelay, _ := cmd.Flags().GetInt("retry-delay")
 			billingDay, _ := cmd.Flags().GetInt("billing-day")
+			allAccounts, _ := cmd.Flags().GetBool("all-accounts")
 
 			return run(RunConfig{
 				Notifications:        notifications,
@@ -83,6 +88,7 @@ Example usage:
 				MaxRetries:           maxRetries,
 				RetryDelay:           retryDelay,
 				BillingDay:           billingDay,
+				AllAccounts:          allAccounts,
 			})
 		},
 	}
@@ -100,11 +106,42 @@ Example usage:
 	rootCmd.Flags().Int("max-retries", 5, "Maximum number of retries for LLM calls")
 	rootCmd.Flags().Int("retry-delay", 2, "Initial retry delay in seconds")
 	rootCmd.Flags().Int("billing-day", 15, "Day of the month for the billing cycle start (1-28)")
+	rootCmd.Flags().Bool("all-accounts", false, "Include all account types (default: credit cards only)")
 	rootCmd.SetVersionTemplate(GetVersion() + "\n")
 
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatal().Err(err).Msg("Error executing root command")
 	}
+}
+
+// isCreditCard determines if an account is a credit card based on available data
+func isCreditCard(account Account) bool {
+	// First, check if the "extra" field contains type information
+	// Note: The SimpleFin API spec doesn't standardize this, but some providers may include it
+	// This would need to be verified with actual data from your SimpleFin provider
+
+	// For now, use name-based heuristics as the primary method
+	nameLower := strings.ToLower(account.Name)
+
+	// Common credit card indicators
+	creditCardKeywords := []string{
+		"credit",
+		"card",
+		"visa",
+		"mastercard",
+		"amex",
+		"american express",
+		"discover",
+		"rewards",
+	}
+
+	for _, keyword := range creditCardKeywords {
+		if strings.Contains(nameLower, keyword) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // run is the main function that runs the finance tracker
@@ -202,6 +239,41 @@ func run(config RunConfig) error {
 			}
 		}
 		log.Debug().Msg("Sent warning notifications for API errors")
+	}
+
+	// Filter accounts based on account type (credit cards only by default)
+	if !config.AllAccounts {
+		var creditCardAccounts []Account
+		for _, account := range accounts {
+			if isCreditCard(account) {
+				creditCardAccounts = append(creditCardAccounts, account)
+				log.Debug().
+					Str("account_id", account.ID).
+					Str("account_name", account.Name).
+					Msg("Included credit card account")
+			} else {
+				log.Debug().
+					Str("account_id", account.ID).
+					Str("account_name", account.Name).
+					Msg("Filtered out non-credit card account")
+			}
+		}
+
+		// Warn if no credit card accounts found
+		if len(creditCardAccounts) == 0 {
+			log.Warn().
+				Int("total_accounts", len(accounts)).
+				Msg("No credit card accounts found. Use --all-accounts to include all account types.")
+			return fmt.Errorf("no credit card accounts found (use --all-accounts to include all account types)")
+		}
+
+		log.Info().
+			Int("credit_card_accounts", len(creditCardAccounts)).
+			Int("total_accounts", len(accounts)).
+			Msg("💳 Filtering to credit card accounts only")
+		accounts = creditCardAccounts
+	} else {
+		log.Debug().Msg("Using all accounts (--all-accounts flag set)")
 	}
 
 	if len(accounts) == 0 {

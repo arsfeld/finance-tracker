@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Finance Tracker is a Go-based CLI tool that fetches financial transactions from SimpleFin, analyzes spending patterns using AI (via OpenRouter), and sends summaries through multiple notification channels (email, ntfy). The tool uses a caching mechanism (BadgerDB) to prevent duplicate notifications.
 
+By default, the tool focuses analysis on **credit card accounts only**, filtering out checking, savings, and investment accounts. This provides more targeted insights into credit card spending patterns. Use the `--all-accounts` flag to analyze all account types.
+
 ## Common Commands
 
 ### Build and Run
@@ -36,6 +38,12 @@ go vet ./src
 
 # Run the application with custom options
 ./bin/finance_tracker --verbose --force --date-range last_month
+
+# Analyze all account types (not just credit cards)
+./bin/finance_tracker --all-accounts
+
+# Analyze credit cards only (default behavior)
+./bin/finance_tracker
 ```
 
 ### Testing
@@ -110,9 +118,14 @@ Models are tried in order (R1 for reasoning, V3.1 as fallback).
   - Email notifications don't differentiate between regular and warning notifications
 - Both channels require specific environment variables to be active
 
-#### Transaction Filtering
-- Filters out accounts with zero balance (`simplefin.go:102-114`)
-- Filters out positive transactions (income/credits) before analysis (`main.go:247-260`)
+#### Account and Transaction Filtering
+- **Account type filtering** (`main.go:244-277`):
+  - By default, only credit card accounts are analyzed
+  - Uses name-based heuristics to identify credit cards (keywords: "credit", "card", "visa", "mastercard", "amex", "discover", etc.)
+  - Use `--all-accounts` flag to include all account types
+  - Fails gracefully if no credit card accounts are found, suggesting use of `--all-accounts`
+- **Zero balance filtering** (`simplefin.go:102-114`): Filters out accounts with zero balance
+- **Transaction filtering** (`main.go:280-295`): Filters out positive transactions (income/credits) before analysis
 - Only analyzes negative transactions (expenses)
 
 ### Environment Variables

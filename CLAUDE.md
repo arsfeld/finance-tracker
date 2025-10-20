@@ -104,8 +104,8 @@ Models are tried in order (R1 for reasoning, V3.1 as fallback).
 - **Ntfy**: Sends plain-text notifications with stripped markdown
 - **Warning notifications**:
   - Warning notifications use the base topic with a suffix appended
-  - Suffix is configurable via `NTFY_WARNING_SUFFIX` (default: `"-warnings"`)
-  - Example: `NTFY_TOPIC=finance` → warnings sent to `finance-warnings`
+  - Suffix is configurable via `NTFY_WARNING_SUFFIX` (default: `"-warning"`)
+  - Example: `NTFY_TOPIC=finance` → warnings sent to `finance-warning`
   - Allows filtering/routing warnings separately from regular transaction summaries
   - Email notifications don't differentiate between regular and warning notifications
 - Both channels require specific environment variables to be active
@@ -130,7 +130,7 @@ Optional (Email):
 
 Optional (Ntfy):
 - `NTFY_TOPIC`: Base ntfy topic for notifications
-- `NTFY_WARNING_SUFFIX`: Suffix appended to base topic for warnings (default: `"-warnings"`)
+- `NTFY_WARNING_SUFFIX`: Suffix appended to base topic for warnings (default: `"-warning"`)
 
 ### Important Patterns
 
@@ -139,7 +139,7 @@ Optional (Ntfy):
 **SimpleFin API Errors:**
 - API errors are collected at the response level (`AccountsResponse.Errors`)
 - Each error is sent as a separate warning notification via configured channels
-- Ntfy warnings are sent to `{NTFY_TOPIC}{NTFY_WARNING_SUFFIX}` (e.g., `finance-warnings`)
+- Ntfy warnings are sent to `{NTFY_TOPIC}{NTFY_WARNING_SUFFIX}` (e.g., `finance-warning`)
 - Email warnings (if configured) use the same SMTP settings as regular notifications
 - Error messages from SimpleFin API are passed through with minimal formatting
 - System continues processing successfully fetched accounts even when some accounts fail

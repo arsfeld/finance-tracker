@@ -98,9 +98,20 @@ func getTransactionsForPeriod(settings *Settings, startDate, endDate time.Time) 
 		}
 	}
 
-	// Don't filter zero-balance accounts here - let them through for proper analysis
-	// The credit card filter and transaction analysis will handle them appropriately
-	log.Debug().Int("account_count", len(accountsResponse.Accounts)).Msg("Returning all accounts")
+	// Filter out accounts with zero balance
+	var filteredAccounts []Account
+	for _, account := range accountsResponse.Accounts {
+		if float64(account.Balance) != 0 {
+			log.Debug().
+				Str("account_id", account.ID).
+				Float64("balance", float64(account.Balance)).
+				Msg("Included account with non-zero balance")
+			filteredAccounts = append(filteredAccounts, account)
+		} else {
+			log.Debug().Str("account_id", account.ID).Msg("Filtered out account with zero balance")
+		}
+	}
+	log.Debug().Int("filtered_account_count", len(filteredAccounts)).Msg("Filtered accounts with non-zero balance")
 
-	return accountsResponse.Accounts, accountsResponse.Errors, nil
+	return filteredAccounts, accountsResponse.Errors, nil
 }

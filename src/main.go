@@ -10,21 +10,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Constants
-const (
-	twoDaysInSeconds = 2 * 24 * 60 * 60
-)
-
 // RunConfig holds all configuration parameters for the run function
 type RunConfig struct {
 	Notifications        []string
 	DisableNotifications bool
-	DisableCache         bool
 	Verbose              bool
 	DateRange            string
 	StartDate            string
 	EndDate              string
-	Force                bool
 	EnvFile              string
 	Version              string
 	MaxRetries           int
@@ -41,9 +34,8 @@ func main() {
 It connects to your SimpleFin account to fetch transactions and uses OpenAI's LLM to provide
 insightful analysis of your spending patterns.
 
-The tool supports multiple notification channels and includes a caching mechanism to prevent
-duplicate notifications. It can analyze transactions for various time periods and provides
-detailed breakdowns of your spending habits.
+The tool supports multiple notification channels and can analyze transactions for various
+time periods, providing detailed breakdowns of your spending habits.
 
 By default, only credit card accounts are analyzed. Use --all-accounts to include all account types.
 
@@ -56,18 +48,15 @@ Example usage:
   finance_tracker --date-range last_month     # Analyze only previous billing cycle
   finance_tracker --all-accounts              # Include all account types (not just credit cards)
   finance_tracker --notifications ntfy        # Send notifications via ntfy
-  finance_tracker --disable-cache             # Force fresh analysis without caching
   finance_tracker --max-retries 5             # Set maximum number of retries for LLM calls
   finance_tracker --retry-delay 2             # Set initial retry delay in seconds`, GetVersion()),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			notifications, _ := cmd.Flags().GetStringSlice("notifications")
 			disableNotifications, _ := cmd.Flags().GetBool("disable-notifications")
-			disableCache, _ := cmd.Flags().GetBool("disable-cache")
 			verbose, _ := cmd.Flags().GetBool("verbose")
 			dateRange, _ := cmd.Flags().GetString("date-range")
 			startDate, _ := cmd.Flags().GetString("start-date")
 			endDate, _ := cmd.Flags().GetString("end-date")
-			force, _ := cmd.Flags().GetBool("force")
 			env_file, _ := cmd.Flags().GetString("env-file")
 			maxRetries, _ := cmd.Flags().GetInt("max-retries")
 			retryDelay, _ := cmd.Flags().GetInt("retry-delay")
@@ -77,12 +66,10 @@ Example usage:
 			return run(RunConfig{
 				Notifications:        notifications,
 				DisableNotifications: disableNotifications,
-				DisableCache:         disableCache,
 				Verbose:              verbose,
 				DateRange:            dateRange,
 				StartDate:            startDate,
 				EndDate:              endDate,
-				Force:                force,
 				EnvFile:              env_file,
 				Version:              GetVersion(),
 				MaxRetries:           maxRetries,
@@ -95,12 +82,10 @@ Example usage:
 
 	rootCmd.Flags().StringSliceP("notifications", "n", []string{"email", "ntfy"}, "Notification types to send")
 	rootCmd.Flags().Bool("disable-notifications", false, "Disable all notifications")
-	rootCmd.Flags().Bool("disable-cache", false, "Disable database caching")
 	rootCmd.Flags().Bool("verbose", false, "Enable verbose logging")
 	rootCmd.Flags().String("date-range", string(DateRangeTypeCurrentAndLastMonth), "Date range type (default: 3 billing cycles)")
 	rootCmd.Flags().String("start-date", "", "Start date for custom range (YYYY-MM-DD)")
 	rootCmd.Flags().String("end-date", "", "End date for custom range (YYYY-MM-DD)")
-	rootCmd.Flags().Bool("force", false, "Force analysis even if database is up to date")
 	rootCmd.Flags().String("env-file", ".env", "Path to environment file")
 	rootCmd.Flags().Bool("version", false, "Show version information")
 	rootCmd.Flags().Int("max-retries", 5, "Maximum number of retries for LLM calls")
@@ -164,10 +149,6 @@ func run(config RunConfig) error {
 
 	// Parse date range
 	dateRangeType := DateRangeType(config.DateRange)
-	if dateRangeType != DateRangeTypeCurrentMonth {
-		config.DisableCache = true
-		log.Debug().Msg("Using non-current month date range, database disabled")
-	}
 
 	// Parse custom dates if provided
 	var parsedStartDate, parsedEndDate *time.Time
@@ -203,21 +184,6 @@ func run(config RunConfig) error {
 		return fmt.Errorf("error validating billing period: %w", err)
 	}
 	log.Debug().Msg("Billing period validated successfully")
-
-	// Load database
-	log.Info().Msg("🔄 Loading database...")
-	var db *DB
-	if !config.DisableCache {
-		db, err = NewDB()
-		if err != nil {
-			return fmt.Errorf("error creating database: %w", err)
-		}
-		defer db.Close()
-
-		log.Debug().Msg("Database loaded successfully")
-	} else {
-		log.Debug().Msg("Database loading skipped (disabled)")
-	}
 
 	// Fetch transactions
 	log.Info().Msg("📊 Fetching transactions...")
@@ -282,7 +248,6 @@ func run(config RunConfig) error {
 
 	// Process accounts
 	log.Info().Msg("💳 Accounts:")
-	hasUpdatedAccounts := false
 	for _, account := range accounts {
 		log.Info().Str("account_name", account.Name).Str("account_id", account.ID).Msg("•")
 		syncTime := time.Unix(account.BalanceDate, 0).Format("2006-01-02 15:04:05")
@@ -290,23 +255,6 @@ func run(config RunConfig) error {
 			Str("balance", account.Balance.String()).
 			Str("transactions", strconv.Itoa(len(account.Transactions))).
 			Msg("└")
-
-		if !config.DisableCache && db.IsAccountUpdated(account.ID, account.BalanceDate) {
-			hasUpdatedAccounts = true
-			if err := db.UpdateAccount(account); err != nil {
-				return fmt.Errorf("error updating account in database: %w", err)
-			}
-			log.Debug().Str("account_id", account.ID).Msg("Account updated in database")
-		} else {
-			log.Debug().Str("account_id", account.ID).Msg("Account not updated (database disabled or no changes)")
-		}
-	}
-
-	// Early return conditions
-	if !hasUpdatedAccounts && !config.Force {
-		log.Debug().Msg("No accounts were updated, returning early")
-		log.Info().Msg("🔴 No updated accounts")
-		return nil
 	}
 
 	// Collect all transactions
@@ -334,22 +282,6 @@ func run(config RunConfig) error {
 
 	if len(allTransactions) == 0 {
 		return fmt.Errorf("no transactions found")
-	}
-
-	// Check last message time
-	if !config.Force {
-		lastMsgTime, err := db.GetLastMessageTime()
-		if err != nil {
-			return fmt.Errorf("error getting last message time: %w", err)
-		}
-		if lastMsgTime != nil {
-			lastMsgTimeUnix := time.Unix(*lastMsgTime, 0)
-			if time.Since(lastMsgTimeUnix).Seconds() < float64(twoDaysInSeconds) {
-				log.Info().Str("last_message_time", lastMsgTimeUnix.Format("2006-01-02 15:04:05")).Msg("🚫 Notification skipped: Last message sent too recently.")
-				return nil // Return success, but indicate skipped notification
-			}
-			log.Debug().Msg("Last message check passed")
-		}
 	}
 
 	// Process transactions with AI
@@ -395,14 +327,6 @@ func run(config RunConfig) error {
 				Msg("📱 Notifications sent successfully via:\n• " + strings.Join(successfulChannels, "\n• "))
 		}
 		log.Debug().Msg("Notifications sent successfully")
-
-		// Update database
-		if !config.DisableCache {
-			if err := db.UpdateLastMessageTime(); err != nil {
-				return fmt.Errorf("error updating last message time: %w", err)
-			}
-			log.Debug().Msg("Database updated with new message time")
-		}
 	} else {
 		log.Debug().Msg("Notifications disabled, skipping")
 		log.Info().Msg("ℹ️ Notifications disabled")

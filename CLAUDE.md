@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Finance Tracker is a Go-based CLI tool that fetches financial transactions from SimpleFin, analyzes spending patterns using AI (via OpenRouter), and sends summaries through multiple notification channels (email, ntfy). The tool uses a caching mechanism (BadgerDB) to prevent duplicate notifications.
+Finance Tracker is a Go-based CLI tool that fetches financial transactions from SimpleFin, analyzes spending patterns using AI (via OpenRouter), and sends summaries through multiple notification channels (email, ntfy).
 
 By default, the tool focuses analysis on **credit card accounts only**, filtering out checking, savings, and investment accounts. This provides more targeted insights into credit card spending patterns. Use the `--all-accounts` flag to analyze all account types.
 
@@ -37,7 +37,7 @@ go fmt ./src
 go vet ./src
 
 # Run the application with custom options
-./bin/finance_tracker --verbose --force --date-range last_month
+./bin/finance_tracker --verbose --date-range last_month
 
 # Analyze all account types (not just credit cards)
 ./bin/finance_tracker --all-accounts
@@ -58,17 +58,10 @@ go test -v ./src
 1. **Configuration** (`settings.go`): Loads environment variables from `.env` file
 2. **Date Calculation** (`date.go`): Calculates billing cycles based on configurable billing day (default: 15th)
 3. **Transaction Fetch** (`simplefin.go`): Retrieves transactions from SimpleFin Bridge API for specified date range
-4. **Caching** (`db.go`): BadgerDB stores account states and last notification time to prevent duplicates
-5. **AI Analysis** (`llm.go`): Sends transactions to OpenRouter LLM for spending analysis
-6. **Notification** (`notifications.go`): Dispatches summaries via email (SMTP) and/or ntfy
+4. **AI Analysis** (`llm.go`): Sends transactions to OpenRouter LLM for spending analysis
+5. **Notification** (`notifications.go`): Dispatches summaries via email (SMTP) and/or ntfy
 
 ### Key Components
-
-#### Database Layer (`db.go`)
-- Uses BadgerDB stored in XDG cache directory (`~/.cache/finance_tracker/badger`)
-- Tracks account balance dates to detect updates
-- Stores last message time to enforce 2-day notification cooldown
-- Cache can be bypassed with `--disable-cache` or when using non-current-month date ranges
 
 #### Date Range Logic (`date.go`)
 - Supports billing cycles based on configurable day of month (1-28)
@@ -172,11 +165,6 @@ Optional (Ntfy):
 #### Billing Cycle Behavior
 - If today is within 5 days of previous billing day, automatically uses last month's cycle
 - This prevents showing incomplete data immediately after billing day rollover
-
-#### Notification Cooldown
-- Enforces 2-day minimum between notifications (unless `--force` is used)
-- Prevents notification spam from multiple runs
-- Can be bypassed with `--force` flag
 
 #### Version Information
 - Version embedded during build from git tags

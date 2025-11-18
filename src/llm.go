@@ -241,7 +241,7 @@ func formatTopExpenses(transactions []Transaction) string {
 		if timestamp == nil {
 			timestamp = &txn.Posted
 		}
-		date := time.Unix(*timestamp, 0).Format("2006-01-02")
+		date := time.Unix(*timestamp, 0).Format("Jan 2")
 		result += fmt.Sprintf("   - $%.2f at %s on %s\n", -txn.Amount, txn.Description, date)
 	}
 
@@ -291,7 +291,7 @@ func calculateTotalExpenses(transactions []Transaction) float64 {
 }
 
 // generateAnalysisPrompt generates a prompt for the AI to analyze transactions
-func generateAnalysisPrompt(accounts []Account, transactions []Transaction, startDate, endDate time.Time, dateRangeType DateRangeType, billingDay int) string {
+func generateAnalysisPrompt(accounts []Account, transactions []Transaction, startDate, endDate time.Time, dateRangeType DateRangeType, billingDay int, filterResult *FilterResult) string {
 	transactionsFormatted := formatTransactions(transactions)
 	accountsFormatted := formatAccounts(accounts)
 	topExpensesFormatted := formatTopExpenses(transactions)
@@ -411,6 +411,32 @@ func generateAnalysisPrompt(accounts []Account, transactions []Transaction, star
 		categoryDescription = "List the top 4-5 spending categories with their totals for this period"
 	}
 
+	// Add filtered transactions section if any were filtered
+	filteredSection := ""
+	if filterResult != nil && filterResult.TotalFiltered > 0 {
+		// Get unique merchant names from filtered transactions
+		merchantMap := make(map[string]float64)
+		for _, tx := range filterResult.FilteredTransactions {
+			merchantMap[tx.Description] += float64(tx.Amount)
+		}
+
+		// Build merchant summary
+		merchantSummary := ""
+		for merchant, amount := range merchantMap {
+			merchantSummary += fmt.Sprintf("   - %s: $%.2f\n", merchant, -amount)
+		}
+
+		filteredSection = fmt.Sprintf(`
+Filtered Transactions (Excluded from Analysis):
+- Total Filtered: %d transactions
+- Total Amount: $%.2f
+- Top Merchants:
+%s
+Note: These transactions were filtered per user configuration and are NOT included in the analysis above.
+
+`, filterResult.TotalFiltered, -float64(filterResult.TotalAmount), merchantSummary)
+	}
+
 	return fmt.Sprintf(`## Financial Transaction Analysis
 %s
 
@@ -444,5 +470,6 @@ Accounts Information:
 %s
 
 All Transactions:
-%s`, periodDescription, summaryInstructions, categoryDescription, topExpensesFormatted, trendAnalysisSection, accountsFormatted, transactionsFormatted)
+%s
+%s`, periodDescription, summaryInstructions, categoryDescription, topExpensesFormatted, trendAnalysisSection, accountsFormatted, transactionsFormatted, filteredSection)
 }

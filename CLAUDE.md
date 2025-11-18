@@ -55,11 +55,12 @@ go test -v ./src
 ## Architecture
 
 ### Core Flow
-1. **Configuration** (`settings.go`): Loads environment variables from `.env` file
+1. **Configuration** (`settings.go`): Loads environment variables from `.env` file and optional filter config from YAML
 2. **Date Calculation** (`date.go`): Calculates billing cycles based on configurable billing day (default: 15th)
 3. **Transaction Fetch** (`simplefin.go`): Retrieves transactions from SimpleFin Bridge API for specified date range
-4. **AI Analysis** (`llm.go`): Sends transactions to OpenRouter LLM for spending analysis
-5. **Notification** (`notifications.go`): Dispatches summaries via email (SMTP) and/or ntfy
+4. **Filtering** (`main.go`): Applies account type, positive transaction, and merchant/description filters
+5. **AI Analysis** (`llm.go`): Sends filtered transactions to OpenRouter LLM for spending analysis
+6. **Notification** (`notifications.go`): Dispatches summaries via email (SMTP) and/or ntfy
 
 ### Key Components
 
@@ -118,7 +119,14 @@ Models are tried in order (R1 for reasoning, V3.1 as fallback).
   - Use `--all-accounts` flag to include all account types
   - Fails gracefully if no credit card accounts are found, suggesting use of `--all-accounts`
 - **Zero balance filtering** (`simplefin.go:102-114`): Filters out accounts with zero balance
-- **Transaction filtering** (`main.go:280-295`): Filters out positive transactions (income/credits) before analysis
+- **Positive transaction filtering** (`main.go:357-371`): Filters out positive transactions (income/credits) before analysis
+- **Merchant/description filtering** (`main.go:132-205`, optional):
+  - Configurable YAML-based filtering system for excluding specific merchants or transaction patterns
+  - Supports three match types: substring (case-insensitive), prefix, and suffix matching
+  - Filtered transactions are excluded from LLM analysis but included in a summary section
+  - Configuration file path set via `FILTER_CONFIG_PATH` environment variable
+  - Example config in `config.example.yaml`
+  - If no config is specified or file is missing, no merchant filtering is applied
 - Only analyzes negative transactions (expenses)
 
 ### Environment Variables
@@ -137,6 +145,12 @@ Optional (Email):
 Optional (Ntfy):
 - `NTFY_TOPIC`: Base ntfy topic for notifications
 - `NTFY_WARNING_SUFFIX`: Suffix appended to base topic for warnings (default: `"-warning"`)
+
+Optional (Transaction Filtering):
+- `FILTER_CONFIG_PATH`: Path to YAML file with transaction filter rules (e.g., `config.yaml`)
+  - See `config.example.yaml` for configuration format
+  - Supports filtering by merchant/description with substring, prefix, or suffix matching
+  - Filtered transactions are excluded from analysis but shown in summary
 
 ### Important Patterns
 

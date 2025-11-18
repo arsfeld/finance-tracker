@@ -100,3 +100,31 @@ type AccountsResponse struct {
 	Errors      []string  `json:"errors,omitempty"`
 	XAPIMessage []string  `json:"x-api-message,omitempty"`
 }
+
+// MatchType defines how to match transaction descriptions
+type MatchType string
+
+// Available match types for filtering
+const (
+	MatchTypeSubstring MatchType = "substring" // Contains anywhere (case-insensitive)
+	MatchTypePrefix    MatchType = "prefix"    // Starts with (case-insensitive)
+	MatchTypeSuffix    MatchType = "suffix"    // Ends with (case-insensitive)
+)
+
+// FilterRule represents a single transaction filter rule
+type FilterRule struct {
+	Pattern   string    `yaml:"pattern"`
+	MatchType MatchType `yaml:"match_type"`
+}
+
+// FilterConfig represents the complete filter configuration
+type FilterConfig struct {
+	ExcludedTransactions []FilterRule `yaml:"excluded_transactions"`
+}
+
+// FilterResult tracks the results of transaction filtering
+type FilterResult struct {
+	FilteredTransactions []Transaction // Transactions that were filtered out
+	TotalFiltered        int           // Count of filtered transactions
+	TotalAmount          Balance       // Sum of filtered transaction amounts
+}

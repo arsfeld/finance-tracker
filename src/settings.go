@@ -5,6 +5,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog/log"
+	"gopkg.in/yaml.v3"
 )
 
 // Settings holds the application configuration
@@ -18,7 +19,8 @@ type Settings struct {
 	MailerFrom         *string
 	MailerTo           *string
 	NtfyTopic          *string
-	NtfyWarningSuffix  string // Suffix appended to NtfyTopic for warning notifications (default: "-warning")
+	NtfyWarningSuffix  string  // Suffix appended to NtfyTopic for warning notifications (default: "-warning")
+	FilterConfigPath   *string // Path to YAML file with transaction filter rules (optional)
 }
 
 // NewSettings creates a new Settings instance from environment variables
@@ -54,6 +56,32 @@ func NewSettings(env_file string) (*Settings, error) {
 	if ntfyWarningSuffix := os.Getenv("NTFY_WARNING_SUFFIX"); ntfyWarningSuffix != "" {
 		settings.NtfyWarningSuffix = ntfyWarningSuffix
 	}
+	// Optional filter config path
+	if filterConfigPath := os.Getenv("FILTER_CONFIG_PATH"); filterConfigPath != "" {
+		settings.FilterConfigPath = &filterConfigPath
+	}
 
 	return settings, nil
+}
+
+// LoadFilterConfig loads transaction filter rules from a YAML file
+func LoadFilterConfig(configPath string) (*FilterConfig, error) {
+	// Read the YAML file
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse YAML
+	var config FilterConfig
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+
+	log.Debug().
+		Int("rule_count", len(config.ExcludedTransactions)).
+		Str("config_path", configPath).
+		Msg("Loaded filter configuration")
+
+	return &config, nil
 }

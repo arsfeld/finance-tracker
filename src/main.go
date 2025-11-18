@@ -129,6 +129,81 @@ func isCreditCard(account Account) bool {
 	return false
 }
 
+// matchesRule checks if a transaction description matches a filter rule
+func matchesRule(description string, rule FilterRule) bool {
+	descLower := strings.ToLower(description)
+	patternLower := strings.ToLower(rule.Pattern)
+
+	switch rule.MatchType {
+	case MatchTypeSubstring:
+		return strings.Contains(descLower, patternLower)
+	case MatchTypePrefix:
+		return strings.HasPrefix(descLower, patternLower)
+	case MatchTypeSuffix:
+		return strings.HasSuffix(descLower, patternLower)
+	default:
+		log.Warn().
+			Str("match_type", string(rule.MatchType)).
+			Msg("Unknown match type, treating as substring")
+		return strings.Contains(descLower, patternLower)
+	}
+}
+
+// filterTransactions filters out transactions based on the provided filter config
+func filterTransactions(transactions []Transaction, filterConfig *FilterConfig) ([]Transaction, FilterResult) {
+	if filterConfig == nil || len(filterConfig.ExcludedTransactions) == 0 {
+		// No filtering configured, return all transactions
+		return transactions, FilterResult{
+			FilteredTransactions: []Transaction{},
+			TotalFiltered:        0,
+			TotalAmount:          0,
+		}
+	}
+
+	var included []Transaction
+	var filtered []Transaction
+	var totalAmount Balance = 0
+
+	for _, tx := range transactions {
+		shouldFilter := false
+		for _, rule := range filterConfig.ExcludedTransactions {
+			if matchesRule(tx.Description, rule) {
+				shouldFilter = true
+				log.Debug().
+					Str("description", tx.Description).
+					Str("pattern", rule.Pattern).
+					Str("match_type", string(rule.MatchType)).
+					Float64("amount", float64(tx.Amount)).
+					Msg("Transaction matched filter rule")
+				break
+			}
+		}
+
+		if shouldFilter {
+			filtered = append(filtered, tx)
+			totalAmount += tx.Amount
+		} else {
+			included = append(included, tx)
+		}
+	}
+
+	result := FilterResult{
+		FilteredTransactions: filtered,
+		TotalFiltered:        len(filtered),
+		TotalAmount:          totalAmount,
+	}
+
+	if len(filtered) > 0 {
+		log.Info().
+			Int("filtered_count", len(filtered)).
+			Float64("total_amount", float64(totalAmount)).
+			Int("remaining_count", len(included)).
+			Msg("🚫 Filtered transactions based on rules")
+	}
+
+	return included, result
+}
+
 // run is the main function that runs the finance tracker
 func run(config RunConfig) error {
 	// Initialize logger
@@ -146,6 +221,21 @@ func run(config RunConfig) error {
 
 	// Log settings in a structured way
 	log.Debug().Interface("settings", settings).Msg("Configuration loaded successfully")
+
+	// Load filter config if configured
+	var filterConfig *FilterConfig
+	if settings.FilterConfigPath != nil {
+		log.Info().Str("config_path", *settings.FilterConfigPath).Msg("📋 Loading filter configuration...")
+		fc, err := LoadFilterConfig(*settings.FilterConfigPath)
+		if err != nil {
+			log.Warn().
+				Err(err).
+				Str("config_path", *settings.FilterConfigPath).
+				Msg("Failed to load filter config, continuing without filtering")
+		} else {
+			filterConfig = fc
+		}
+	}
 
 	// Parse date range
 	dateRangeType := DateRangeType(config.DateRange)
@@ -280,13 +370,17 @@ func run(config RunConfig) error {
 		Int("positive_txns_ignored", positiveTxnCount).
 		Msg("Filtered out positive transactions (e.g., income, payments)")
 
+	// Apply merchant/description filtering if configured
+	var filterResult FilterResult
+	allTransactions, filterResult = filterTransactions(allTransactions, filterConfig)
+
 	if len(allTransactions) == 0 {
 		return fmt.Errorf("no transactions found")
 	}
 
 	// Process transactions with AI
 	log.Info().Msg("🤖 Analyzing transactions with AI...")
-	prompt := generateAnalysisPrompt(accounts, allTransactions, billingStart, billingEnd, dateRangeType, config.BillingDay)
+	prompt := generateAnalysisPrompt(accounts, allTransactions, billingStart, billingEnd, dateRangeType, config.BillingDay, &filterResult)
 	log.Debug().Str("prompt", prompt).Msg("Generated analysis prompt")
 
 	// Determine if this is complex analysis requiring reasoning

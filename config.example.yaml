@@ -1,0 +1,56 @@
+# Transaction Filter Configuration
+# This file defines rules for filtering out specific transactions from analysis.
+# Filtered transactions will be excluded from the LLM analysis but will be
+# included in a summary section for reference.
+
+# Excluded Transactions
+# Each rule consists of:
+#   - pattern: The text to match in the transaction description
+#   - match_type: How to match the pattern (substring, prefix, or suffix)
+#
+# Match Types:
+#   - substring: Matches if the pattern appears anywhere in the description (case-insensitive)
+#   - prefix: Matches if the description starts with the pattern (case-insensitive)
+#   - suffix: Matches if the description ends with the pattern (case-insensitive)
+
+excluded_transactions:
+  # Filter out all Amazon transactions (substring match)
+  - pattern: "Amazon"
+    match_type: "substring"
+
+  # Filter out Venmo transactions
+  - pattern: "Venmo"
+    match_type: "substring"
+
+  # Filter out PayPal transactions
+  - pattern: "PayPal"
+    match_type: "substring"
+
+  # Filter out ACH transfers (prefix match)
+  - pattern: "ACH"
+    match_type: "prefix"
+
+  # Filter out wire transfers (prefix match)
+  - pattern: "WIRE"
+    match_type: "prefix"
+
+  # Filter out fee transactions (suffix match)
+  - pattern: "FEE"
+    match_type: "suffix"
+
+  # Filter out ATM withdrawals
+  - pattern: "ATM"
+    match_type: "substring"
+
+# Usage:
+# 1. Copy this file to config.yaml: cp config.example.yaml config.yaml
+# 2. Edit config.yaml to add your specific filter rules
+# 3. Set the FILTER_CONFIG_PATH environment variable in your .env file:
+#    FILTER_CONFIG_PATH=config.yaml
+# 4. Run finance_tracker as usual
+#
+# Notes:
+# - All pattern matching is case-insensitive
+# - Patterns are matched against the transaction description field
+# - Filtered transactions are shown in a summary but excluded from analysis
+# - If the config file path is not set or the file doesn't exist, no filtering is applied

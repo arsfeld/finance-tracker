@@ -99,3 +99,37 @@ func convertMarkdownToHTML(md string) string {
 	html := string(markdown.Render(node, renderer))
 	return strings.ReplaceAll(html, "\n", "")
 }
+
+// countTransactionDays counts the number of unique days with transactions in a given period
+func countTransactionDays(transactions []Transaction, startDate, endDate time.Time) int {
+	// Use a map to track unique dates (YYYY-MM-DD format)
+	uniqueDays := make(map[string]bool)
+
+	for _, txn := range transactions {
+		// Get transaction timestamp (prefer TransactedAt, fallback to Posted)
+		timestamp := txn.TransactedAt
+		if timestamp == nil {
+			timestamp = &txn.Posted
+		}
+		txnDate := time.Unix(*timestamp, 0)
+
+		// Only count transactions within the period
+		if !txnDate.Before(startDate) && !txnDate.After(endDate) {
+			// Store as YYYY-MM-DD to count unique days
+			dateKey := txnDate.Format("2006-01-02")
+			uniqueDays[dateKey] = true
+		}
+	}
+
+	count := len(uniqueDays)
+
+	// Log the transaction day count for debugging
+	log.Debug().
+		Int("transaction_days", count).
+		Int("calendar_days", int(endDate.Sub(startDate).Hours()/24)+1).
+		Str("start_date", startDate.Format("2006-01-02")).
+		Str("end_date", endDate.Format("2006-01-02")).
+		Msg("Counted transaction days for burn rate calculation")
+
+	return count
+}

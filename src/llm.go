@@ -297,13 +297,14 @@ func generateAnalysisPrompt(accounts []Account, transactions []Transaction, star
 	topExpensesFormatted := formatTopExpenses(transactions)
 
 	// Calculate period details
-	periodDays := int(endDate.Sub(startDate).Hours() / 24)
+	calendarDays := int(endDate.Sub(startDate).Hours() / 24)
+	transactionDays := countTransactionDays(transactions, startDate, endDate)
 	totalExpenses := calculateTotalExpenses(transactions)
 
-	// Calculate daily burn rate
+	// Calculate daily burn rate based on days with actual transactions
 	dailyBurnRate := 0.0
-	if periodDays > 0 {
-		dailyBurnRate = totalExpenses / float64(periodDays)
+	if transactionDays > 0 {
+		dailyBurnRate = totalExpenses / float64(transactionDays)
 	}
 
 	// Calculate monthly projection (assuming 30-day month)
@@ -311,7 +312,7 @@ func generateAnalysisPrompt(accounts []Account, transactions []Transaction, star
 
 	// Determine if this is a multi-month analysis
 	isMultiMonth := dateRangeType == DateRangeTypeCurrentAndLastMonth
-	periodDescription := fmt.Sprintf("Billing Period: %s to %s (%d days)\nTotal Expenses: $%.2f\nDaily Burn Rate: $%.2f/day\nMonthly Projection: $%.2f (at current rate)", startDate.Format("2006-01-02"), endDate.Format("2006-01-02"), periodDays, totalExpenses, dailyBurnRate, monthlyProjection)
+	periodDescription := fmt.Sprintf("Billing Period: %s to %s (%d calendar days, %d transaction days)\nTotal Expenses: $%.2f\nDaily Burn Rate: $%.2f/day (based on transaction days)\nMonthly Projection: $%.2f (at current rate)", startDate.Format("2006-01-02"), endDate.Format("2006-01-02"), calendarDays, transactionDays, totalExpenses, dailyBurnRate, monthlyProjection)
 
 	summaryInstructions := "Provide a human-friendly overview of spending patterns during this period. Be specific about trends and notable observations."
 	trendAnalysisSection := ""
@@ -333,17 +334,20 @@ func generateAnalysisPrompt(accounts []Account, transactions []Transaction, star
 		// Period 1 (oldest completed cycle)
 		period1Start := startDate
 		period1End := previousCycleStart.Add(-24 * time.Hour)
-		period1Days := int(period1End.Sub(period1Start).Hours()/24) + 1
+		period1CalendarDays := int(period1End.Sub(period1Start).Hours()/24) + 1
+		period1Days := countTransactionDays(transactions, period1Start, period1End)
 
 		// Period 2 (previous completed cycle)
 		period2Start := previousCycleStart
 		period2End := currentCycleStart.Add(-24 * time.Hour)
-		period2Days := int(period2End.Sub(period2Start).Hours()/24) + 1
+		period2CalendarDays := int(period2End.Sub(period2Start).Hours()/24) + 1
+		period2Days := countTransactionDays(transactions, period2Start, period2End)
 
 		// Period 3 (current incomplete cycle)
 		period3Start := currentCycleStart
 		period3End := endDate
-		period3Days := int(period3End.Sub(period3Start).Hours()/24) + 1
+		period3CalendarDays := int(period3End.Sub(period3Start).Hours()/24) + 1
+		period3Days := countTransactionDays(transactions, period3Start, period3End)
 
 		// Calculate percentage changes
 		period2Change := 0.0
@@ -384,15 +388,15 @@ func generateAnalysisPrompt(accounts []Account, transactions []Transaction, star
 		completedMonthlyProjection := avgCompletedBurnRate * 30
 
 		periodDescription = fmt.Sprintf(`Multi-Cycle Analysis (3 Billing Periods):
-- %s: %s to %s (%d days) - $%.2f [completed] - Burn rate: $%.2f/day
-- %s: %s to %s (%d days) - $%.2f [completed] - Burn rate: $%.2f/day - Change: %.1f%% (%s)
-- %s: %s to %s (%d days) - $%.2f [in progress] - Burn rate: $%.2f/day - Change: %.1f%% (%s)
+- %s: %s to %s (%d calendar/%d txn days) - $%.2f [completed] - Burn rate: $%.2f/day
+- %s: %s to %s (%d calendar/%d txn days) - $%.2f [completed] - Burn rate: $%.2f/day - Change: %.1f%% (%s)
+- %s: %s to %s (%d calendar/%d txn days) - $%.2f [in progress] - Burn rate: $%.2f/day - Change: %.1f%% (%s)
 - Grand Total: $%.2f
-- Average Burn Rate (completed cycles): $%.2f/day
+- Average Burn Rate (completed cycles): $%.2f/day (based on transaction days)
 - Monthly Projection: $%.2f (based on completed cycles)`,
-			cycle1Label, period1Start.Format("2006-01-02"), period1End.Format("2006-01-02"), period1Days, period1Total, period1BurnRate,
-			cycle2Label, period2Start.Format("2006-01-02"), period2End.Format("2006-01-02"), period2Days, period2Total, period2BurnRate, period2Change, formatChange(period2Change),
-			cycle3Label, period3Start.Format("2006-01-02"), period3End.Format("2006-01-02"), period3Days, period3Total, period3BurnRate, period3Change, formatChange(period3Change),
+			cycle1Label, period1Start.Format("2006-01-02"), period1End.Format("2006-01-02"), period1CalendarDays, period1Days, period1Total, period1BurnRate,
+			cycle2Label, period2Start.Format("2006-01-02"), period2End.Format("2006-01-02"), period2CalendarDays, period2Days, period2Total, period2BurnRate, period2Change, formatChange(period2Change),
+			cycle3Label, period3Start.Format("2006-01-02"), period3End.Format("2006-01-02"), period3CalendarDays, period3Days, period3Total, period3BurnRate, period3Change, formatChange(period3Change),
 			totalExpenses, avgCompletedBurnRate, completedMonthlyProjection)
 
 		summaryInstructions = fmt.Sprintf("Provide a human-friendly overview of spending patterns across the 3 billing cycles (%s, %s, %s). Focus on comparing the two completed cycles and note that the current cycle is still in progress. Use the provided billing period totals for accurate comparisons.", cycle1Label, cycle2Label, cycle3Label)

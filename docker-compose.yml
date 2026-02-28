@@ -1,0 +1,7 @@
+services:
+  finance-tracker:
+    build: .
+    volumes:
+      - ./config:/config
+    environment:
+      - TZ=America/Toronto

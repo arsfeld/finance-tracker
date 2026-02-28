@@ -42,6 +42,26 @@ excluded_transactions:
   - pattern: "ATM"
     match_type: "substring"
 
+# Specific Exclusions
+# Filter individual transactions by date AND merchant pattern.
+# Useful for one-off exclusions (e.g., a refund, a duplicate, or an unusual charge).
+#
+# Each rule consists of:
+#   - date: The transaction date in YYYY-MM-DD format
+#   - pattern: The text to match in the transaction description
+#   - match_type: How to match the pattern (substring, prefix, or suffix)
+#                 Defaults to "substring" if omitted.
+
+specific_exclusions:
+  # Example: Exclude a specific Starbucks charge on Jan 15, 2025
+  - date: "2025-01-15"
+    pattern: "STARBUCKS"
+    match_type: "substring"
+
+  # Example: Exclude a specific refund
+  - date: "2025-02-01"
+    pattern: "RETURN CREDIT"
+
 # Usage:
 # 1. Copy this file to config.yaml: cp config.example.yaml config.yaml
 # 2. Edit config.yaml to add your specific filter rules

@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -71,44 +72,16 @@ func shuffleModels(models []string) {
 	})
 }
 
-// getLLMResponse sends a prompt to the OpenRouter API and returns the response
-func getLLMResponse(settings *Settings, prompt string, isComplexAnalysis bool) (string, error) {
-	models := strings.Split(settings.OpenRouterModel, ",")
-
-	log.Debug().Msgf("Using models in order: %v", models)
-
-	// System message to prime the model with financial analyst role
-	systemMessage := Message{
-		Role: "system",
-		Content: `You are an expert financial analyst specializing in personal finance and spending pattern analysis.
-Your role is to provide clear, actionable insights from transaction data. Focus on identifying trends,
-categorizing expenses accurately, and highlighting notable patterns or concerns. Be concise, specific,
-and use data to support your observations.`,
-	}
-
-	reqBody := OpenRouterRequest{
-		Models:      models,
-		Temperature: 0.4, // Lower temperature for more consistent, factual responses
-		Messages: []Message{
-			systemMessage,
-			{
-				Role:    "user",
-				Content: prompt,
-			},
-		},
-		Reasoning: Reasoning{
-			Exclude: !isComplexAnalysis, // Enable reasoning for complex analysis (multi-month, etc.)
-		},
-	}
-
-	jsonData, err := json.Marshal(reqBody)
+// callOpenRouter sends a request to the OpenRouter API and returns the raw content and model name
+func callOpenRouter(settings *Settings, request OpenRouterRequest) (content string, model string, err error) {
+	jsonData, err := json.Marshal(request)
 	if err != nil {
-		return "", fmt.Errorf("error marshaling request: %w", err)
+		return "", "", fmt.Errorf("error marshaling request: %w", err)
 	}
 
 	req, err := http.NewRequest(http.MethodPost, settings.OpenRouterURL, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return "", fmt.Errorf("error creating request: %w", err)
+		return "", "", fmt.Errorf("error creating request: %w", err)
 	}
 
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", settings.OpenRouterAPIKey))
@@ -119,7 +92,7 @@ and use data to support your observations.`,
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("error making request: %w", err)
+		return "", "", fmt.Errorf("error making request: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -133,7 +106,7 @@ and use data to support your observations.`,
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		event.Err(err).Msg("OpenRouter response (error reading body)")
-		return "", fmt.Errorf("error reading response body: %w", err)
+		return "", "", fmt.Errorf("error reading response body: %w", err)
 	}
 	event.Str("body", string(bodyBytes))
 
@@ -144,32 +117,111 @@ and use data to support your observations.`,
 	resp.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
+		return "", "", fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	var openRouterResp OpenRouterResponse
 	if err := json.NewDecoder(resp.Body).Decode(&openRouterResp); err != nil {
-		return "", fmt.Errorf("error decoding response: %w", err)
+		return "", "", fmt.Errorf("error decoding response: %w", err)
 	}
 
 	log.Info().Str("model", openRouterResp.Model).Str("provider", openRouterResp.Provider).Msg(" └ OpenRouter response")
 
 	// Check for error in the response
 	if openRouterResp.Error != nil {
-		return "", fmt.Errorf("OpenRouter API error: %s (code: %d)", openRouterResp.Error.Message, openRouterResp.Error.Code)
+		return "", "", fmt.Errorf("OpenRouter API error: %s (code: %d)", openRouterResp.Error.Message, openRouterResp.Error.Code)
 	}
 
 	if len(openRouterResp.Choices) == 0 {
-		return "", fmt.Errorf("no response from OpenRouter")
+		return "", "", fmt.Errorf("no response from OpenRouter")
 	}
 
-	content := openRouterResp.Choices[0].Message.Content
-	if content == "" {
-		return "", fmt.Errorf("received empty analysis from LLM")
+	responseContent := openRouterResp.Choices[0].Message.Content
+	if responseContent == "" {
+		return "", "", fmt.Errorf("received empty response from LLM")
+	}
+
+	return responseContent, openRouterResp.Model, nil
+}
+
+// getLLMResponse sends a prompt to the OpenRouter API and returns the analysis response
+func getLLMResponse(settings *Settings, prompt string, isComplexAnalysis bool) (string, error) {
+	models := strings.Split(settings.OpenRouterModel, ",")
+
+	log.Debug().Msgf("Using models in order: %v", models)
+
+	reqBody := OpenRouterRequest{
+		Models:      models,
+		Temperature: 0.4,
+		Messages: []Message{
+			{
+				Role: "system",
+				Content: `You are an expert financial analyst specializing in personal finance and spending pattern analysis for families.
+You are analyzing spending for a Canadian family of 4: 2 adults, 2 daughters (born 2021 and 2024, currently ~4 and ~1 years old).
+Your role is to provide clear, actionable insights from transaction data. Focus on identifying trends,
+highlighting what's improving and what needs attention, and providing family-relevant suggestions.
+Be concise, specific, and use the pre-calculated data provided — do not recalculate totals or percentages.`,
+			},
+			{
+				Role:    "user",
+				Content: prompt,
+			},
+		},
+		Reasoning: Reasoning{
+			Exclude: !isComplexAnalysis,
+		},
+	}
+
+	content, model, err := callOpenRouter(settings, reqBody)
+	if err != nil {
+		return "", err
 	}
 
 	// Add model information as a small note at the bottom
-	content = fmt.Sprintf("%s\n\n---\n*Generated by %s*", content, openRouterResp.Model)
+	content = fmt.Sprintf("%s\n\n---\n*Generated by %s*", content, model)
+
+	return content, nil
+}
+
+// getLLMResponseJSON sends a prompt to the OpenRouter API expecting a JSON response.
+// Uses low temperature and disabled reasoning for deterministic categorization.
+func getLLMResponseJSON(settings *Settings, systemPrompt string, userPrompt string) (string, error) {
+	models := strings.Split(settings.OpenRouterModel, ",")
+
+	reqBody := OpenRouterRequest{
+		Models:      models,
+		Temperature: 0.1,
+		Messages: []Message{
+			{
+				Role:    "system",
+				Content: systemPrompt,
+			},
+			{
+				Role:    "user",
+				Content: userPrompt,
+			},
+		},
+		Reasoning: Reasoning{
+			Exclude: true,
+		},
+	}
+
+	content, _, err := callOpenRouter(settings, reqBody)
+	if err != nil {
+		return "", err
+	}
+
+	// Strip markdown code fences if present
+	content = strings.TrimSpace(content)
+	if strings.HasPrefix(content, "```json") {
+		content = strings.TrimPrefix(content, "```json")
+		content = strings.TrimSuffix(content, "```")
+		content = strings.TrimSpace(content)
+	} else if strings.HasPrefix(content, "```") {
+		content = strings.TrimPrefix(content, "```")
+		content = strings.TrimSuffix(content, "```")
+		content = strings.TrimSpace(content)
+	}
 
 	return content, nil
 }
@@ -258,9 +310,67 @@ func formatChange(percentChange float64) string {
 	return "no change"
 }
 
-// calculateBillingPeriodTotals calculates expense totals for each billing period in a multi-month analysis (3 periods)
-func calculateBillingPeriodTotals(transactions []Transaction, split1 time.Time, split2 time.Time) (float64, float64, float64) {
-	var period1Total, period2Total, period3Total float64
+// calculateBillingPeriods generates N billing periods ending at endDate, working backwards from billingDay.
+// The last period (current) may be incomplete. The last 3 are marked as focus periods.
+func calculateBillingPeriods(startDate, endDate time.Time, billingDay int) []BillingPeriod {
+	// Find the current cycle start
+	currentYear, currentMonth, _ := endDate.Date()
+	var currentCycleStart time.Time
+	if endDate.Day() >= billingDay {
+		currentCycleStart = time.Date(currentYear, currentMonth, billingDay, 0, 0, 0, 0, time.UTC)
+	} else {
+		currentCycleStart = time.Date(currentYear, currentMonth, billingDay, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 0)
+	}
+
+	// Build periods from newest to oldest
+	var periods []BillingPeriod
+	cycleStart := currentCycleStart
+
+	for cycleStart.After(startDate) || cycleStart.Equal(startDate) {
+		var periodEnd time.Time
+		var isComplete bool
+
+		if cycleStart.Equal(currentCycleStart) {
+			// Current (most recent) period — ends at endDate, incomplete
+			periodEnd = endDate
+			isComplete = false
+		} else {
+			// Completed period — ends the day before the next cycle starts
+			nextCycle := cycleStart.AddDate(0, 1, 0)
+			periodEnd = nextCycle.Add(-24 * time.Hour)
+			isComplete = true
+		}
+
+		periodStart := cycleStart
+		if periodStart.Before(startDate) {
+			periodStart = startDate
+		}
+
+		label := fmt.Sprintf("%s %d - %s %d", periodStart.Format("Jan"), periodStart.Day(), periodEnd.Format("Jan"), periodEnd.Day())
+
+		periods = append([]BillingPeriod{{
+			Label:      label,
+			Start:      periodStart,
+			End:        periodEnd,
+			IsComplete: isComplete,
+			IsFocus:    false, // set below
+		}}, periods...)
+
+		// Move to previous cycle
+		cycleStart = cycleStart.AddDate(0, -1, 0)
+	}
+
+	// Mark the last 3 periods (or all if fewer) as focus
+	for i := len(periods) - 1; i >= 0 && i >= len(periods)-3; i-- {
+		periods[i].IsFocus = true
+	}
+
+	return periods
+}
+
+// calculatePeriodTotals calculates expense totals for each billing period.
+func calculatePeriodTotals(transactions []Transaction, periods []BillingPeriod) []float64 {
+	totals := make([]float64, len(periods))
 
 	for _, txn := range transactions {
 		timestamp := txn.TransactedAt
@@ -269,16 +379,15 @@ func calculateBillingPeriodTotals(transactions []Transaction, split1 time.Time, 
 		}
 		txnDate := time.Unix(*timestamp, 0)
 
-		if txnDate.Before(split1) {
-			period1Total += -float64(txn.Amount) // Convert to positive - oldest period
-		} else if txnDate.Before(split2) {
-			period2Total += -float64(txn.Amount) // Convert to positive - middle period
-		} else {
-			period3Total += -float64(txn.Amount) // Convert to positive - current period
+		for i, p := range periods {
+			if !txnDate.Before(p.Start) && !txnDate.After(p.End) {
+				totals[i] += -float64(txn.Amount) // Convert to positive
+				break
+			}
 		}
 	}
 
-	return period1Total, period2Total, period3Total
+	return totals
 }
 
 // calculateTotalExpenses calculates the total expenses for all transactions
@@ -291,146 +400,258 @@ func calculateTotalExpenses(transactions []Transaction) float64 {
 }
 
 // generateAnalysisPrompt generates a prompt for the AI to analyze transactions
-func generateAnalysisPrompt(accounts []Account, transactions []Transaction, startDate, endDate time.Time, dateRangeType DateRangeType, billingDay int, filterResult *FilterResult) string {
-	transactionsFormatted := formatTransactions(transactions)
+func generateAnalysisPrompt(accounts []Account, transactions []Transaction, startDate, endDate time.Time, dateRangeType DateRangeType, billingDay int, filterResult *FilterResult, categories map[string]string) string {
+	var transactionsFormatted string
+	if categories != nil {
+		transactionsFormatted = formatTransactionsWithCategories(transactions, categories)
+	} else {
+		transactionsFormatted = formatTransactions(transactions)
+	}
 	accountsFormatted := formatAccounts(accounts)
-	topExpensesFormatted := formatTopExpenses(transactions)
 
-	// Calculate period details
-	calendarDays := int(endDate.Sub(startDate).Hours() / 24)
-	transactionDays := countTransactionDays(transactions, startDate, endDate)
 	totalExpenses := calculateTotalExpenses(transactions)
 
-	// Calculate daily burn rate based on days with actual transactions
+	// Determine if this is a multi-month analysis
+	isMultiMonth := dateRangeType == DateRangeTypeCurrentAndLastMonth
+
+	if isMultiMonth {
+		return generateMultiPeriodPrompt(accounts, transactions, startDate, endDate, billingDay, filterResult, categories, accountsFormatted, transactionsFormatted, totalExpenses)
+	}
+
+	return generateSinglePeriodPrompt(accounts, transactions, startDate, endDate, filterResult, categories, accountsFormatted, transactionsFormatted, totalExpenses)
+}
+
+// generateSinglePeriodPrompt creates the prompt for single-period analysis
+func generateSinglePeriodPrompt(accounts []Account, transactions []Transaction, startDate, endDate time.Time, filterResult *FilterResult, categories map[string]string, accountsFormatted, transactionsFormatted string, totalExpenses float64) string {
+	calendarDays := int(endDate.Sub(startDate).Hours() / 24)
+	transactionDays := countTransactionDays(transactions, startDate, endDate)
+
 	dailyBurnRate := 0.0
 	if transactionDays > 0 {
 		dailyBurnRate = totalExpenses / float64(transactionDays)
 	}
-
-	// Calculate monthly projection (assuming 30-day month)
 	monthlyProjection := dailyBurnRate * 30
 
-	// Determine if this is a multi-month analysis
-	isMultiMonth := dateRangeType == DateRangeTypeCurrentAndLastMonth
 	periodDescription := fmt.Sprintf("Billing Period: %s to %s (%d calendar days, %d transaction days)\nTotal Expenses: $%.2f\nDaily Burn Rate: $%.2f/day (based on transaction days)\nMonthly Projection: $%.2f (at current rate)", startDate.Format("2006-01-02"), endDate.Format("2006-01-02"), calendarDays, transactionDays, totalExpenses, dailyBurnRate, monthlyProjection)
 
-	summaryInstructions := "Provide a human-friendly overview of spending patterns during this period. Be specific about trends and notable observations."
-	trendAnalysisSection := ""
-
-	if isMultiMonth {
-		// Calculate the split points between billing periods (3 periods total)
-		currentYear, currentMonth, _ := endDate.Date()
-		var currentCycleStart time.Time
-		if endDate.Day() >= billingDay {
-			currentCycleStart = time.Date(currentYear, currentMonth, billingDay, 0, 0, 0, 0, time.UTC)
-		} else {
-			currentCycleStart = time.Date(currentYear, currentMonth, billingDay, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 0)
-		}
-		previousCycleStart := currentCycleStart.AddDate(0, -1, 0)
-
-		// Calculate totals for each of the 3 billing periods
-		period1Total, period2Total, period3Total := calculateBillingPeriodTotals(transactions, previousCycleStart, currentCycleStart)
-
-		// Period 1 (oldest completed cycle)
-		period1Start := startDate
-		period1End := previousCycleStart.Add(-24 * time.Hour)
-		period1CalendarDays := int(period1End.Sub(period1Start).Hours()/24) + 1
-		period1Days := countTransactionDays(transactions, period1Start, period1End)
-
-		// Period 2 (previous completed cycle)
-		period2Start := previousCycleStart
-		period2End := currentCycleStart.Add(-24 * time.Hour)
-		period2CalendarDays := int(period2End.Sub(period2Start).Hours()/24) + 1
-		period2Days := countTransactionDays(transactions, period2Start, period2End)
-
-		// Period 3 (current incomplete cycle)
-		period3Start := currentCycleStart
-		period3End := endDate
-		period3CalendarDays := int(period3End.Sub(period3Start).Hours()/24) + 1
-		period3Days := countTransactionDays(transactions, period3Start, period3End)
-
-		// Calculate percentage changes
-		period2Change := 0.0
-		if period1Total > 0 {
-			period2Change = ((period2Total - period1Total) / period1Total) * 100
-		}
-		period3Change := 0.0
-		if period2Total > 0 {
-			period3Change = ((period3Total - period2Total) / period2Total) * 100
-		}
-
-		// Format cycle labels with month names
-		cycle1Label := fmt.Sprintf("%s %d - %s %d", period1Start.Format("Jan"), period1Start.Day(), period1End.Format("Jan"), period1End.Day())
-		cycle2Label := fmt.Sprintf("%s %d - %s %d", period2Start.Format("Jan"), period2Start.Day(), period2End.Format("Jan"), period2End.Day())
-		cycle3Label := fmt.Sprintf("%s %d - %s %d", period3Start.Format("Jan"), period3Start.Day(), period3End.Format("Jan"), period3End.Day())
-
-		// Calculate burn rates for each period
-		period1BurnRate := 0.0
-		if period1Days > 0 {
-			period1BurnRate = period1Total / float64(period1Days)
-		}
-		period2BurnRate := 0.0
-		if period2Days > 0 {
-			period2BurnRate = period2Total / float64(period2Days)
-		}
-		period3BurnRate := 0.0
-		if period3Days > 0 {
-			period3BurnRate = period3Total / float64(period3Days)
-		}
-
-		// Calculate average burn rate from completed cycles
-		avgCompletedBurnRate := 0.0
-		if period1Days > 0 && period2Days > 0 {
-			avgCompletedBurnRate = (period1BurnRate + period2BurnRate) / 2
-		}
-
-		// Monthly projection based on average of completed cycles
-		completedMonthlyProjection := avgCompletedBurnRate * 30
-
-		periodDescription = fmt.Sprintf(`Multi-Cycle Analysis (3 Billing Periods):
-- %s: %s to %s (%d calendar/%d txn days) - $%.2f [completed] - Burn rate: $%.2f/day
-- %s: %s to %s (%d calendar/%d txn days) - $%.2f [completed] - Burn rate: $%.2f/day - Change: %.1f%% (%s)
-- %s: %s to %s (%d calendar/%d txn days) - $%.2f [in progress] - Burn rate: $%.2f/day - Change: %.1f%% (%s)
-- Grand Total: $%.2f
-- Average Burn Rate (completed cycles): $%.2f/day (based on transaction days)
-- Monthly Projection: $%.2f (based on completed cycles)`,
-			cycle1Label, period1Start.Format("2006-01-02"), period1End.Format("2006-01-02"), period1CalendarDays, period1Days, period1Total, period1BurnRate,
-			cycle2Label, period2Start.Format("2006-01-02"), period2End.Format("2006-01-02"), period2CalendarDays, period2Days, period2Total, period2BurnRate, period2Change, formatChange(period2Change),
-			cycle3Label, period3Start.Format("2006-01-02"), period3End.Format("2006-01-02"), period3CalendarDays, period3Days, period3Total, period3BurnRate, period3Change, formatChange(period3Change),
-			totalExpenses, avgCompletedBurnRate, completedMonthlyProjection)
-
-		summaryInstructions = fmt.Sprintf("Provide a human-friendly overview of spending patterns across the 3 billing cycles (%s, %s, %s). Focus on comparing the two completed cycles and note that the current cycle is still in progress. Use the provided billing period totals for accurate comparisons.", cycle1Label, cycle2Label, cycle3Label)
-		trendAnalysisSection = fmt.Sprintf(`4. **📈 Spending Trends** (use pre-calculated totals above):
-   - Compare the two completed cycles (%s vs %s)
-   - Note current cycle (%s) progress relative to completed cycles
-   - Identify which categories changed significantly between cycles
-5. `, cycle1Label, cycle2Label, cycle3Label)
-	} else {
-		trendAnalysisSection = "4. "
+	categoryBreakdownSection := ""
+	if categories != nil {
+		categoryBreakdownSection = buildSinglePeriodBreakdown(transactions, categories)
 	}
 
-	// Determine category description based on analysis type
-	categoryDescription := "List the top 4-5 spending categories with their totals for the LATEST billing cycle only"
-	if !isMultiMonth {
-		categoryDescription = "List the top 4-5 spending categories with their totals for this period"
+	categoryDescription := "List the top 4-5 spending categories with their totals for this period"
+	if categories != nil {
+		categoryDescription = "Use the pre-calculated category totals below — do NOT re-categorize"
 	}
 
-	// Add filtered transactions section if any were filtered
-	filteredSection := ""
-	if filterResult != nil && filterResult.TotalFiltered > 0 {
-		// Get unique merchant names from filtered transactions
-		merchantMap := make(map[string]float64)
-		for _, tx := range filterResult.FilteredTransactions {
-			merchantMap[tx.Description] += float64(tx.Amount)
+	topExpensesFormatted := formatTopExpenses(transactions)
+	filteredSection := buildFilteredSection(filterResult)
+
+	return fmt.Sprintf(`## Financial Transaction Analysis — Family of 4
+
+Household: 2 adults, 2 children (born 2021 and 2024, currently ~4 and ~1 years old).
+
+%s
+%s
+
+Please create a concise report (~250 words) with:
+
+### Summary
+Provide a human-friendly overview of spending patterns during this period.
+
+### Analysis Breakdown
+1. **Total Expenses**: $%.2f
+2. **Major Categories**: %s
+3. **Top 10 Largest Expenses**:
+%s4. **Key Insights**: 1-2 actionable insights referencing the burn rate and projection above.
+
+Notes:
+- Consider only outgoing expenses (ignore income/credits/refunds)
+- Format all monetary values consistently (e.g., $1,234.56)
+- Use CAD ($) for all amounts
+
+Accounts Information:
+%s
+
+All Transactions:
+%s
+%s`, periodDescription, categoryBreakdownSection, totalExpenses, categoryDescription, topExpensesFormatted, accountsFormatted, transactionsFormatted, filteredSection)
+}
+
+// generateMultiPeriodPrompt creates the enhanced prompt for multi-period (5 billing cycles) analysis
+func generateMultiPeriodPrompt(accounts []Account, transactions []Transaction, startDate, endDate time.Time, billingDay int, filterResult *FilterResult, categories map[string]string, accountsFormatted, transactionsFormatted string, totalExpenses float64) string {
+	periods := calculateBillingPeriods(startDate, endDate, billingDay)
+	periodTotals := calculatePeriodTotals(transactions, periods)
+
+	// Build period summary table
+	var periodSummary strings.Builder
+	periodSummary.WriteString(fmt.Sprintf("Multi-Cycle Analysis (%d Billing Periods):\n", len(periods)))
+
+	// Calculate per-period stats
+	var completedBurnRates []float64
+	for i, p := range periods {
+		calDays := int(p.End.Sub(p.Start).Hours()/24) + 1
+		txnDays := countTransactionDays(transactions, p.Start, p.End)
+		burnRate := 0.0
+		if txnDays > 0 {
+			burnRate = periodTotals[i] / float64(txnDays)
 		}
 
-		// Build merchant summary
-		merchantSummary := ""
-		for merchant, amount := range merchantMap {
-			merchantSummary += fmt.Sprintf("   - %s: $%.2f\n", merchant, -amount)
+		status := "completed"
+		if !p.IsComplete {
+			status = "in progress"
 		}
 
-		filteredSection = fmt.Sprintf(`
+		focusMarker := ""
+		if p.IsFocus {
+			focusMarker = " [FOCUS]"
+		}
+
+		// Calculate change vs previous period
+		changeStr := ""
+		if i > 0 && periodTotals[i-1] > 0 {
+			pctChange := ((periodTotals[i] - periodTotals[i-1]) / periodTotals[i-1]) * 100
+			changeStr = fmt.Sprintf(" - Change: %+.1f%% (%s)", pctChange, formatChange(pctChange))
+		}
+
+		periodSummary.WriteString(fmt.Sprintf("- Period %d: %s (%d cal/%d txn days) - $%.2f [%s] - Burn: $%.2f/day%s%s\n",
+			i+1, p.Label, calDays, txnDays, periodTotals[i], status, burnRate, changeStr, focusMarker))
+
+		if p.IsComplete {
+			completedBurnRates = append(completedBurnRates, burnRate)
+		}
+	}
+
+	// Calculate averages
+	fivePeriodAvg := 0.0
+	if len(periodTotals) > 0 {
+		sum := 0.0
+		for _, t := range periodTotals {
+			sum += t
+		}
+		fivePeriodAvg = sum / float64(len(periodTotals))
+	}
+
+	threePeriodAvg := 0.0
+	focusCount := 0
+	for i, p := range periods {
+		if p.IsFocus {
+			threePeriodAvg += periodTotals[i]
+			focusCount++
+		}
+	}
+	if focusCount > 0 {
+		threePeriodAvg = threePeriodAvg / float64(focusCount)
+	}
+
+	avgCompletedBurnRate := 0.0
+	if len(completedBurnRates) > 0 {
+		sum := 0.0
+		for _, r := range completedBurnRates {
+			sum += r
+		}
+		avgCompletedBurnRate = sum / float64(len(completedBurnRates))
+	}
+
+	periodSummary.WriteString(fmt.Sprintf("- Grand Total: $%.2f\n", totalExpenses))
+	periodSummary.WriteString(fmt.Sprintf("- %d-Period Average Monthly Spend: $%.2f\n", len(periods), fivePeriodAvg))
+	periodSummary.WriteString(fmt.Sprintf("- 3-Period Average (recent trend): $%.2f\n", threePeriodAvg))
+	periodSummary.WriteString(fmt.Sprintf("- Average Burn Rate (completed cycles): $%.2f/day\n", avgCompletedBurnRate))
+	periodSummary.WriteString(fmt.Sprintf("- Monthly Projection: $%.2f (based on completed cycles)\n", avgCompletedBurnRate*30))
+
+	// Build category breakdown for all periods
+	categoryBreakdownSection := ""
+	if categories != nil {
+		categoryBreakdownSection = buildMultiPeriodBreakdown(transactions, categories, startDate, endDate, billingDay)
+	}
+
+	// Build trend highlights
+	trendHighlights := ""
+	if categories != nil {
+		trendHighlights = buildTrendHighlights(transactions, categories, periods)
+	}
+
+	// Get top expenses from focus periods only
+	var focusTransactions []Transaction
+	for _, txn := range transactions {
+		timestamp := txn.TransactedAt
+		if timestamp == nil {
+			timestamp = &txn.Posted
+		}
+		txnDate := time.Unix(*timestamp, 0)
+		for _, p := range periods {
+			if p.IsFocus && !txnDate.Before(p.Start) && !txnDate.After(p.End) {
+				focusTransactions = append(focusTransactions, txn)
+				break
+			}
+		}
+	}
+	topExpensesFormatted := formatTopExpenses(focusTransactions)
+
+	filteredSection := buildFilteredSection(filterResult)
+
+	return fmt.Sprintf(`## Financial Transaction Analysis — Family of 4
+
+Household: 2 adults, 2 children (born 2021 and 2024, currently ~4 and ~1 years old).
+Consider age-appropriate spending patterns (childcare, diapers, kids' activities, family dining, etc.)
+
+%s
+%s
+%s
+
+### Instructions
+
+Analyze this family's spending. Write a concise report (~250 words) with:
+
+1. **Summary**: Overview of the last 3 billing cycles. What's the overall trajectory?
+
+2. **What's Improving**: Categories or habits trending in a positive direction.
+   Use the pre-calculated trends — don't recalculate.
+
+3. **What Needs Attention**: Categories growing faster than average, unusual
+   spikes, or potential areas to cut back. Be specific with dollar amounts.
+
+4. **Top Expenses**: The 10 largest individual charges across the last 3 periods:
+%s
+5. **Family-Specific Insights**: Note anything relevant to a family with young
+   children (childcare costs, kids' activities, family-size grocery spending, etc.)
+
+6. **Actionable Suggestions**: 2-3 concrete things to try next billing cycle,
+   based on the data. Reference specific categories and amounts.
+
+Notes:
+- All calculations are pre-computed. Use them directly.
+- Focus narrative on the LAST 3 periods only (the FOCUS periods).
+- Earlier periods are provided for trend context only.
+- The current period (last one) is partial/in-progress.
+- Use CAD ($) for all amounts.
+- Consider only outgoing expenses (ignore income/credits/refunds).
+
+Accounts Information:
+%s
+
+All Transactions:
+%s
+%s`, periodSummary.String(), categoryBreakdownSection, trendHighlights, topExpensesFormatted, accountsFormatted, transactionsFormatted, filteredSection)
+}
+
+// buildFilteredSection creates the filtered transactions section for the prompt
+func buildFilteredSection(filterResult *FilterResult) string {
+	if filterResult == nil || filterResult.TotalFiltered == 0 {
+		return ""
+	}
+
+	merchantMap := make(map[string]float64)
+	for _, tx := range filterResult.FilteredTransactions {
+		merchantMap[tx.Description] += float64(tx.Amount)
+	}
+
+	merchantSummary := ""
+	for merchant, amount := range merchantMap {
+		merchantSummary += fmt.Sprintf("   - %s: $%.2f\n", merchant, -amount)
+	}
+
+	return fmt.Sprintf(`
 Filtered Transactions (Excluded from Analysis):
 - Total Filtered: %d transactions
 - Total Amount: $%.2f
@@ -439,41 +660,462 @@ Filtered Transactions (Excluded from Analysis):
 Note: These transactions were filtered per user configuration and are NOT included in the analysis above.
 
 `, filterResult.TotalFiltered, -float64(filterResult.TotalAmount), merchantSummary)
+}
+
+// formatTransactionsWithCategories formats transactions as a markdown table with a Category column
+func formatTransactionsWithCategories(transactions []Transaction, categories map[string]string) string {
+	if categories == nil {
+		return formatTransactions(transactions)
 	}
 
-	return fmt.Sprintf(`## Financial Transaction Analysis
-%s
+	var result string
+	result += "| Description | Amount | Date | Category |\n"
+	result += "|------------|---------|------|----------|\n"
 
-I need a structured analysis of the provided financial transactions. Use emojis to make the report more engaging.
-Please create a concise report (max 180 words total) with the following sections:
+	for _, txn := range transactions {
+		timestamp := txn.TransactedAt
+		if timestamp == nil {
+			timestamp = &txn.Posted
+		}
+		date := time.Unix(*timestamp, 0).Format("2006-01-02")
+		category := categories[txn.Description]
+		if category == "" {
+			category = "Uncategorized"
+		}
+		result += fmt.Sprintf("| %s | %.2f | %s | %s |\n", txn.Description, txn.Amount, date, category)
+	}
 
-### Summary
-%s
+	return result
+}
 
-### Analysis Breakdown
-1. **Total Expenses**: Per billing cycle totals shown above
-2. **Major Categories** (latest cycle only): %s
-   - Category 1: ${{amount}}
-   - Category 2: ${{amount}}
-   - ...
-3. **Top 10 Largest Expenses** (across all periods):
-%s%s**🔍 Key Insights**: Provide 1-2 actionable insights such as:
-   - Reference the daily burn rate and monthly projection provided above
-   - Notable patterns or anomalies worth mentioning
-   - Recurring charges or subscription reminders if relevant
+// generateCategorizationPrompt builds a prompt for categorizing uncategorized merchant descriptions.
+// Existing categories are provided as context examples for consistency.
+func generateCategorizationPrompt(uncategorized []string, existingStore CategoryStore) string {
+	var sb strings.Builder
 
-Notes:
-- Consider only outgoing expenses in your analysis (ignore incoming payments, credits, refunds)
-- Format all monetary values consistently (e.g., $1,234.56)
-- Keep insights brief and actionable
-- Use the pre-calculated burn rates and projections provided in the period description above
-- Category totals should be for the LATEST billing cycle only (not combined across periods)
-- If a category has no transactions, indicate 'No spending in this category'
+	sb.WriteString("Categorize the following merchant/transaction descriptions into spending categories.\n\n")
 
-Accounts Information:
-%s
+	// Provide existing categories as context
+	if len(existingStore) > 0 {
+		sb.WriteString("Here are the existing categories and their merchants (use these as a guide for consistency):\n")
+		// Sort category names for deterministic output
+		catNames := make([]string, 0, len(existingStore))
+		for cat := range existingStore {
+			catNames = append(catNames, cat)
+		}
+		sort.Strings(catNames)
 
-All Transactions:
-%s
-%s`, periodDescription, summaryInstructions, categoryDescription, topExpensesFormatted, trendAnalysisSection, accountsFormatted, transactionsFormatted, filteredSection)
+		for _, cat := range catNames {
+			merchants := existingStore[cat]
+			if len(merchants) > 5 {
+				merchants = merchants[:5]
+			}
+			sb.WriteString(fmt.Sprintf("- %s: [%s]\n", cat, strings.Join(merchants, ", ")))
+		}
+		sb.WriteString("\nAssign each new merchant to an existing category above if it fits. Create a new category only if none fit.\n\n")
+	}
+
+	sb.WriteString("Merchant descriptions to categorize:\n")
+	for _, desc := range uncategorized {
+		sb.WriteString(fmt.Sprintf("- %s\n", desc))
+	}
+
+	sb.WriteString("\nRespond with valid JSON only in this exact format:\n")
+	sb.WriteString(`{"categories": [{"description": "MERCHANT NAME", "category": "Category Name"}, ...]}`)
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+// categorizeTransactions orchestrates transaction categorization using a persistent store and LLM.
+// Returns a map of description -> category for all provided transactions.
+func categorizeTransactions(settings *Settings, transactions []Transaction, categoriesPath string) (map[string]string, error) {
+	// Load existing category store
+	store, err := LoadCategories(categoriesPath)
+	if err != nil {
+		return nil, fmt.Errorf("error loading categories: %w", err)
+	}
+
+	// Build deduplicated set of descriptions and look up existing categories
+	result := make(map[string]string)
+	var uncategorized []string
+	seen := make(map[string]bool)
+
+	for _, tx := range transactions {
+		desc := tx.Description
+		if seen[desc] {
+			continue
+		}
+		seen[desc] = true
+
+		if cat, found := LookupCategory(store, desc); found {
+			result[desc] = cat
+		} else {
+			uncategorized = append(uncategorized, desc)
+		}
+	}
+
+	log.Info().
+		Int("known", len(result)).
+		Int("uncategorized", len(uncategorized)).
+		Msg("🏷️  Category lookup results")
+
+	// If everything is already categorized, skip the LLM call
+	if len(uncategorized) == 0 {
+		log.Info().Msg("🏷️  All merchants already categorized, skipping LLM call")
+		return result, nil
+	}
+
+	// Generate categorization prompt with existing categories as context
+	prompt := generateCategorizationPrompt(uncategorized, store)
+	log.Debug().Str("prompt", prompt).Msg("Generated categorization prompt")
+
+	// Call LLM for categorization
+	log.Info().Int("count", len(uncategorized)).Msg("🏷️  Categorizing new merchants with LLM...")
+	systemPrompt := "You are a financial transaction categorization system. Respond with valid JSON only. Categorize merchants into clear spending categories like Dining, Groceries, Transportation, Entertainment, Subscriptions, Shopping, Healthcare, Utilities, etc."
+	jsonResp, err := getLLMResponseJSON(settings, systemPrompt, prompt)
+	if err != nil {
+		return nil, fmt.Errorf("error getting categorization from LLM: %w", err)
+	}
+
+	// Parse the response
+	var catResp CategorizationResponse
+	if err := json.Unmarshal([]byte(jsonResp), &catResp); err != nil {
+		return nil, fmt.Errorf("error parsing categorization response: %w (response: %s)", err, jsonResp)
+	}
+
+	// Merge new categorizations into the store
+	for _, tc := range catResp.Categories {
+		result[tc.Description] = tc.Category
+		AddToCategory(store, tc.Category, tc.Description)
+	}
+
+	// Save updated store
+	if err := SaveCategories(categoriesPath, store); err != nil {
+		log.Warn().Err(err).Msg("Failed to save categories file")
+	} else {
+		log.Info().Str("path", categoriesPath).Msg("🏷️  Saved updated categories")
+	}
+
+	return result, nil
+}
+
+// buildCategoryBreakdown pre-calculates per-category spending totals for the analysis prompt.
+func buildCategoryBreakdown(transactions []Transaction, categories map[string]string, isMultiMonth bool, startDate, endDate time.Time, billingDay int) string {
+	if categories == nil || len(categories) == 0 {
+		return ""
+	}
+
+	if !isMultiMonth {
+		return buildSinglePeriodBreakdown(transactions, categories)
+	}
+
+	return buildMultiPeriodBreakdown(transactions, categories, startDate, endDate, billingDay)
+}
+
+// buildSinglePeriodBreakdown creates a simple category spending summary for single-period analysis
+func buildSinglePeriodBreakdown(transactions []Transaction, categories map[string]string) string {
+	type catStats struct {
+		total float64
+		count int
+	}
+	stats := make(map[string]*catStats)
+
+	for _, tx := range transactions {
+		cat := categories[tx.Description]
+		if cat == "" {
+			cat = "Uncategorized"
+		}
+		if stats[cat] == nil {
+			stats[cat] = &catStats{}
+		}
+		stats[cat].total += -float64(tx.Amount) // Convert to positive
+		stats[cat].count++
+	}
+
+	// Sort by total descending
+	type catEntry struct {
+		name  string
+		total float64
+		count int
+	}
+	var entries []catEntry
+	for name, s := range stats {
+		entries = append(entries, catEntry{name, s.total, s.count})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].total > entries[j].total
+	})
+
+	var sb strings.Builder
+	sb.WriteString("\nPre-Calculated Category Spending:\n")
+	for _, e := range entries {
+		sb.WriteString(fmt.Sprintf("- %s: $%.2f (%d transactions)\n", e.name, e.total, e.count))
+	}
+
+	return sb.String()
+}
+
+// buildMultiPeriodBreakdown creates a per-period category spending table for multi-month analysis (N periods)
+func buildMultiPeriodBreakdown(transactions []Transaction, categories map[string]string, startDate, endDate time.Time, billingDay int) string {
+	periods := calculateBillingPeriods(startDate, endDate, billingDay)
+	if len(periods) == 0 {
+		return ""
+	}
+
+	// Accumulate per-category per-period totals
+	stats := make(map[string][]float64)
+	allCats := make(map[string]bool)
+
+	for _, tx := range transactions {
+		cat := categories[tx.Description]
+		if cat == "" {
+			cat = "Uncategorized"
+		}
+		allCats[cat] = true
+		if stats[cat] == nil {
+			stats[cat] = make([]float64, len(periods))
+		}
+
+		timestamp := tx.TransactedAt
+		if timestamp == nil {
+			timestamp = &tx.Posted
+		}
+		txnDate := time.Unix(*timestamp, 0)
+		amount := -float64(tx.Amount) // Convert to positive
+
+		for i, p := range periods {
+			if !txnDate.Before(p.Start) && !txnDate.After(p.End) {
+				stats[cat][i] += amount
+				break
+			}
+		}
+	}
+
+	// Sort categories by grand total descending
+	type catEntry struct {
+		name   string
+		totals []float64
+		grand  float64
+	}
+	var entries []catEntry
+	for name := range allCats {
+		s := stats[name]
+		grand := 0.0
+		for _, v := range s {
+			grand += v
+		}
+		entries = append(entries, catEntry{name, s, grand})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].grand > entries[j].grand
+	})
+
+	// Build table header
+	var sb strings.Builder
+	sb.WriteString("\nPre-Calculated Category Spending by Period:\n\n")
+	sb.WriteString("| Category |")
+	for i, p := range periods {
+		label := fmt.Sprintf(" P%d (%s-%s)", i+1, p.Start.Format("Jan"), p.End.Format("Jan"))
+		if !p.IsComplete {
+			label += "*"
+		}
+		sb.WriteString(label + " |")
+	}
+	sb.WriteString(" Trend (last 2 complete) |\n")
+
+	sb.WriteString("|----------|")
+	for range periods {
+		sb.WriteString("--------|")
+	}
+	sb.WriteString("--------|\n")
+
+	// Build rows
+	for _, e := range entries {
+		sb.WriteString(fmt.Sprintf("| %s |", e.name))
+		for _, v := range e.totals {
+			sb.WriteString(fmt.Sprintf(" $%.2f |", v))
+		}
+
+		// Calculate trend from the last two completed periods
+		trend := "—"
+		completedIndices := []int{}
+		for i, p := range periods {
+			if p.IsComplete {
+				completedIndices = append(completedIndices, i)
+			}
+		}
+		if len(completedIndices) >= 2 {
+			prev := e.totals[completedIndices[len(completedIndices)-2]]
+			curr := e.totals[completedIndices[len(completedIndices)-1]]
+			if prev > 0 {
+				pctChange := ((curr - prev) / prev) * 100
+				trend = fmt.Sprintf("%+.1f%%", pctChange)
+			}
+		}
+		sb.WriteString(fmt.Sprintf(" %s |\n", trend))
+	}
+
+	return sb.String()
+}
+
+// buildTrendHighlights identifies category trends across focus periods and formats them for the prompt.
+func buildTrendHighlights(transactions []Transaction, categories map[string]string, periods []BillingPeriod) string {
+	if len(periods) < 2 {
+		return ""
+	}
+
+	// Calculate per-category per-period totals
+	stats := make(map[string][]float64)
+	for _, tx := range transactions {
+		cat := categories[tx.Description]
+		if cat == "" {
+			cat = "Uncategorized"
+		}
+		if stats[cat] == nil {
+			stats[cat] = make([]float64, len(periods))
+		}
+
+		timestamp := tx.TransactedAt
+		if timestamp == nil {
+			timestamp = &tx.Posted
+		}
+		txnDate := time.Unix(*timestamp, 0)
+
+		for i, p := range periods {
+			if !txnDate.Before(p.Start) && !txnDate.After(p.End) {
+				stats[cat][i] += -float64(tx.Amount)
+				break
+			}
+		}
+	}
+
+	// Identify focus period indices
+	var focusIndices []int
+	for i, p := range periods {
+		if p.IsFocus {
+			focusIndices = append(focusIndices, i)
+		}
+	}
+
+	// Identify old (non-focus) and recent (focus) indices
+	var oldIndices []int
+	for i, p := range periods {
+		if !p.IsFocus {
+			oldIndices = append(oldIndices, i)
+		}
+	}
+
+	var trendingUp, trendingDown, stable, newCats, disappearedCats []string
+
+	for cat, totals := range stats {
+		// Check for new/disappeared categories
+		oldTotal := 0.0
+		for _, idx := range oldIndices {
+			oldTotal += totals[idx]
+		}
+		recentTotal := 0.0
+		for _, idx := range focusIndices {
+			recentTotal += totals[idx]
+		}
+
+		if oldTotal == 0 && recentTotal > 0 {
+			newCats = append(newCats, fmt.Sprintf("%s ($%.0f)", cat, recentTotal))
+			continue
+		}
+		if oldTotal > 0 && recentTotal == 0 {
+			disappearedCats = append(disappearedCats, cat)
+			continue
+		}
+
+		// Analyze trend across focus periods (need at least 2 completed focus periods)
+		completedFocus := []int{}
+		for _, idx := range focusIndices {
+			if periods[idx].IsComplete {
+				completedFocus = append(completedFocus, idx)
+			}
+		}
+
+		if len(completedFocus) >= 2 {
+			// Check consecutive increases/decreases
+			allUp := true
+			allDown := true
+			for j := 1; j < len(completedFocus); j++ {
+				prev := totals[completedFocus[j-1]]
+				curr := totals[completedFocus[j]]
+				if prev == 0 {
+					allUp = false
+					allDown = false
+					break
+				}
+				change := ((curr - prev) / prev) * 100
+				if change <= 10 {
+					allUp = false
+				}
+				if change >= -10 {
+					allDown = false
+				}
+			}
+
+			// Check stability (within ±5% across completed focus periods)
+			isStable := true
+			if len(completedFocus) >= 2 {
+				base := totals[completedFocus[0]]
+				if base > 0 {
+					for _, idx := range completedFocus[1:] {
+						change := ((totals[idx] - base) / base) * 100
+						if change > 5 || change < -5 {
+							isStable = false
+							break
+						}
+					}
+				} else {
+					isStable = false
+				}
+			}
+
+			lastTwo := completedFocus[len(completedFocus)-2:]
+			prev := totals[lastTwo[0]]
+			curr := totals[lastTwo[1]]
+			pctStr := ""
+			if prev > 0 {
+				pct := ((curr - prev) / prev) * 100
+				pctStr = fmt.Sprintf(" %+.0f%%", pct)
+			}
+
+			if allUp {
+				trendingUp = append(trendingUp, fmt.Sprintf("%s%s", cat, pctStr))
+			} else if allDown {
+				trendingDown = append(trendingDown, fmt.Sprintf("%s%s", cat, pctStr))
+			} else if isStable {
+				avgAmount := 0.0
+				for _, idx := range completedFocus {
+					avgAmount += totals[idx]
+				}
+				avgAmount /= float64(len(completedFocus))
+				stable = append(stable, fmt.Sprintf("%s ($%.0f/mo avg)", cat, avgAmount))
+			}
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\nPre-Calculated Trend Highlights:\n")
+
+	if len(trendingUp) > 0 {
+		sb.WriteString("- Categories trending UP (focus periods): " + strings.Join(trendingUp, ", ") + "\n")
+	}
+	if len(trendingDown) > 0 {
+		sb.WriteString("- Categories trending DOWN (focus periods): " + strings.Join(trendingDown, ", ") + "\n")
+	}
+	if len(stable) > 0 {
+		sb.WriteString("- Stable categories: " + strings.Join(stable, ", ") + "\n")
+	}
+	if len(newCats) > 0 {
+		sb.WriteString("- New categories this period: " + strings.Join(newCats, ", ") + "\n")
+	}
+	if len(disappearedCats) > 0 {
+		sb.WriteString("- Disappeared categories: " + strings.Join(disappearedCats, ", ") + "\n")
+	}
+
+	return sb.String()
 }

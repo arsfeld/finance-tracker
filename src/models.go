@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"time"
 )
 
 // Balance represents a monetary value that can be unmarshaled from either string or float64
@@ -117,9 +118,17 @@ type FilterRule struct {
 	MatchType MatchType `yaml:"match_type"`
 }
 
+// SpecificExclusion represents a filter for a specific transaction by date and pattern
+type SpecificExclusion struct {
+	Date      string    `yaml:"date"`       // Format: "2006-01-02" (YYYY-MM-DD)
+	Pattern   string    `yaml:"pattern"`    // Merchant/description to match
+	MatchType MatchType `yaml:"match_type"` // substring (default), prefix, suffix
+}
+
 // FilterConfig represents the complete filter configuration
 type FilterConfig struct {
-	ExcludedTransactions []FilterRule `yaml:"excluded_transactions"`
+	ExcludedTransactions []FilterRule        `yaml:"excluded_transactions"`
+	SpecificExclusions   []SpecificExclusion `yaml:"specific_exclusions"`
 }
 
 // FilterResult tracks the results of transaction filtering
@@ -127,4 +136,55 @@ type FilterResult struct {
 	FilteredTransactions []Transaction // Transactions that were filtered out
 	TotalFiltered        int           // Count of filtered transactions
 	TotalAmount          Balance       // Sum of filtered transaction amounts
+}
+
+// BillingPeriod represents a single billing cycle in a multi-period analysis
+type BillingPeriod struct {
+	Label      string
+	Start      time.Time
+	End        time.Time
+	IsComplete bool // true for past periods, false for current/in-progress
+	IsFocus    bool // true for the last 3 periods (narrative focus)
+}
+
+// CachedAccount stores account metadata in the transaction cache
+type CachedAccount struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Balance     Balance `json:"balance"`
+	BalanceDate int64   `json:"balance_date"`
+	Currency    string  `json:"currency,omitempty"`
+}
+
+// CachedTransaction stores a single transaction in the cache
+type CachedTransaction struct {
+	ID           string  `json:"id"`
+	AccountID    string  `json:"account_id"`
+	Description  string  `json:"description"`
+	Amount       Balance `json:"amount"`
+	Posted       int64   `json:"posted"`
+	TransactedAt *int64  `json:"transacted_at,omitempty"`
+	Pending      bool    `json:"pending"`
+	CachedAt     int64   `json:"cached_at"`
+}
+
+// TransactionCache holds the complete transaction cache state
+type TransactionCache struct {
+	LastFetched  string                       `json:"last_fetched"`
+	Accounts     map[string]CachedAccount     `json:"accounts"`
+	Transactions map[string]CachedTransaction `json:"transactions"`
+}
+
+// CategoryStore maps category name -> list of merchant descriptions
+type CategoryStore map[string][]string
+
+// TransactionCategory represents a single categorization result from the LLM
+type TransactionCategory struct {
+	Description string `json:"description"`
+	Category    string `json:"category"`
+}
+
+// CategorizationResponse represents the LLM response for transaction categorization
+type CategorizationResponse struct {
+	Categories []TransactionCategory `json:"categories"`
 }

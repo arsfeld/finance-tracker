@@ -24,6 +24,7 @@ type RunConfig struct {
 	RetryDelay           int
 	BillingDay           int
 	AllAccounts          bool
+	SkipCategorization   bool
 }
 
 func main() {
@@ -42,8 +43,8 @@ By default, only credit card accounts are analyzed. Use --all-accounts to includ
 Version: %s
 
 Example usage:
-  finance_tracker                    # Analyze 3 billing cycles (default: cycles based on day 15)
-  finance_tracker --billing-day 1    # Analyze 3 billing cycles starting from day 1
+  finance_tracker                    # Analyze 5 billing cycles (default: cycles based on day 15)
+  finance_tracker --billing-day 1    # Analyze 5 billing cycles starting from day 1
   finance_tracker --date-range current_month  # Analyze only current billing cycle
   finance_tracker --date-range last_month     # Analyze only previous billing cycle
   finance_tracker --all-accounts              # Include all account types (not just credit cards)
@@ -62,6 +63,7 @@ Example usage:
 			retryDelay, _ := cmd.Flags().GetInt("retry-delay")
 			billingDay, _ := cmd.Flags().GetInt("billing-day")
 			allAccounts, _ := cmd.Flags().GetBool("all-accounts")
+			skipCategorization, _ := cmd.Flags().GetBool("skip-categorization")
 
 			return run(RunConfig{
 				Notifications:        notifications,
@@ -76,6 +78,7 @@ Example usage:
 				RetryDelay:           retryDelay,
 				BillingDay:           billingDay,
 				AllAccounts:          allAccounts,
+				SkipCategorization:   skipCategorization,
 			})
 		},
 	}
@@ -83,7 +86,7 @@ Example usage:
 	rootCmd.Flags().StringSliceP("notifications", "n", []string{"email", "ntfy"}, "Notification types to send")
 	rootCmd.Flags().Bool("disable-notifications", false, "Disable all notifications")
 	rootCmd.Flags().Bool("verbose", false, "Enable verbose logging")
-	rootCmd.Flags().String("date-range", string(DateRangeTypeCurrentAndLastMonth), "Date range type (default: 3 billing cycles)")
+	rootCmd.Flags().String("date-range", string(DateRangeTypeCurrentAndLastMonth), "Date range type (default: 5 billing cycles)")
 	rootCmd.Flags().String("start-date", "", "Start date for custom range (YYYY-MM-DD)")
 	rootCmd.Flags().String("end-date", "", "End date for custom range (YYYY-MM-DD)")
 	rootCmd.Flags().String("env-file", ".env", "Path to environment file")
@@ -92,6 +95,7 @@ Example usage:
 	rootCmd.Flags().Int("retry-delay", 2, "Initial retry delay in seconds")
 	rootCmd.Flags().Int("billing-day", 15, "Day of the month for the billing cycle start (1-28)")
 	rootCmd.Flags().Bool("all-accounts", false, "Include all account types (default: credit cards only)")
+	rootCmd.Flags().Bool("skip-categorization", false, "Skip LLM-based transaction categorization")
 	rootCmd.SetVersionTemplate(GetVersion() + "\n")
 
 	if err := rootCmd.Execute(); err != nil {
@@ -149,9 +153,33 @@ func matchesRule(description string, rule FilterRule) bool {
 	}
 }
 
+// matchesSpecificExclusion checks if a transaction matches a specific date+pattern exclusion
+func matchesSpecificExclusion(tx Transaction, excl SpecificExclusion) bool {
+	// Get the transaction date
+	timestamp := tx.TransactedAt
+	if timestamp == nil {
+		timestamp = &tx.Posted
+	}
+	txDate := time.Unix(*timestamp, 0).Format("2006-01-02")
+
+	// Check date match first
+	if txDate != excl.Date {
+		return false
+	}
+
+	// Reuse matchesRule for the description matching
+	return matchesRule(tx.Description, FilterRule{
+		Pattern:   excl.Pattern,
+		MatchType: excl.MatchType,
+	})
+}
+
 // filterTransactions filters out transactions based on the provided filter config
 func filterTransactions(transactions []Transaction, filterConfig *FilterConfig) ([]Transaction, FilterResult) {
-	if filterConfig == nil || len(filterConfig.ExcludedTransactions) == 0 {
+	hasPatternRules := filterConfig != nil && len(filterConfig.ExcludedTransactions) > 0
+	hasSpecificExclusions := filterConfig != nil && len(filterConfig.SpecificExclusions) > 0
+
+	if !hasPatternRules && !hasSpecificExclusions {
 		// No filtering configured, return all transactions
 		return transactions, FilterResult{
 			FilteredTransactions: []Transaction{},
@@ -166,6 +194,8 @@ func filterTransactions(transactions []Transaction, filterConfig *FilterConfig) 
 
 	for _, tx := range transactions {
 		shouldFilter := false
+
+		// Check pattern-based rules
 		for _, rule := range filterConfig.ExcludedTransactions {
 			if matchesRule(tx.Description, rule) {
 				shouldFilter = true
@@ -176,6 +206,22 @@ func filterTransactions(transactions []Transaction, filterConfig *FilterConfig) 
 					Float64("amount", float64(tx.Amount)).
 					Msg("Transaction matched filter rule")
 				break
+			}
+		}
+
+		// Check specific exclusions if not already filtered
+		if !shouldFilter {
+			for _, excl := range filterConfig.SpecificExclusions {
+				if matchesSpecificExclusion(tx, excl) {
+					shouldFilter = true
+					log.Debug().
+						Str("description", tx.Description).
+						Str("date", excl.Date).
+						Str("pattern", excl.Pattern).
+						Float64("amount", float64(tx.Amount)).
+						Msg("Transaction matched specific exclusion")
+					break
+				}
 			}
 		}
 
@@ -275,13 +321,49 @@ func run(config RunConfig) error {
 	}
 	log.Debug().Msg("Billing period validated successfully")
 
-	// Fetch transactions
-	log.Info().Msg("📊 Fetching transactions...")
-	accounts, apiErrors, err := getTransactionsForPeriod(settings, billingStart, billingEnd)
+	// Load transaction cache
+	log.Info().Msg("📦 Loading transaction cache...")
+	cache, err := LoadCache(settings.CachePath)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to load cache, starting fresh")
+		cache = &TransactionCache{
+			Accounts:     make(map[string]CachedAccount),
+			Transactions: make(map[string]CachedTransaction),
+		}
+	}
+
+	// Fetch last 90 days from SimpleFin API (always, for fresh data)
+	// Clamp the API fetch to 90 days maximum
+	apiStart := clampToAPILimit(billingStart, billingEnd)
+	log.Info().
+		Str("api_start", apiStart.Format("2006-01-02")).
+		Str("api_end", billingEnd.Format("2006-01-02")).
+		Str("full_start", billingStart.Format("2006-01-02")).
+		Msg("📊 Fetching transactions (API window clamped to 90 days)...")
+
+	freshAccounts, apiErrors, err := getTransactionsForPeriod(settings, apiStart, billingEnd)
 	if err != nil {
 		return fmt.Errorf("error fetching transactions: %w", err)
 	}
-	log.Debug().Int("account_count", len(accounts)).Msg("Fetched accounts")
+	log.Debug().Int("account_count", len(freshAccounts)).Msg("Fetched fresh accounts from API")
+
+	// Merge fresh data into cache and save
+	cache = MergeTransactions(cache, freshAccounts)
+
+	// Prune stale pending transactions (>30 days old)
+	cutoff := time.Now().UTC().AddDate(0, 0, -30)
+	PrunePendingOlderThan(cache, cutoff)
+
+	if err := SaveCache(settings.CachePath, cache); err != nil {
+		log.Warn().Err(err).Msg("Failed to save transaction cache")
+	}
+
+	// Reconstruct full date range from cache
+	accounts, _ := GetTransactionsForRange(cache, billingStart, billingEnd)
+	log.Info().
+		Int("cached_accounts", len(accounts)).
+		Str("range", fmt.Sprintf("%s to %s", billingStart.Format("2006-01-02"), billingEnd.Format("2006-01-02"))).
+		Msg("📦 Reconstructed accounts from cache for full analysis range")
 
 	// Handle API errors by sending warnings through configured channels
 	if len(apiErrors) > 0 && !config.DisableNotifications {
@@ -378,9 +460,28 @@ func run(config RunConfig) error {
 		return fmt.Errorf("no transactions found")
 	}
 
+	// Categorize transactions (unless skipped)
+	var categories map[string]string
+	if !config.SkipCategorization {
+		categories, err = retryWithBackoff(
+			func() (map[string]string, error) {
+				return categorizeTransactions(settings, allTransactions, settings.CategoriesPath)
+			},
+			config.MaxRetries,
+			config.RetryDelay,
+			"Transaction categorization",
+		)
+		if err != nil {
+			log.Warn().Err(err).Msg("Categorization failed, proceeding without categories")
+			categories = nil
+		}
+	} else {
+		log.Info().Msg("🏷️  Skipping categorization (--skip-categorization flag set)")
+	}
+
 	// Process transactions with AI
 	log.Info().Msg("🤖 Analyzing transactions with AI...")
-	prompt := generateAnalysisPrompt(accounts, allTransactions, billingStart, billingEnd, dateRangeType, config.BillingDay, &filterResult)
+	prompt := generateAnalysisPrompt(accounts, allTransactions, billingStart, billingEnd, dateRangeType, config.BillingDay, &filterResult, categories)
 	log.Debug().Str("prompt", prompt).Msg("Generated analysis prompt")
 
 	// Determine if this is complex analysis requiring reasoning

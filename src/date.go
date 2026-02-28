@@ -71,9 +71,8 @@ func calculateDateRange(
 	case DateRangeTypeCurrentAndLastMonth:
 		// End is today
 		end := today
-		// Start is the beginning of two billing cycles ago
-		// Go back two full cycles from the current cycle start to get 3 total cycles
-		start := currentCycleStart.AddDate(0, -2, 0)
+		// Start is the beginning of four billing cycles ago (5 total periods including current)
+		start := currentCycleStart.AddDate(0, -4, 0)
 		return start, end, nil
 
 	case DateRangeTypeLast3Months:
@@ -109,16 +108,22 @@ func calculateDateRange(
 
 // validateBillingPeriod ensures that the provided billing period is valid:
 // - Start date must be before end date
-// - Billing period can't exceed 90 days (SimpleFIN limit?)
+// Note: The 90-day SimpleFin API limit is enforced at fetch time, not here,
+// because the analysis window can span more periods using the transaction cache.
 func validateBillingPeriod(start, end time.Time) error {
 	if start.After(end) {
 		return fmt.Errorf("start date cannot be after end date")
 	}
 
-	if end.Sub(start).Hours() > 90*24 {
-		// Note: SimpleFIN seems to have a 90-day limit for fetching transactions
-		return fmt.Errorf("billing period cannot exceed 90 days")
-	}
-
 	return nil
+}
+
+// clampToAPILimit returns a start date that is at most 90 days before end,
+// respecting the SimpleFin API limit.
+func clampToAPILimit(start, end time.Time) time.Time {
+	maxStart := end.AddDate(0, 0, -90)
+	if start.Before(maxStart) {
+		return maxStart
+	}
+	return start
 }

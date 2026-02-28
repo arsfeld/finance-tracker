@@ -30,3 +30,8 @@ go.work.sum
 .devenv/
 .pre-commit-config.yaml
 .direnv/
+
+# Personal data / generated files
+categories.json
+transaction_cache.json
+filter-config.yaml

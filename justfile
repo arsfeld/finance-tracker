@@ -22,10 +22,26 @@ run: build
     #!/usr/bin/env bash
     ./bin/finance_server
 
+# Run both Go server and Vite dev server for development
+dev:
+    #!/usr/bin/env bash
+    echo "Starting Go server on :8080 and Vite dev server on :5173..."
+    (cd web && npm run dev) &
+    VITE_PID=$!
+    go run ./cmd/server &
+    GO_PID=$!
+    trap "kill $VITE_PID $GO_PID 2>/dev/null" EXIT
+    wait
+
+# Build the frontend
+build-web:
+    #!/usr/bin/env bash
+    cd web && npm run build
+
 # Clean build artifacts
 clean:
     #!/usr/bin/env bash
-    rm -rf bin/
+    rm -rf bin/ web/dist/
 
 # Run the legacy CLI
 run-cli: build-cli

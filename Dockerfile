@@ -35,6 +35,7 @@ VOLUME /config
 
 ENV DATA_DIR=/config
 ENV DB_PATH=/config/finance_tracker.db
+ENV FRONTEND_DIR=/app/web/dist
 ENV LISTEN_ADDR=:8080
 
 EXPOSE 8080

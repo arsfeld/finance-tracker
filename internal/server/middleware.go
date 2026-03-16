@@ -69,6 +69,7 @@ func CORS() Middleware {
 }
 
 // statusWriter wraps ResponseWriter to capture the status code.
+// It preserves http.Flusher so SSE works through the middleware chain.
 type statusWriter struct {
 	http.ResponseWriter
 	status int
@@ -77,4 +78,10 @@ type statusWriter struct {
 func (w *statusWriter) WriteHeader(status int) {
 	w.status = status
 	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }

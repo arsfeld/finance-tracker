@@ -15,6 +15,7 @@ type Config struct {
 	DataDir     string
 	DBPath      string
 	FrontendDir string
+	ViteDevURL  string // If set, proxy non-API requests to Vite dev server (e.g. "http://localhost:5173")
 
 	// SimpleFin
 	SimplefinBridgeURL string
@@ -58,6 +59,7 @@ func Load(envFile string) (*Config, error) {
 		DataDir:     dataDir,
 		DBPath:      dbPath,
 		FrontendDir: getEnvOr("FRONTEND_DIR", "web/dist"),
+		ViteDevURL:  os.Getenv("VITE_DEV_URL"),
 		EnvFile:     envFile,
 
 		SimplefinBridgeURL: os.Getenv("SIMPLEFIN_BRIDGE_URL"),

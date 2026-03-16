@@ -97,7 +97,9 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	s.mux.HandleFunc("DELETE /api/filters/{id}", filterHandler.Delete)
 
 	// SPA fallback: must be last (least specific pattern).
-	s.mux.Handle("GET /", spaHandler(cfg.FrontendDir))
+	// In dev mode (VITE_DEV_URL set), proxies to Vite for hot-reload.
+	// In production, serves static files from FrontendDir.
+	s.mux.Handle("/", spaHandler(cfg.FrontendDir, cfg.ViteDevURL))
 
 	return s
 }

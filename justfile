@@ -22,15 +22,20 @@ run: build
     #!/usr/bin/env bash
     ./bin/finance_server
 
-# Run both Go server and Vite dev server for development
+# Run in dev mode: single port, Go proxies to Vite for hot-reload
 dev:
     #!/usr/bin/env bash
-    echo "Starting Go server on :8080 and Vite dev server on :5173..."
-    (cd web && npm run dev) &
+    echo "Starting Vite dev server (background)..."
+    (cd web && npm run dev -- --port 5173) &
     VITE_PID=$!
-    go run ./cmd/server &
+    sleep 1
+    echo "Starting Go server with Vite proxy on :8099..."
+    LISTEN_ADDR=:8099 VITE_DEV_URL=http://localhost:5173 go run ./cmd/server &
     GO_PID=$!
     trap "kill $VITE_PID $GO_PID 2>/dev/null" EXIT
+    echo ""
+    echo "  Open http://localhost:8099"
+    echo ""
     wait
 
 # Build the frontend

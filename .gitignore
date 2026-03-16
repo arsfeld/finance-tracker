@@ -35,3 +35,8 @@ go.work.sum
 categories.json
 transaction_cache.json
 filter-config.yaml
+web/node_modules/
+web/dist/
+*.db
+*.db-wal
+*.db-shm

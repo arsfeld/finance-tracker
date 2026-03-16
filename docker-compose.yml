@@ -1,6 +1,8 @@
 services:
   finance-tracker:
     build: .
+    ports:
+      - "8080:8080"
     volumes:
       - ./config:/config
     environment:

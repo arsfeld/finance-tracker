@@ -92,6 +92,9 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	s.mux.HandleFunc("PATCH /api/filters/{id}", filterHandler.Update)
 	s.mux.HandleFunc("DELETE /api/filters/{id}", filterHandler.Delete)
 
+	// SPA fallback: must be last (least specific pattern).
+	s.mux.Handle("GET /", spaHandler("web/dist"))
+
 	return s
 }
 

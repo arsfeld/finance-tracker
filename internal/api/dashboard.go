@@ -5,18 +5,19 @@ import (
 	"net/http"
 
 	"finance_tracker/internal/billing"
+	"finance_tracker/internal/config"
 	"finance_tracker/internal/models"
 	"finance_tracker/internal/store"
 )
 
 type DashboardHandler struct {
+	cfg           *config.Config
 	txnStore      *store.TransactionStore
 	analysisStore *store.AnalysisStore
-	settingsStore *store.SettingsStore
 }
 
-func NewDashboardHandler(ts *store.TransactionStore, as *store.AnalysisStore, ss *store.SettingsStore) *DashboardHandler {
-	return &DashboardHandler{txnStore: ts, analysisStore: as, settingsStore: ss}
+func NewDashboardHandler(cfg *config.Config, ts *store.TransactionStore, as *store.AnalysisStore) *DashboardHandler {
+	return &DashboardHandler{cfg: cfg, txnStore: ts, analysisStore: as}
 }
 
 type DashboardResponse struct {
@@ -48,13 +49,7 @@ type TrendPoint struct {
 
 func (h *DashboardHandler) Get(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-
-	billingDay := 15
-	if val, err := h.settingsStore.Get(ctx, "billing_day"); err == nil && val != "" {
-		if d := parseInt(val); d >= 1 && d <= 28 {
-			billingDay = d
-		}
-	}
+	billingDay := h.cfg.BillingDay
 
 	start, end, err := billing.CalculateDateRange(models.DateRangeTypeCurrentMonth, nil, nil, billingDay)
 	if err != nil {
@@ -65,7 +60,6 @@ func (h *DashboardHandler) Get(w http.ResponseWriter, r *http.Request) {
 	startUnix := start.Unix()
 	endUnix := end.Unix()
 
-	// Expenses for current period.
 	txns, err := h.txnStore.GetForPeriod(ctx, startUnix, endUnix)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error())
@@ -87,10 +81,8 @@ func (h *DashboardHandler) Get(w http.ResponseWriter, r *http.Request) {
 		dailyAvg = totalSpending / float64(daysInPeriod)
 	}
 
-	// Category totals.
 	catTotals, _ := h.txnStore.CountByCategory(ctx, startUnix, endUnix)
 
-	// Recent transactions (last 10).
 	recentFilter := store.TransactionFilter{
 		StartDate: startUnix,
 		EndDate:   endUnix,
@@ -101,10 +93,8 @@ func (h *DashboardHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	recent, _, _ := h.txnStore.List(ctx, recentFilter)
 
-	// Latest analysis.
 	latest, _ := h.analysisStore.GetLatest(ctx)
 
-	// Trend: last 5 billing periods.
 	trendStart := start.AddDate(0, -4, 0)
 	periods := billing.CalculateBillingPeriods(trendStart, end, billingDay)
 	var trendData []TrendPoint

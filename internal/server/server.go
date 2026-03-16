@@ -28,12 +28,11 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	txnStore := store.NewTransactionStore(db.Read, db.Write)
 	catStore := store.NewCategoryStore(db.Read, db.Write)
 	analysisStore := store.NewAnalysisStore(db.Read, db.Write)
-	settingsStore := store.NewSettingsStore(db.Read, db.Write)
 	filterStore := store.NewFilterStore(db.Read, db.Write)
 	syncLogStore := store.NewSyncLogStore(db.Read, db.Write)
 
-	syncHandler := api.NewSyncHandler(cfg, accountStore, txnStore, catStore, settingsStore, syncLogStore, sched, events)
-	analysisRunHandler := api.NewAnalysisRunHandler(cfg, txnStore, accountStore, analysisStore, settingsStore, catStore, sched, events)
+	syncHandler := api.NewSyncHandler(cfg, accountStore, txnStore, catStore, syncLogStore, sched, events)
+	analysisRunHandler := api.NewAnalysisRunHandler(cfg, txnStore, accountStore, analysisStore, sched, events)
 
 	s := &Server{
 		db:        db,
@@ -51,7 +50,7 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	s.mux.Handle("GET /api/events", events)
 
 	// Dashboard
-	dashboard := api.NewDashboardHandler(txnStore, analysisStore, settingsStore)
+	dashboard := api.NewDashboardHandler(cfg, txnStore, analysisStore)
 	s.mux.HandleFunc("GET /api/dashboard", dashboard.Get)
 
 	// Transactions
@@ -83,10 +82,9 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	s.mux.HandleFunc("GET /api/sync/status", syncHandler.GetStatus)
 	s.mux.HandleFunc("GET /api/sync/log", syncHandler.GetLog)
 
-	// Settings
-	settingsHandler := api.NewSettingsHandler(settingsStore, cfg)
+	// Settings (read-only from .env, test notification)
+	settingsHandler := api.NewSettingsHandler(cfg)
 	s.mux.HandleFunc("GET /api/settings", settingsHandler.Get)
-	s.mux.HandleFunc("PATCH /api/settings", settingsHandler.Update)
 	s.mux.HandleFunc("POST /api/settings/test-notification", settingsHandler.TestNotification)
 
 	// Filters

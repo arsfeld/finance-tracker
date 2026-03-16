@@ -23,8 +23,6 @@ type AnalysisRunHandler struct {
 	txnStore      *store.TransactionStore
 	acctStore     *store.AccountStore
 	analysisStore *store.AnalysisStore
-	settingsStore *store.SettingsStore
-	catStore      *store.CategoryStore
 	scheduler     *scheduler.Scheduler
 	events        *EventHub
 }
@@ -34,8 +32,6 @@ func NewAnalysisRunHandler(
 	txns *store.TransactionStore,
 	accts *store.AccountStore,
 	analyses *store.AnalysisStore,
-	settings *store.SettingsStore,
-	cats *store.CategoryStore,
 	sched *scheduler.Scheduler,
 	events *EventHub,
 ) *AnalysisRunHandler {
@@ -44,8 +40,6 @@ func NewAnalysisRunHandler(
 		txnStore:      txns,
 		acctStore:     accts,
 		analysisStore: analyses,
-		settingsStore: settings,
-		catStore:      cats,
 		scheduler:     sched,
 		events:        events,
 	}
@@ -69,13 +63,7 @@ func (h *AnalysisRunHandler) TriggerAnalysis(w http.ResponseWriter, r *http.Requ
 func (h *AnalysisRunHandler) runAnalysis(ctx context.Context) {
 	h.events.Broadcast("analysis_started", `{"status":"running"}`)
 
-	// Get billing day from settings.
-	billingDay := 15
-	if val, err := h.settingsStore.Get(ctx, "billing_day"); err == nil && val != "" {
-		if d := parseInt(val); d >= 1 && d <= 28 {
-			billingDay = d
-		}
-	}
+	billingDay := h.cfg.BillingDay
 
 	// Determine analysis type: use multi-period (5 cycles) by default.
 	dateRangeType := models.DateRangeTypeCurrentAndLastMonth
@@ -111,27 +99,13 @@ func (h *AnalysisRunHandler) runAnalysis(ctx context.Context) {
 	// Build prompt.
 	prompt := llmclient.GeneratePrompt(txns, accounts, startDate, endDate, billingDay, true)
 
-	// Get LLM settings (prefer DB settings, fall back to env config).
-	openRouterURL := h.cfg.OpenRouterURL
-	if v, _ := h.settingsStore.Get(ctx, "openrouter_url"); v != "" {
-		openRouterURL = v
-	}
-	openRouterKey := h.cfg.OpenRouterAPIKey
-	if v, _ := h.settingsStore.Get(ctx, "openrouter_api_key"); v != "" {
-		openRouterKey = v
-	}
-	openRouterModel := h.cfg.OpenRouterModel
-	if v, _ := h.settingsStore.Get(ctx, "openrouter_model"); v != "" {
-		openRouterModel = v
-	}
-
-	if openRouterURL == "" || openRouterKey == "" || openRouterModel == "" {
+	if h.cfg.OpenRouterURL == "" || h.cfg.OpenRouterAPIKey == "" || h.cfg.OpenRouterModel == "" {
 		log.Error().Msg("OpenRouter not configured")
-		h.events.Broadcast("analysis_error", `{"error":"OpenRouter not configured. Set API key and model in Settings."}`)
+		h.events.Broadcast("analysis_error", `{"error":"OpenRouter not configured. Set OPENROUTER_URL, OPENROUTER_API_KEY, and OPENROUTER_MODEL in .env"}`)
 		return
 	}
 
-	llm := llmclient.NewClient(openRouterURL, openRouterKey, openRouterModel)
+	llm := llmclient.NewClient(h.cfg.OpenRouterURL, h.cfg.OpenRouterAPIKey, h.cfg.OpenRouterModel)
 
 	// Call LLM with retry.
 	response, err := llmclient.RetryWithBackoff(func() (string, error) {

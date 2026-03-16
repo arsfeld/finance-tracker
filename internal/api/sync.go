@@ -20,7 +20,6 @@ type SyncHandler struct {
 	accounts  *store.AccountStore
 	txns      *store.TransactionStore
 	cats      *store.CategoryStore
-	settings  *store.SettingsStore
 	syncLog   *store.SyncLogStore
 	scheduler *scheduler.Scheduler
 	events    *EventHub
@@ -31,7 +30,6 @@ func NewSyncHandler(
 	accounts *store.AccountStore,
 	txns *store.TransactionStore,
 	cats *store.CategoryStore,
-	settings *store.SettingsStore,
 	syncLog *store.SyncLogStore,
 	sched *scheduler.Scheduler,
 	events *EventHub,
@@ -41,7 +39,6 @@ func NewSyncHandler(
 		accounts:  accounts,
 		txns:      txns,
 		cats:      cats,
-		settings:  settings,
 		syncLog:   syncLog,
 		scheduler: sched,
 		events:    events,
@@ -101,21 +98,8 @@ func (h *SyncHandler) runSync(ctx context.Context) {
 }
 
 func (h *SyncHandler) runCategorization(ctx context.Context, start, end time.Time) {
-	openRouterURL := h.cfg.OpenRouterURL
-	if v, _ := h.settings.Get(ctx, "openrouter_url"); v != "" {
-		openRouterURL = v
-	}
-	openRouterKey := h.cfg.OpenRouterAPIKey
-	if v, _ := h.settings.Get(ctx, "openrouter_api_key"); v != "" {
-		openRouterKey = v
-	}
-	openRouterModel := h.cfg.OpenRouterModel
-	if v, _ := h.settings.Get(ctx, "openrouter_model"); v != "" {
-		openRouterModel = v
-	}
-
-	if openRouterURL == "" || openRouterKey == "" || openRouterModel == "" {
-		log.Debug().Msg("Skipping categorization: OpenRouter not configured")
+	if h.cfg.OpenRouterURL == "" || h.cfg.OpenRouterAPIKey == "" || h.cfg.OpenRouterModel == "" {
+		log.Debug().Msg("Skipping categorization: OpenRouter not configured in .env")
 		return
 	}
 
@@ -124,7 +108,7 @@ func (h *SyncHandler) runCategorization(ctx context.Context, start, end time.Tim
 		return
 	}
 
-	client := llmclient.NewClient(openRouterURL, openRouterKey, openRouterModel)
+	client := llmclient.NewClient(h.cfg.OpenRouterURL, h.cfg.OpenRouterAPIKey, h.cfg.OpenRouterModel)
 	if err := llmclient.CategorizeTransactions(ctx, client, h.cats, txns); err != nil {
 		log.Error().Err(err).Msg("Categorization failed")
 	} else {

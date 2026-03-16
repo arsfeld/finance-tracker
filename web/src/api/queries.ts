@@ -34,20 +34,6 @@ async function postApi<T>(url: string, body?: unknown): Promise<T> {
   return json.data;
 }
 
-async function patchApi<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
-    throw new Error(err.error?.message || res.statusText);
-  }
-  const json: ApiResponse<T> = await res.json();
-  return json.data;
-}
-
 // Dashboard
 export function useDashboard() {
   return useQuery({
@@ -108,19 +94,11 @@ export function useCategories() {
   });
 }
 
-// Settings
+// Settings (read-only from .env)
 export function useSettings() {
   return useQuery({
     queryKey: ["settings"],
-    queryFn: () => fetchApi<Record<string, string>>("/api/settings"),
-  });
-}
-
-export function useUpdateSettings() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: Record<string, string>) => patchApi("/api/settings", body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["settings"] }),
+    queryFn: () => fetchApi<Record<string, unknown>>("/api/settings"),
   });
 }
 

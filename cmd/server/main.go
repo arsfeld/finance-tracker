@@ -13,6 +13,7 @@ import (
 
 	"finance_tracker/internal/config"
 	"finance_tracker/internal/database"
+	"finance_tracker/internal/scheduler"
 	"finance_tracker/internal/server"
 )
 
@@ -34,7 +35,20 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to run migrations")
 	}
 
-	srv := server.New(db)
+	sched := scheduler.New()
+
+	srv := server.New(db, cfg, sched)
+
+	// Schedule periodic sync if SimpleFin is configured.
+	if cfg.SimplefinBridgeURL != "" {
+		if err := sched.AddFunc(cfg.SyncSchedule, srv.Sync.RunSync); err != nil {
+			log.Error().Err(err).Str("schedule", cfg.SyncSchedule).Msg("Failed to add sync schedule")
+		} else {
+			log.Info().Str("schedule", cfg.SyncSchedule).Msg("Scheduled periodic sync")
+		}
+	}
+
+	sched.Start()
 
 	httpSrv := &http.Server{
 		Addr:         cfg.ListenAddr,
@@ -59,6 +73,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	sched.Stop(ctx)
 	if err := httpSrv.Shutdown(ctx); err != nil {
 		log.Error().Err(err).Msg("Server shutdown error")
 	}

@@ -61,16 +61,16 @@ func (s *TransactionStore) UpsertBatch(ctx context.Context, txns []models.DBTran
 
 // TransactionFilter holds query parameters for listing transactions.
 type TransactionFilter struct {
-	AccountID      string
-	Category       string
-	Search         string
-	StartDate      int64 // Unix timestamp
-	EndDate        int64 // Unix timestamp
+	AccountID       string
+	Category        string
+	Search          string
+	StartDate       int64 // Unix timestamp
+	EndDate         int64 // Unix timestamp
 	IncludePositive bool
-	Page           int
-	Limit          int
-	SortBy         string // "posted", "amount", "description"
-	SortDir        string // "asc", "desc"
+	Page            int
+	Limit           int
+	SortBy          string // "posted", "amount", "description"
+	SortDir         string // "asc", "desc"
 }
 
 // List returns filtered, paginated, sorted transactions.

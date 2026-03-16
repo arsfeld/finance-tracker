@@ -1,7 +1,7 @@
 ---
 title: "feat: Replace CLI with Full-Featured Web UI"
 type: feat
-status: active
+status: in_progress
 date: 2026-03-16
 origin: docs/brainstorms/2026-03-16-web-ui-brainstorm.md
 ---
@@ -421,42 +421,42 @@ finance_tracker/
 
 ### Functional Requirements
 
-- [ ] Go web server starts and serves React SPA on configurable port
-- [ ] SQLite database created with full schema on first run
-- [ ] SimpleFin transactions fetched and stored in SQLite (upsert by ID)
-- [ ] Account include/exclude configurable via Settings, with auto-detection heuristic for new accounts
-- [ ] Transactions displayed in searchable, filterable, sortable, paginated table
-- [ ] Transaction categories displayed (LLM-assigned) with user override capability
-- [ ] Category override option to apply to all matching merchants
-- [ ] Dashboard shows: spending summary, category pie chart, trend line chart, recent transactions, latest analysis
+- [x] Go web server starts and serves React SPA on configurable port
+- [x] SQLite database created with full schema on first run
+- [x] SimpleFin transactions fetched and stored in SQLite (upsert by ID)
+- [x] Account include/exclude configurable via Settings, with auto-detection heuristic for new accounts
+- [x] Transactions displayed in searchable, filterable, sortable, paginated table
+- [x] Transaction categories displayed (LLM-assigned) with user override capability
+- [x] Category override option to apply to all matching merchants
+- [x] Dashboard shows: spending summary, category pie chart, trend line chart, recent transactions, latest analysis
 - [ ] LLM analysis runs on schedule and on-demand, results stored and viewable
-- [ ] Past analyses browsable as a list, individual analysis rendered as markdown
+- [x] Past analyses browsable as a list, individual analysis rendered as markdown
 - [ ] Period comparison view (side-by-side) for two selected analyses
-- [ ] Notifications (email + ntfy) dispatched on scheduled analysis completion
-- [ ] Warning notifications sent to separate ntfy topic for SimpleFin API errors
-- [ ] Settings page allows configuration of: billing day, notification channels, OpenRouter models, cron schedule, account inclusion
-- [ ] Filter rules manageable via Settings (create, edit, delete) replacing YAML config
-- [ ] Test notification button in Settings
-- [ ] CSV export of filtered transaction view
-- [ ] SSE provides real-time status updates for sync and analysis operations
-- [ ] Mutual exclusion prevents concurrent sync/analysis operations
-- [ ] Dark mode toggle in header, persisted in settings
-- [ ] Graceful shutdown (stop scheduler, drain HTTP connections)
+- [x] Notifications (email + ntfy) dispatched on scheduled analysis completion
+- [x] Warning notifications sent to separate ntfy topic for SimpleFin API errors
+- [x] Settings page allows configuration of: billing day, notification channels, OpenRouter models, cron schedule, account inclusion
+- [x] Filter rules manageable via Settings (create, edit, delete) replacing YAML config
+- [x] Test notification button in Settings
+- [x] CSV export of filtered transaction view
+- [x] SSE provides real-time status updates for sync and analysis operations
+- [x] Mutual exclusion prevents concurrent sync/analysis operations
+- [x] Dark mode toggle in header, persisted in settings
+- [x] Graceful shutdown (stop scheduler, drain HTTP connections)
 
 ### Non-Functional Requirements
 
-- [ ] Pure Go build (no CGO) — `modernc.org/sqlite`
-- [ ] Multi-stage Docker build (Node + Go + Alpine)
-- [ ] Single Docker image serves both API and frontend
-- [ ] SQLite WAL mode enabled for concurrent read performance
-- [ ] API responses under 200ms for cached data queries
+- [x] Pure Go build (no CGO) — `modernc.org/sqlite`
+- [x] Multi-stage Docker build (Node + Go + Alpine)
+- [x] Single Docker image serves both API and frontend
+- [x] SQLite WAL mode enabled for concurrent read performance
+- [x] API responses under 200ms for cached data queries
 - [ ] Frontend loads in under 3 seconds on local network
 
 ### Quality Gates
 
-- [ ] Go code formatted with `gofmt`
-- [ ] Go code passes `go vet`
-- [ ] Frontend builds without TypeScript errors
+- [x] Go code formatted with `gofmt`
+- [x] Go code passes `go vet`
+- [x] Frontend builds without TypeScript errors
 - [ ] Frontend passes ESLint
 - [ ] Docker image builds successfully
 

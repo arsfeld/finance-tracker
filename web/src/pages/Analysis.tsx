@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useAnalyses, useAnalysis } from "@/api/queries";
+import { useAnalyses, useAnalysis, useTriggerAnalysis } from "@/api/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import Markdown from "react-markdown";
@@ -8,10 +8,19 @@ export default function Analysis() {
   const [selectedId, setSelectedId] = useState<number>(0);
   const { data: analyses, isLoading } = useAnalyses();
   const { data: detail } = useAnalysis(selectedId);
+  const triggerAnalysis = useTriggerAnalysis();
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold">Analysis History</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Analysis History</h1>
+        <Button
+          onClick={() => triggerAnalysis.mutate()}
+          disabled={triggerAnalysis.isPending}
+        >
+          {triggerAnalysis.isPending ? "Running..." : "Run Analysis"}
+        </Button>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-1">

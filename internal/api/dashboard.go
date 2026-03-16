@@ -3,7 +3,6 @@ package api
 import (
 	"math"
 	"net/http"
-	"time"
 
 	"finance_tracker/internal/billing"
 	"finance_tracker/internal/models"
@@ -138,16 +137,3 @@ func (h *DashboardHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	WriteData(w, resp)
 }
-
-func parseInt(s string) int {
-	var n int
-	for _, c := range s {
-		if c >= '0' && c <= '9' {
-			n = n*10 + int(c-'0')
-		}
-	}
-	return n
-}
-
-// Suppress unused import warning.
-var _ = time.Now

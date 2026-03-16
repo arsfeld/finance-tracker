@@ -16,6 +16,7 @@ type Server struct {
 	mux       *http.ServeMux
 	Events    *api.EventHub
 	Sync      *api.SyncHandler
+	Analysis  *api.AnalysisRunHandler
 	Scheduler *scheduler.Scheduler
 }
 
@@ -32,12 +33,14 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	syncLogStore := store.NewSyncLogStore(db.Read, db.Write)
 
 	syncHandler := api.NewSyncHandler(cfg, accountStore, txnStore, syncLogStore, sched, events)
+	analysisRunHandler := api.NewAnalysisRunHandler(cfg, txnStore, accountStore, analysisStore, settingsStore, catStore, sched, events)
 
 	s := &Server{
 		db:        db,
 		mux:       http.NewServeMux(),
 		Events:    events,
 		Sync:      syncHandler,
+		Analysis:  analysisRunHandler,
 		Scheduler: sched,
 	}
 
@@ -73,6 +76,7 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	s.mux.HandleFunc("GET /api/analyses", analysisHandler.List)
 	s.mux.HandleFunc("GET /api/analyses/latest", analysisHandler.GetLatest)
 	s.mux.HandleFunc("GET /api/analyses/{id}", analysisHandler.GetByID)
+	s.mux.HandleFunc("POST /api/analyses/run", analysisRunHandler.TriggerAnalysis)
 
 	// Sync
 	s.mux.HandleFunc("POST /api/sync", syncHandler.TriggerSync)
@@ -93,7 +97,7 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	s.mux.HandleFunc("DELETE /api/filters/{id}", filterHandler.Delete)
 
 	// SPA fallback: must be last (least specific pattern).
-	s.mux.Handle("GET /", spaHandler("web/dist"))
+	s.mux.Handle("GET /", spaHandler(cfg.FrontendDir))
 
 	return s
 }

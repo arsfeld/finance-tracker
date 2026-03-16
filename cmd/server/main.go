@@ -39,12 +39,15 @@ func main() {
 
 	srv := server.New(db, cfg, sched)
 
-	// Schedule periodic sync if SimpleFin is configured.
+	// Schedule periodic sync + analysis if SimpleFin is configured.
 	if cfg.SimplefinBridgeURL != "" {
-		if err := sched.AddFunc(cfg.SyncSchedule, srv.Sync.RunSync); err != nil {
+		if err := sched.AddFunc(cfg.SyncSchedule, func() {
+			srv.Sync.RunSync()
+			srv.Analysis.RunAnalysis()
+		}); err != nil {
 			log.Error().Err(err).Str("schedule", cfg.SyncSchedule).Msg("Failed to add sync schedule")
 		} else {
-			log.Info().Str("schedule", cfg.SyncSchedule).Msg("Scheduled periodic sync")
+			log.Info().Str("schedule", cfg.SyncSchedule).Msg("Scheduled periodic sync + analysis")
 		}
 	}
 

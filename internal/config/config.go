@@ -11,9 +11,10 @@ import (
 // Config holds the application configuration loaded from environment variables.
 type Config struct {
 	// Server
-	ListenAddr string
-	DataDir    string
-	DBPath     string
+	ListenAddr  string
+	DataDir     string
+	DBPath      string
+	FrontendDir string
 
 	// SimpleFin
 	SimplefinBridgeURL string
@@ -53,10 +54,11 @@ func Load(envFile string) (*Config, error) {
 	}
 
 	cfg := &Config{
-		ListenAddr: getEnvOr("LISTEN_ADDR", ":8080"),
-		DataDir:    dataDir,
-		DBPath:     dbPath,
-		EnvFile:    envFile,
+		ListenAddr:  getEnvOr("LISTEN_ADDR", ":8080"),
+		DataDir:     dataDir,
+		DBPath:      dbPath,
+		FrontendDir: getEnvOr("FRONTEND_DIR", "web/dist"),
+		EnvFile:     envFile,
 
 		SimplefinBridgeURL: os.Getenv("SIMPLEFIN_BRIDGE_URL"),
 

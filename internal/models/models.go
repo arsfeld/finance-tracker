@@ -161,7 +161,7 @@ type DBTransaction struct {
 	Posted       int64   `json:"posted"`
 	TransactedAt *int64  `json:"transacted_at,omitempty"`
 	Pending      bool    `json:"pending"`
-	Category     string  `json:"category,omitempty"`
+	Category     string  `json:"category"`
 	CachedAt     string  `json:"cached_at"`
 	UpdatedAt    string  `json:"updated_at"`
 }

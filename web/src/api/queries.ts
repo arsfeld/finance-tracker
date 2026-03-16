@@ -102,6 +102,39 @@ export function useSettings() {
   });
 }
 
+// Category override
+export function useOverrideCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ txnId, category, applyToMerchant }: { txnId: string; category: string; applyToMerchant: boolean }) => {
+      const res = await fetch(`/api/transactions/${txnId}/category`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category, apply_to_merchant: applyToMerchant }),
+      });
+      if (!res.ok) throw new Error("Failed to update category");
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["transactions"] });
+      qc.invalidateQueries({ queryKey: ["categories"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
+// Unique categories (for autocomplete)
+export function useCategoryNames() {
+  const { data } = useCategories();
+  const names = new Set<string>();
+  if (data) {
+    for (const e of data) {
+      names.add(e.category);
+    }
+  }
+  return Array.from(names).sort();
+}
+
 // Filters
 export function useFilters() {
   return useQuery({

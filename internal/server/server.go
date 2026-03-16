@@ -32,7 +32,7 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	filterStore := store.NewFilterStore(db.Read, db.Write)
 	syncLogStore := store.NewSyncLogStore(db.Read, db.Write)
 
-	syncHandler := api.NewSyncHandler(cfg, accountStore, txnStore, syncLogStore, sched, events)
+	syncHandler := api.NewSyncHandler(cfg, accountStore, txnStore, catStore, settingsStore, syncLogStore, sched, events)
 	analysisRunHandler := api.NewAnalysisRunHandler(cfg, txnStore, accountStore, analysisStore, settingsStore, catStore, sched, events)
 
 	s := &Server{

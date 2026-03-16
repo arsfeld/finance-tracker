@@ -9,6 +9,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"finance_tracker/internal/config"
+	llmclient "finance_tracker/internal/llm"
 	"finance_tracker/internal/scheduler"
 	"finance_tracker/internal/simplefin"
 	"finance_tracker/internal/store"
@@ -18,6 +19,8 @@ type SyncHandler struct {
 	cfg       *config.Config
 	accounts  *store.AccountStore
 	txns      *store.TransactionStore
+	cats      *store.CategoryStore
+	settings  *store.SettingsStore
 	syncLog   *store.SyncLogStore
 	scheduler *scheduler.Scheduler
 	events    *EventHub
@@ -27,6 +30,8 @@ func NewSyncHandler(
 	cfg *config.Config,
 	accounts *store.AccountStore,
 	txns *store.TransactionStore,
+	cats *store.CategoryStore,
+	settings *store.SettingsStore,
 	syncLog *store.SyncLogStore,
 	sched *scheduler.Scheduler,
 	events *EventHub,
@@ -35,6 +40,8 @@ func NewSyncHandler(
 		cfg:       cfg,
 		accounts:  accounts,
 		txns:      txns,
+		cats:      cats,
+		settings:  settings,
 		syncLog:   syncLog,
 		scheduler: sched,
 		events:    events,
@@ -88,6 +95,41 @@ func (h *SyncHandler) runSync(ctx context.Context) {
 		string(rune(accountCount+'0'))+`}`)
 
 	log.Info().Int("accounts", accountCount).Int("api_errors", len(apiErrors)).Msg("Sync complete")
+
+	// Run categorization on fetched transactions.
+	h.runCategorization(ctx, start, end)
+}
+
+func (h *SyncHandler) runCategorization(ctx context.Context, start, end time.Time) {
+	openRouterURL := h.cfg.OpenRouterURL
+	if v, _ := h.settings.Get(ctx, "openrouter_url"); v != "" {
+		openRouterURL = v
+	}
+	openRouterKey := h.cfg.OpenRouterAPIKey
+	if v, _ := h.settings.Get(ctx, "openrouter_api_key"); v != "" {
+		openRouterKey = v
+	}
+	openRouterModel := h.cfg.OpenRouterModel
+	if v, _ := h.settings.Get(ctx, "openrouter_model"); v != "" {
+		openRouterModel = v
+	}
+
+	if openRouterURL == "" || openRouterKey == "" || openRouterModel == "" {
+		log.Debug().Msg("Skipping categorization: OpenRouter not configured")
+		return
+	}
+
+	txns, err := h.txns.GetForPeriod(ctx, start.Unix(), end.Unix())
+	if err != nil || len(txns) == 0 {
+		return
+	}
+
+	client := llmclient.NewClient(openRouterURL, openRouterKey, openRouterModel)
+	if err := llmclient.CategorizeTransactions(ctx, client, h.cats, txns); err != nil {
+		log.Error().Err(err).Msg("Categorization failed")
+	} else {
+		h.events.Broadcast("categories_updated", `{"status":"ok"}`)
+	}
 }
 
 // RunSync is called by the scheduler for periodic syncs.

@@ -13,7 +13,6 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
-COPY src/ ./src/
 
 ARG VERSION=dev
 ARG BUILD_TIME
@@ -35,6 +34,7 @@ VOLUME /config
 
 ENV DATA_DIR=/config
 ENV DB_PATH=/config/finance_tracker.db
+ENV ENV_FILE=/config/.env
 ENV FRONTEND_DIR=/app/web/dist
 ENV LISTEN_ADDR=:8080
 

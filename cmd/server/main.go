@@ -20,7 +20,11 @@ import (
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
-	cfg, err := config.Load(".env")
+	envFile := ".env"
+	if v := os.Getenv("ENV_FILE"); v != "" {
+		envFile = v
+	}
+	cfg, err := config.Load(envFile)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to load config")
 	}

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useTransactions } from "@/api/queries";
+import { useTransactions, useBillingPeriods, type BillingPeriod } from "@/api/queries";
 import { CategoryPicker } from "@/components/CategoryPicker";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,15 @@ import {
 export default function Transactions() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [selectedPeriodIdx, setSelectedPeriodIdx] = useState<number | null>(null);
+
+  const { data: periods } = useBillingPeriods();
+
+  // Default to the latest (current) period once loaded.
+  const activePeriod: BillingPeriod | undefined =
+    periods && periods.length > 0
+      ? periods[selectedPeriodIdx ?? periods.length - 1]
+      : undefined;
 
   const params: Record<string, string> = {
     page: String(page),
@@ -24,15 +33,43 @@ export default function Transactions() {
     sort_dir: "desc",
     include_positive: "true",
   };
+  if (activePeriod) {
+    params.start = String(activePeriod.start);
+    params.end = String(activePeriod.end);
+  }
   if (search) params.search = search;
 
   const { data, isLoading } = useTransactions(params);
   const transactions = data?.data || [];
   const meta = data?.meta;
 
+  const handlePeriodChange = (idx: number) => {
+    setSelectedPeriodIdx(idx);
+    setPage(1);
+  };
+
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-semibold">Transactions</h1>
+
+      {/* Period selector */}
+      {periods && periods.length > 0 && (
+        <div className="flex gap-1 flex-wrap">
+          {periods.map((p, i) => {
+            const isActive = activePeriod === p;
+            return (
+              <Button
+                key={i}
+                variant={isActive ? "default" : "outline"}
+                size="sm"
+                onClick={() => handlePeriodChange(i)}
+              >
+                {p.label}
+              </Button>
+            );
+          })}
+        </div>
+      )}
 
       <div className="flex gap-2">
         <Input
@@ -43,7 +80,10 @@ export default function Transactions() {
           className="max-w-xs"
         />
         <Button variant="outline" size="sm" asChild>
-          <a href={`/api/transactions/export?search=${encodeURIComponent(search)}&include_positive=true`} download>
+          <a
+            href={`/api/transactions/export?${new URLSearchParams(params).toString()}`}
+            download
+          >
             Export CSV
           </a>
         </Button>
@@ -51,8 +91,13 @@ export default function Transactions() {
 
       <Card>
         <CardHeader>
-          <CardTitle>
-            {meta ? `${meta.total} transactions` : "Transactions"}
+          <CardTitle className="flex items-center justify-between">
+            <span>{meta ? `${meta.total} transactions` : "Transactions"}</span>
+            {activePeriod && (
+              <span className="text-sm font-normal text-muted-foreground">
+                {activePeriod.label}
+              </span>
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -90,7 +135,7 @@ export default function Transactions() {
                   )) : (
                     <TableRow>
                       <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
-                        No transactions found. Click "Sync Now" to fetch data.
+                        No transactions for this period.
                       </TableCell>
                     </TableRow>
                   )}

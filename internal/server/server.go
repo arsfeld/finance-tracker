@@ -53,6 +53,10 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	dashboard := api.NewDashboardHandler(cfg, txnStore, analysisStore)
 	s.mux.HandleFunc("GET /api/dashboard", dashboard.Get)
 
+	// Billing periods
+	billingPeriods := api.NewBillingPeriodsHandler(cfg)
+	s.mux.HandleFunc("GET /api/billing-periods", billingPeriods.List)
+
 	// Transactions
 	txnHandler := api.NewTransactionHandler(txnStore, catStore, events)
 	s.mux.HandleFunc("GET /api/transactions", txnHandler.List)

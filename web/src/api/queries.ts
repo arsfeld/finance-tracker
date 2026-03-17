@@ -34,6 +34,20 @@ async function postApi<T>(url: string, body?: unknown): Promise<T> {
   return json.data;
 }
 
+// Billing periods
+export interface BillingPeriod {
+  label: string;
+  start: number;
+  end: number;
+}
+
+export function useBillingPeriods() {
+  return useQuery({
+    queryKey: ["billing-periods"],
+    queryFn: () => fetchApi<BillingPeriod[]>("/api/billing-periods"),
+  });
+}
+
 // Dashboard
 export function useDashboard() {
   return useQuery({

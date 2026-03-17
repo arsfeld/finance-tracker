@@ -5,7 +5,6 @@ import type {
   DBTransaction,
   DBAccount,
   Analysis,
-  FilterRule,
   CategoryEntry,
   SyncLogEntry,
 } from "./types";
@@ -108,6 +107,31 @@ export function useCategories() {
   });
 }
 
+export interface CategoryInfoItem {
+  name: string;
+  excluded: boolean;
+  count: number;
+}
+
+export function useUniqueCategories() {
+  return useQuery({
+    queryKey: ["categories", "unique"],
+    queryFn: () => fetchApi<CategoryInfoItem[]>("/api/categories/unique"),
+  });
+}
+
+export function useSetCategoryExcluded() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { category: string; excluded: boolean }) =>
+      postApi("/api/categories/exclude", body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["categories"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
 // Settings (read-only from .env)
 export function useSettings() {
   return useQuery({
@@ -147,14 +171,6 @@ export function useCategoryNames() {
     }
   }
   return Array.from(names).sort();
-}
-
-// Filters
-export function useFilters() {
-  return useQuery({
-    queryKey: ["filters"],
-    queryFn: () => fetchApi<FilterRule[]>("/api/filters"),
-  });
 }
 
 // Sync

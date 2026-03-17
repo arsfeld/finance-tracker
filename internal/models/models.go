@@ -58,14 +58,6 @@ const (
 	DateRangeTypeCustom              DateRangeType = "custom"
 )
 
-// MatchType defines how to match transaction descriptions.
-type MatchType string
-
-const (
-	MatchTypeSubstring MatchType = "substring"
-	MatchTypePrefix    MatchType = "prefix"
-	MatchTypeSuffix    MatchType = "suffix"
-)
 
 // Organization represents a financial institution.
 type Organization struct {
@@ -114,14 +106,6 @@ type BillingPeriod struct {
 	End        time.Time
 	IsComplete bool
 	IsFocus    bool
-}
-
-// FilterRule represents a single transaction filter rule.
-type FilterRule struct {
-	ID        int64     `json:"id"`
-	Pattern   string    `json:"pattern"`
-	MatchType MatchType `json:"match_type"`
-	IsActive  bool      `json:"is_active"`
 }
 
 // Analysis represents a stored LLM analysis result.
@@ -183,6 +167,7 @@ type CategoryEntry struct {
 	MerchantDescription string `json:"merchant_description"`
 	Category            string `json:"category"`
 	Source              string `json:"source"`
+	Excluded            bool   `json:"excluded"`
 	UpdatedAt           string `json:"updated_at"`
 }
 

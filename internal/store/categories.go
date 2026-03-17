@@ -39,7 +39,7 @@ func (s *CategoryStore) Set(ctx context.Context, merchantDesc, category, source 
 
 func (s *CategoryStore) ListAll(ctx context.Context) ([]models.CategoryEntry, error) {
 	rows, err := s.read.QueryContext(ctx, `
-		SELECT merchant_description, category, source, updated_at
+		SELECT merchant_description, category, source, excluded, updated_at
 		FROM categories ORDER BY category, merchant_description`)
 	if err != nil {
 		return nil, err
@@ -49,12 +49,69 @@ func (s *CategoryStore) ListAll(ctx context.Context) ([]models.CategoryEntry, er
 	var entries []models.CategoryEntry
 	for rows.Next() {
 		var e models.CategoryEntry
-		if err := rows.Scan(&e.MerchantDescription, &e.Category, &e.Source, &e.UpdatedAt); err != nil {
+		if err := rows.Scan(&e.MerchantDescription, &e.Category, &e.Source, &e.Excluded, &e.UpdatedAt); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()
+}
+
+// ListUniqueCategories returns distinct category names with their exclusion status.
+type CategoryInfo struct {
+	Name     string `json:"name"`
+	Excluded bool   `json:"excluded"`
+	Count    int    `json:"count"`
+}
+
+func (s *CategoryStore) ListUniqueCategories(ctx context.Context) ([]CategoryInfo, error) {
+	rows, err := s.read.QueryContext(ctx, `
+		SELECT category, MAX(excluded) as excluded, COUNT(*) as count
+		FROM categories
+		GROUP BY category
+		ORDER BY category`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var cats []CategoryInfo
+	for rows.Next() {
+		var c CategoryInfo
+		if err := rows.Scan(&c.Name, &c.Excluded, &c.Count); err != nil {
+			return nil, err
+		}
+		cats = append(cats, c)
+	}
+	return cats, rows.Err()
+}
+
+// SetCategoryExcluded sets the excluded flag for all merchants in a category.
+func (s *CategoryStore) SetCategoryExcluded(ctx context.Context, category string, excluded bool) error {
+	_, err := s.write.ExecContext(ctx, `
+		UPDATE categories SET excluded = ?, updated_at = datetime('now')
+		WHERE category = ?`, excluded, category)
+	return err
+}
+
+// ExcludedCategoryNames returns the list of excluded category names.
+func (s *CategoryStore) ExcludedCategoryNames(ctx context.Context) ([]string, error) {
+	rows, err := s.read.QueryContext(ctx, `
+		SELECT DISTINCT category FROM categories WHERE excluded = 1 ORDER BY category`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		names = append(names, n)
+	}
+	return names, rows.Err()
 }
 
 func (s *CategoryStore) BulkUpsert(ctx context.Context, entries []models.CategoryEntry) error {
@@ -84,7 +141,6 @@ func (s *CategoryStore) BulkUpsert(ctx context.Context, entries []models.Categor
 	return tx.Commit()
 }
 
-// SetOverride sets a per-transaction category override.
 func (s *CategoryStore) SetOverride(ctx context.Context, txnID, category string) error {
 	_, err := s.write.ExecContext(ctx, `
 		INSERT INTO category_overrides (transaction_id, category, created_at)
@@ -95,7 +151,6 @@ func (s *CategoryStore) SetOverride(ctx context.Context, txnID, category string)
 	return err
 }
 
-// SetOverrideAndMerchant sets both a per-transaction override and updates the merchant-level category.
 func (s *CategoryStore) SetOverrideAndMerchant(ctx context.Context, txnID, merchantDesc, category string) error {
 	tx, err := s.write.BeginTx(ctx, nil)
 	if err != nil {

@@ -22,6 +22,7 @@ type AnalysisRunHandler struct {
 	cfg           *config.Config
 	txnStore      *store.TransactionStore
 	acctStore     *store.AccountStore
+	catStore      *store.CategoryStore
 	analysisStore *store.AnalysisStore
 	scheduler     *scheduler.Scheduler
 	events        *EventHub
@@ -31,6 +32,7 @@ func NewAnalysisRunHandler(
 	cfg *config.Config,
 	txns *store.TransactionStore,
 	accts *store.AccountStore,
+	cats *store.CategoryStore,
 	analyses *store.AnalysisStore,
 	sched *scheduler.Scheduler,
 	events *EventHub,
@@ -39,6 +41,7 @@ func NewAnalysisRunHandler(
 		cfg:           cfg,
 		txnStore:      txns,
 		acctStore:     accts,
+		catStore:      cats,
 		analysisStore: analyses,
 		scheduler:     sched,
 		events:        events,
@@ -94,6 +97,23 @@ func (h *AnalysisRunHandler) runAnalysis(ctx context.Context) {
 		log.Error().Err(err).Msg("Failed to fetch accounts for analysis")
 		h.events.Broadcast("analysis_error", fmt.Sprintf(`{"error":"%s"}`, err.Error()))
 		return
+	}
+
+	// Filter out transactions in excluded categories.
+	excludedCats, _ := h.catStore.ExcludedCategoryNames(ctx)
+	if len(excludedCats) > 0 {
+		excluded := make(map[string]bool)
+		for _, c := range excludedCats {
+			excluded[c] = true
+		}
+		var filtered []models.DBTransaction
+		for _, t := range txns {
+			if !excluded[t.Category] {
+				filtered = append(filtered, t)
+			}
+		}
+		log.Info().Int("before", len(txns)).Int("after", len(filtered)).Int("excluded_categories", len(excludedCats)).Msg("Filtered excluded categories from analysis")
+		txns = filtered
 	}
 
 	// Build prompt.

@@ -28,11 +28,10 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	txnStore := store.NewTransactionStore(db.Read, db.Write)
 	catStore := store.NewCategoryStore(db.Read, db.Write)
 	analysisStore := store.NewAnalysisStore(db.Read, db.Write)
-	filterStore := store.NewFilterStore(db.Read, db.Write)
 	syncLogStore := store.NewSyncLogStore(db.Read, db.Write)
 
 	syncHandler := api.NewSyncHandler(cfg, accountStore, txnStore, catStore, syncLogStore, sched, events)
-	analysisRunHandler := api.NewAnalysisRunHandler(cfg, txnStore, accountStore, analysisStore, sched, events)
+	analysisRunHandler := api.NewAnalysisRunHandler(cfg, txnStore, accountStore, catStore, analysisStore, sched, events)
 
 	s := &Server{
 		db:        db,
@@ -70,8 +69,10 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	s.mux.HandleFunc("PATCH /api/accounts/{id}", acctHandler.UpdateInclusion)
 
 	// Categories
-	catHandler := api.NewCategoryHandler(catStore, txnStore)
+	catHandler := api.NewCategoryHandler(catStore, txnStore, events)
 	s.mux.HandleFunc("GET /api/categories", catHandler.List)
+	s.mux.HandleFunc("GET /api/categories/unique", catHandler.ListUnique)
+	s.mux.HandleFunc("POST /api/categories/exclude", catHandler.SetExcluded)
 	s.mux.HandleFunc("GET /api/categories/summary", catHandler.Summary)
 
 	// Analyses
@@ -94,13 +95,6 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	// Chat
 	chatHandler := api.NewChatHandler(cfg, txnStore, accountStore, catStore, analysisStore, events)
 	s.mux.HandleFunc("POST /api/chat", chatHandler.Handle)
-
-	// Filters
-	filterHandler := api.NewFilterHandler(filterStore)
-	s.mux.HandleFunc("GET /api/filters", filterHandler.List)
-	s.mux.HandleFunc("POST /api/filters", filterHandler.Create)
-	s.mux.HandleFunc("PATCH /api/filters/{id}", filterHandler.Update)
-	s.mux.HandleFunc("DELETE /api/filters/{id}", filterHandler.Delete)
 
 	// SPA fallback: must be last (least specific pattern).
 	// In dev mode (VITE_DEV_URL set), proxies to Vite for hot-reload.

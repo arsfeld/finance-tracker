@@ -46,17 +46,11 @@ export interface Analysis {
   status: string;
 }
 
-export interface FilterRule {
-  id: number;
-  pattern: string;
-  match_type: "substring" | "prefix" | "suffix";
-  is_active: boolean;
-}
-
 export interface CategoryEntry {
   merchant_description: string;
   category: string;
   source: string;
+  excluded: boolean;
   updated_at: string;
 }
 

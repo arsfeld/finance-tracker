@@ -1,5 +1,6 @@
 import { useDashboard } from "@/api/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { MarkdownContent } from "@/components/MarkdownContent";
 import {
   PieChart,
   Pie,
@@ -147,9 +148,8 @@ export default function Dashboard() {
             <CardTitle>Latest Analysis</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-sm text-muted-foreground whitespace-pre-wrap max-h-64 overflow-y-auto">
-              {data.latest_analysis.response_text.substring(0, 500)}
-              {data.latest_analysis.response_text.length > 500 && "..."}
+            <div className="max-h-64 overflow-y-auto">
+              <MarkdownContent>{data.latest_analysis.response_text}</MarkdownContent>
             </div>
           </CardContent>
         </Card>

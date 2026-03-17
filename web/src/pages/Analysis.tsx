@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useAnalyses, useAnalysis, useTriggerAnalysis } from "@/api/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import Markdown from "react-markdown";
+import { MarkdownContent } from "@/components/MarkdownContent";
 
 export default function Analysis() {
   const [selectedId, setSelectedId] = useState<number>(0);
@@ -65,9 +65,7 @@ export default function Analysis() {
           </CardHeader>
           <CardContent>
             {detail ? (
-              <div className="prose prose-sm dark:prose-invert max-w-none">
-                <Markdown>{detail.response_text}</Markdown>
-              </div>
+              <MarkdownContent>{detail.response_text}</MarkdownContent>
             ) : (
               <div className="text-muted-foreground text-sm">
                 Select an analysis from the list to view its details.

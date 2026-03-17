@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import Markdown from "react-markdown";
+import { MarkdownContent } from "@/components/MarkdownContent";
 
 interface Message {
   role: "user" | "assistant";
@@ -106,9 +106,7 @@ export default function Chat() {
               }`}
             >
               {msg.role === "assistant" ? (
-                <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-                  <Markdown>{msg.content}</Markdown>
-                </div>
+                <MarkdownContent>{msg.content}</MarkdownContent>
               ) : (
                 <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
               )}

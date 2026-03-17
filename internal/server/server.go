@@ -91,6 +91,10 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	s.mux.HandleFunc("GET /api/settings", settingsHandler.Get)
 	s.mux.HandleFunc("POST /api/settings/test-notification", settingsHandler.TestNotification)
 
+	// Chat
+	chatHandler := api.NewChatHandler(cfg, txnStore, accountStore, catStore, analysisStore, events)
+	s.mux.HandleFunc("POST /api/chat", chatHandler.Handle)
+
 	// Filters
 	filterHandler := api.NewFilterHandler(filterStore)
 	s.mux.HandleFunc("GET /api/filters", filterHandler.List)

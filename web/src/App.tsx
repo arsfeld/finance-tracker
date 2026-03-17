@@ -5,6 +5,7 @@ import Dashboard from "@/pages/Dashboard";
 import Transactions from "@/pages/Transactions";
 import Analysis from "@/pages/Analysis";
 import Settings from "@/pages/Settings";
+import Chat from "@/pages/Chat";
 
 export default function App() {
   return (
@@ -14,6 +15,7 @@ export default function App() {
           <Route index element={<Dashboard />} />
           <Route path="transactions" element={<Transactions />} />
           <Route path="analysis" element={<Analysis />} />
+          <Route path="chat" element={<Chat />} />
           <Route path="settings" element={<Settings />} />
         </Route>
       </Routes>

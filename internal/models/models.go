@@ -58,7 +58,6 @@ const (
 	DateRangeTypeCustom              DateRangeType = "custom"
 )
 
-
 // Organization represents a financial institution.
 type Organization struct {
 	SfinURL string  `json:"sfin-url"`

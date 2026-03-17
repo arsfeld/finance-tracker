@@ -78,8 +78,8 @@ type llmRequest struct {
 }
 
 type toolDef struct {
-	Type     string         `json:"type"`
-	Function toolDefFunc    `json:"function"`
+	Type     string      `json:"type"`
+	Function toolDefFunc `json:"function"`
 }
 
 type toolDefFunc struct {

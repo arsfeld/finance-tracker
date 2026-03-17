@@ -8,12 +8,28 @@ interface Message {
   content: string;
 }
 
+const STORAGE_KEY = "finance-chat-messages";
+
+function loadMessages(): Message[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
 export default function Chat() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(loadMessages);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Persist messages on change.
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+  }, [messages]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -62,11 +78,18 @@ export default function Chat() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-3.5rem)]">
-      <div className="px-2 py-3">
-        <h1 className="text-2xl font-semibold">Chat</h1>
-        <p className="text-sm text-muted-foreground">
-          Ask about your spending, categorize transactions, or run analysis.
-        </p>
+      <div className="px-2 py-3 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Chat</h1>
+          <p className="text-sm text-muted-foreground">
+            Ask about your spending, categorize transactions, or run analysis.
+          </p>
+        </div>
+        {messages.length > 0 && (
+          <Button variant="outline" size="sm" onClick={() => setMessages([])}>
+            New Chat
+          </Button>
+        )}
       </div>
 
       {/* Messages */}

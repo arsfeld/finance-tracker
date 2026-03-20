@@ -52,9 +52,6 @@ func sendNtfyNotification(settings *Settings, message string, notificationTopic 
 	req.Header.Set("Content-Type", "text/plain")
 	req.Header.Set("Title", "💰 Finance Tracker")
 
-	// Update request body with plain text message
-	req.Body = io.NopCloser(bytes.NewBuffer([]byte(plainMessage)))
-
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 	}

@@ -71,6 +71,9 @@ func NewSettings(env_file string) (*Settings, error) {
 		settings.NtfyTopic = &ntfyTopic
 	}
 	// Allow customizing the warning suffix (optional)
+	if ntfyServer := os.Getenv("NTFY_SERVER"); ntfyServer != "" {
+		settings.NtfyServer = ntfyServer
+	}
 	if ntfyWarningSuffix := os.Getenv("NTFY_WARNING_SUFFIX"); ntfyWarningSuffix != "" {
 		settings.NtfyWarningSuffix = ntfyWarningSuffix
 	}

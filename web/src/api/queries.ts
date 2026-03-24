@@ -270,6 +270,33 @@ export function useTriggerAnalysis() {
   });
 }
 
+// Category transactions (for budget drill-down)
+export function useCategoryTransactions(
+  category: string,
+  start: number,
+  end: number,
+  enabled: boolean
+) {
+  return useQuery({
+    queryKey: ["transactions", "category-preview", category, start, end],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        category,
+        start: String(start),
+        end: String(end),
+        sort_by: "amount",
+        sort_dir: "asc",
+        limit: "5",
+        included_only: "true",
+      });
+      const res = await fetch(`/api/transactions?${params}`);
+      const json = await res.json();
+      return json.data as DBTransaction[] | null;
+    },
+    enabled,
+  });
+}
+
 // Budgets
 export function useBudgetStatus() {
   return useQuery({

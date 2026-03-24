@@ -1,14 +1,22 @@
 import { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router";
 import {
   useBudgetStatus,
   useUpsertBudget,
   useDeleteBudget,
+  useCategoryTransactions,
 } from "@/api/queries";
-import type { BudgetedCategory, UnbudgetedCategory } from "@/api/types";
+import type {
+  BudgetedCategory,
+  UnbudgetedCategory,
+  DBTransaction,
+} from "@/api/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useChatDrawer } from "@/hooks/useChatDrawer";
 import { cn } from "@/lib/utils";
+import { ChevronRightIcon } from "lucide-react";
+import { Collapsible } from "radix-ui";
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -211,76 +219,186 @@ function SetBudgetInput({
   );
 }
 
+// --- Transaction Preview (for accordion drill-down) ---
+
+function formatDate(unix: number): string {
+  return new Date(unix * 1000).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function TransactionPreview({
+  transactions,
+  isLoading,
+  isError,
+  onViewAll,
+}: {
+  transactions: DBTransaction[] | null | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  onViewAll: () => void;
+}) {
+  return (
+    <div className="pb-3 pl-8">
+      {isLoading && (
+        <p className="text-xs text-muted-foreground py-2">Loading...</p>
+      )}
+      {isError && (
+        <p className="text-xs text-destructive py-2">
+          Failed to load transactions
+        </p>
+      )}
+      {!isLoading && !isError && (!transactions || transactions.length === 0) && (
+        <p className="text-xs text-muted-foreground py-2">
+          No transactions this period
+        </p>
+      )}
+      {!isLoading && !isError && transactions && transactions.length > 0 && (
+        <div className="space-y-1">
+          {transactions.map((txn) => (
+            <div
+              key={txn.id}
+              className="flex items-center justify-between text-xs py-1"
+            >
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <span className="text-muted-foreground shrink-0">
+                  {formatDate(txn.posted)}
+                </span>
+                <span className="truncate">{txn.description}</span>
+              </div>
+              <span className="tabular-nums text-muted-foreground shrink-0 ml-3">
+                {formatCurrency(txn.amount)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      <button
+        onClick={onViewAll}
+        className="text-xs text-primary hover:underline mt-2 cursor-pointer"
+      >
+        View all transactions
+      </button>
+    </div>
+  );
+}
+
 // --- Budgeted Row ---
 
 function BudgetedRow({
   item,
+  period,
   onEdit,
   onDelete,
   onFixWithAI,
 }: {
   item: BudgetedCategory;
+  period: { start: number; end: number };
   onEdit: (category: string, amount: number) => void;
   onDelete: (category: string) => void;
   onFixWithAI: (category: string, spent: number, amount: number) => void;
 }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const navigate = useNavigate();
+  const { data: transactions, isLoading, isError } = useCategoryTransactions(
+    item.category,
+    period.start,
+    period.end,
+    isOpen
+  );
   const isOver = item.percent >= 100;
   const statusText = isOver
     ? `Over by ${formatCurrency(Math.abs(item.remaining))}`
     : `${formatCurrency(item.remaining)} remaining`;
 
+  const handleViewAll = () => {
+    const params = new URLSearchParams({
+      category: item.category,
+      start: String(period.start),
+      end: String(period.end),
+      included_only: "true",
+    });
+    navigate(`/transactions?${params}`);
+  };
+
   return (
-    <div className="space-y-2 py-3">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">{item.category}</span>
-        <div className="flex items-center gap-2">
-          {isOver && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-xs"
-              onClick={() =>
-                onFixWithAI(item.category, item.spent, item.amount)
-              }
-            >
-              Fix with AI
-            </Button>
-          )}
-          <span
-            className={cn(
-              "text-sm tabular-nums",
-              isOver ? "text-red-600 font-semibold" : "text-muted-foreground"
+    <Collapsible.Root open={isOpen} onOpenChange={setIsOpen}>
+      <div className="space-y-2 py-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1">
+            <Collapsible.Trigger asChild>
+              <button
+                className="p-0.5 rounded hover:bg-accent transition-colors cursor-pointer"
+                aria-label={`Show transactions for ${item.category}`}
+              >
+                <ChevronRightIcon
+                  className={cn(
+                    "h-4 w-4 text-muted-foreground transition-transform duration-200",
+                    isOpen && "rotate-90"
+                  )}
+                />
+              </button>
+            </Collapsible.Trigger>
+            <span className="text-sm font-medium">{item.category}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {isOver && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs"
+                onClick={() =>
+                  onFixWithAI(item.category, item.spent, item.amount)
+                }
+              >
+                Fix with AI
+              </Button>
             )}
-          >
-            {formatCurrency(item.spent)} /
-          </span>
-          <InlineBudgetEditor
-            currentAmount={item.amount}
-            onSave={(amount) => onEdit(item.category, amount)}
-          />
-          <button
-            onClick={() => onDelete(item.category)}
-            className="text-muted-foreground hover:text-destructive text-xs px-1 transition-colors"
-            title="Remove budget"
-          >
-            ✕
-          </button>
+            <span
+              className={cn(
+                "text-sm tabular-nums",
+                isOver ? "text-red-600 font-semibold" : "text-muted-foreground"
+              )}
+            >
+              {formatCurrency(item.spent)} /
+            </span>
+            <InlineBudgetEditor
+              currentAmount={item.amount}
+              onSave={(amount) => onEdit(item.category, amount)}
+            />
+            <button
+              onClick={() => onDelete(item.category)}
+              className="text-muted-foreground hover:text-destructive text-xs px-1 transition-colors"
+              title="Remove budget"
+            >
+              ✕
+            </button>
+          </div>
         </div>
+        <BudgetProgressBar
+          category={item.category}
+          percent={item.percent}
+          statusText={statusText}
+        />
+        <p
+          className={cn(
+            "text-xs",
+            isOver ? "text-red-600 font-medium" : "text-muted-foreground"
+          )}
+        >
+          {statusText} ({Math.round(item.percent)}%)
+        </p>
       </div>
-      <BudgetProgressBar
-        category={item.category}
-        percent={item.percent}
-        statusText={statusText}
-      />
-      <p
-        className={cn(
-          "text-xs",
-          isOver ? "text-red-600 font-medium" : "text-muted-foreground"
-        )}
-      >
-        {statusText} ({Math.round(item.percent)}%)
-      </p>
-    </div>
+      <Collapsible.Content className="overflow-hidden data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up">
+        <TransactionPreview
+          transactions={transactions}
+          isLoading={isLoading}
+          isError={isError}
+          onViewAll={handleViewAll}
+        />
+      </Collapsible.Content>
+    </Collapsible.Root>
   );
 }
 
@@ -288,37 +406,81 @@ function BudgetedRow({
 
 function UnbudgetedRow({
   item,
+  period,
   onSetBudget,
   onFixWithAI,
 }: {
   item: UnbudgetedCategory;
+  period: { start: number; end: number };
   onSetBudget: (category: string, amount: number) => void;
   onFixWithAI: (category: string, spent: number) => void;
 }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const navigate = useNavigate();
+  const { data: transactions, isLoading, isError } = useCategoryTransactions(
+    item.category,
+    period.start,
+    period.end,
+    isOpen
+  );
+
+  const handleViewAll = () => {
+    const params = new URLSearchParams({
+      category: item.category,
+      start: String(period.start),
+      end: String(period.end),
+      included_only: "true",
+    });
+    navigate(`/transactions?${params}`);
+  };
+
   return (
-    <div className="flex items-center justify-between py-2">
-      <div className="flex items-center gap-3">
-        <span className="text-sm text-muted-foreground">{item.category}</span>
-        <span className="text-xs text-muted-foreground tabular-nums">
-          {formatCurrency(item.spent)} spent
-        </span>
+    <Collapsible.Root open={isOpen} onOpenChange={setIsOpen}>
+      <div className="flex items-center justify-between py-2">
+        <div className="flex items-center gap-1">
+          <Collapsible.Trigger asChild>
+            <button
+              className="p-0.5 rounded hover:bg-accent transition-colors cursor-pointer"
+              aria-label={`Show transactions for ${item.category}`}
+            >
+              <ChevronRightIcon
+                className={cn(
+                  "h-4 w-4 text-muted-foreground transition-transform duration-200",
+                  isOpen && "rotate-90"
+                )}
+              />
+            </button>
+          </Collapsible.Trigger>
+          <span className="text-sm text-muted-foreground">{item.category}</span>
+          <span className="text-xs text-muted-foreground tabular-nums ml-2">
+            {formatCurrency(item.spent)} spent
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs"
+            onClick={() => onFixWithAI(item.category, item.spent)}
+          >
+            Ask AI
+          </Button>
+          <SetBudgetInput
+            category={item.category}
+            suggestedAmount={item.suggested_amount}
+            onSave={onSetBudget}
+          />
+        </div>
       </div>
-      <div className="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-xs"
-          onClick={() => onFixWithAI(item.category, item.spent)}
-        >
-          Ask AI
-        </Button>
-        <SetBudgetInput
-          category={item.category}
-          suggestedAmount={item.suggested_amount}
-          onSave={onSetBudget}
+      <Collapsible.Content className="overflow-hidden data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up">
+        <TransactionPreview
+          transactions={transactions}
+          isLoading={isLoading}
+          isError={isError}
+          onViewAll={handleViewAll}
         />
-      </div>
-    </div>
+      </Collapsible.Content>
+    </Collapsible.Root>
   );
 }
 
@@ -326,11 +488,13 @@ function UnbudgetedRow({
 
 function EmptyState({
   unbudgeted,
+  period,
   onSetBudget,
   onFixWithAI,
   onCreateAllWithAI,
 }: {
   unbudgeted: UnbudgetedCategory[];
+  period: { start: number; end: number };
   onSetBudget: (category: string, amount: number) => void;
   onFixWithAI: (category: string, spent: number) => void;
   onCreateAllWithAI: () => void;
@@ -363,6 +527,7 @@ function EmptyState({
                   <UnbudgetedRow
                     key={item.category}
                     item={item}
+                    period={period}
                     onSetBudget={onSetBudget}
                     onFixWithAI={onFixWithAI}
                   />
@@ -455,6 +620,7 @@ export default function Budgets() {
       {!hasBudgets ? (
         <EmptyState
           unbudgeted={unbudgeted || []}
+          period={period}
           onSetBudget={handleEdit}
           onFixWithAI={(cat, spent) => handleFixWithAI(cat, spent)}
           onCreateAllWithAI={handleCreateAllWithAI}
@@ -471,6 +637,7 @@ export default function Budgets() {
                   <BudgetedRow
                     key={item.category}
                     item={item}
+                    period={period}
                     onEdit={handleEdit}
                     onDelete={handleDelete}
                     onFixWithAI={(cat, spent, amt) =>
@@ -495,6 +662,7 @@ export default function Budgets() {
                     <UnbudgetedRow
                       key={item.category}
                       item={item}
+                      period={period}
                       onSetBudget={handleEdit}
                       onFixWithAI={(cat, spent) =>
                         handleFixWithAI(cat, spent)

@@ -100,7 +100,7 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	s.mux.HandleFunc("POST /api/settings/test-notification", settingsHandler.TestNotification)
 
 	// Budgets
-	budgetHandler := api.NewBudgetHandler(budgetStore, txnStore, cfg)
+	budgetHandler := api.NewBudgetHandler(budgetStore, txnStore, cfg, events)
 	s.mux.HandleFunc("POST /api/budgets", budgetHandler.Upsert)
 	s.mux.HandleFunc("DELETE /api/budgets/{category}", budgetHandler.Delete)
 	s.mux.HandleFunc("GET /api/budgets/status", budgetHandler.Status)

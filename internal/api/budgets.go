@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -21,10 +22,11 @@ type BudgetHandler struct {
 	budgetStore *store.BudgetStore
 	txnStore    *store.TransactionStore
 	cfg         *config.Config
+	events      *EventHub
 }
 
-func NewBudgetHandler(bs *store.BudgetStore, ts *store.TransactionStore, cfg *config.Config) *BudgetHandler {
-	return &BudgetHandler{budgetStore: bs, txnStore: ts, cfg: cfg}
+func NewBudgetHandler(bs *store.BudgetStore, ts *store.TransactionStore, cfg *config.Config, events *EventHub) *BudgetHandler {
+	return &BudgetHandler{budgetStore: bs, txnStore: ts, cfg: cfg, events: events}
 }
 
 // BudgetedCategory represents a category with a budget and its current spending.
@@ -57,6 +59,20 @@ type BudgetStatusResponse struct {
 	Unbudgeted []UnbudgetedCategory `json:"unbudgeted"`
 }
 
+// validateBudgetInput checks category and amount validity. Returns an error message or empty string.
+func validateBudgetInput(category string, amount float64) string {
+	if category == "" || len(category) > 100 {
+		return "Invalid category name"
+	}
+	if amount <= 0 || amount > 1_000_000 || math.IsNaN(amount) || math.IsInf(amount, 0) {
+		return "Amount must be between 0 and 1,000,000"
+	}
+	if strings.EqualFold(category, "Uncategorized") {
+		return "Cannot set budget for Uncategorized"
+	}
+	return ""
+}
+
 // Upsert creates or updates a budget for a category.
 // POST /api/budgets
 func (h *BudgetHandler) Upsert(w http.ResponseWriter, r *http.Request) {
@@ -71,16 +87,8 @@ func (h *BudgetHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 	}
 
 	body.Category = strings.TrimSpace(body.Category)
-	if body.Category == "" || len(body.Category) > 100 {
-		WriteError(w, http.StatusBadRequest, "BAD_REQUEST", "Invalid category name")
-		return
-	}
-	if body.Amount <= 0 || body.Amount > 1_000_000 || math.IsNaN(body.Amount) || math.IsInf(body.Amount, 0) {
-		WriteError(w, http.StatusBadRequest, "BAD_REQUEST", "Amount must be between 0 and 1,000,000")
-		return
-	}
-	if strings.EqualFold(body.Category, "Uncategorized") {
-		WriteError(w, http.StatusBadRequest, "BAD_REQUEST", "Cannot set budget for Uncategorized")
+	if msg := validateBudgetInput(body.Category, body.Amount); msg != "" {
+		WriteError(w, http.StatusBadRequest, "BAD_REQUEST", msg)
 		return
 	}
 
@@ -90,6 +98,7 @@ func (h *BudgetHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.events.Broadcast("budgets_updated", `{"status":"ok"}`)
 	WriteData(w, models.Budget{Category: body.Category, Amount: body.Amount})
 }
 
@@ -102,12 +111,18 @@ func (h *BudgetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.budgetStore.Delete(r.Context(), category); err != nil {
+	deleted, err := h.budgetStore.Delete(r.Context(), category)
+	if err != nil {
 		log.Error().Err(err).Str("category", category).Msg("Failed to delete budget")
 		WriteError(w, http.StatusInternalServerError, "DB_ERROR", "Failed to delete budget")
 		return
 	}
+	if !deleted {
+		WriteError(w, http.StatusNotFound, "NOT_FOUND", "No budget found for that category")
+		return
+	}
 
+	h.events.Broadcast("budgets_updated", `{"status":"ok"}`)
 	WriteData(w, map[string]string{"deleted": category})
 }
 
@@ -183,7 +198,7 @@ func (h *BudgetHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 	// Compute 3-month average suggestions for unbudgeted categories.
 	if len(unbudgeted) > 0 {
-		suggestions := h.computeSuggestedAmounts(ctx, start, h.cfg.BillingDay)
+		suggestions := h.computeSuggestedAmounts(ctx, start)
 		for i := range unbudgeted {
 			key := strings.ToLower(unbudgeted[i].Category)
 			if avg, ok := suggestions[key]; ok {
@@ -210,31 +225,27 @@ func (h *BudgetHandler) Status(w http.ResponseWriter, r *http.Request) {
 }
 
 // computeSuggestedAmounts returns average spending per category over the prior 3 billing periods.
-func (h *BudgetHandler) computeSuggestedAmounts(ctx context.Context, currentStart time.Time, billingDay int) map[string]float64 {
-	totals := make(map[string]float64)
-	counts := make(map[string]int)
+// Uses a single grouped query instead of 3 separate queries.
+func (h *BudgetHandler) computeSuggestedAmounts(ctx context.Context, currentStart time.Time) map[string]float64 {
+	// Range: 3 months before current period start.
+	histStart := currentStart.AddDate(0, -3, 0)
+	histEnd := currentStart.Add(-time.Second)
 
-	// Look at 3 prior billing periods.
-	periodStart := currentStart
-	for i := 0; i < 3; i++ {
-		periodStart = periodStart.AddDate(0, -1, 0)
-		periodEnd := periodStart.AddDate(0, 1, 0).Add(-time.Second)
-
-		spending, err := h.txnStore.CountByCategory(ctx, periodStart.Unix(), periodEnd.Unix())
-		if err != nil {
-			continue
-		}
-		for cat, amount := range spending {
-			key := strings.ToLower(cat)
-			totals[key] += amount
-			counts[key]++
-		}
+	grouped, err := h.txnStore.CountByCategoryGrouped(ctx, histStart.Unix(), histEnd.Unix())
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to compute budget suggestions")
+		return nil
 	}
 
 	result := make(map[string]float64)
-	for key, total := range totals {
-		if counts[key] > 0 {
-			result[key] = total / float64(counts[key])
+	for cat, months := range grouped {
+		key := strings.ToLower(cat)
+		total := 0.0
+		for _, v := range months {
+			total += v
+		}
+		if len(months) > 0 {
+			result[key] = total / float64(len(months))
 		}
 	}
 	return result
@@ -242,9 +253,5 @@ func (h *BudgetHandler) computeSuggestedAmounts(ctx context.Context, currentStar
 
 // sortBudgetedByPercent sorts budgeted categories by percent descending.
 func sortBudgetedByPercent(items []BudgetedCategory) {
-	for i := 1; i < len(items); i++ {
-		for j := i; j > 0 && items[j].Percent > items[j-1].Percent; j-- {
-			items[j], items[j-1] = items[j-1], items[j]
-		}
-	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Percent > items[j].Percent })
 }

@@ -243,6 +243,7 @@ You can also view and manage the user's budgets:
 Always describe what you plan to do and ask for confirmation before modifying or deleting budgets.`
 
 func (h *ChatHandler) Handle(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 2<<20) // 2 MB limit
 	var req chatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		WriteError(w, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON")
@@ -622,15 +623,6 @@ func (h *ChatHandler) toolGetBudgetStatus(ctx context.Context) string {
 
 func (h *ChatHandler) toolSetBudget(ctx context.Context, args map[string]interface{}) string {
 	category := strings.TrimSpace(strArg(args, "category"))
-	if category == "" {
-		return "Error: category is required"
-	}
-	if len(category) > 100 {
-		return "Error: category name too long (max 100 characters)"
-	}
-	if strings.EqualFold(category, "Uncategorized") {
-		return "Error: cannot set budget for Uncategorized"
-	}
 
 	amountRaw, ok := args["amount"]
 	if !ok {
@@ -640,8 +632,9 @@ func (h *ChatHandler) toolSetBudget(ctx context.Context, args map[string]interfa
 	if !ok {
 		return "Error: amount must be a number"
 	}
-	if amount <= 0 || amount > 1_000_000 || math.IsNaN(amount) || math.IsInf(amount, 0) {
-		return "Error: amount must be between 0 and 1,000,000"
+
+	if msg := validateBudgetInput(category, amount); msg != "" {
+		return "Error: " + msg
 	}
 
 	if err := h.budgetStore.Upsert(ctx, category, amount); err != nil {
@@ -658,24 +651,12 @@ func (h *ChatHandler) toolDeleteBudget(ctx context.Context, args map[string]inte
 		return "Error: category is required"
 	}
 
-	// Check if budget exists first.
-	budgets, err := h.budgetStore.GetAll(ctx)
+	deleted, err := h.budgetStore.Delete(ctx, category)
 	if err != nil {
-		return fmt.Sprintf("Error: %s", err)
-	}
-	found := false
-	for _, b := range budgets {
-		if strings.EqualFold(b.Category, category) {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return fmt.Sprintf("No budget found for category '%s'.", category)
-	}
-
-	if err := h.budgetStore.Delete(ctx, category); err != nil {
 		return fmt.Sprintf("Error deleting budget: %s", err)
+	}
+	if !deleted {
+		return fmt.Sprintf("No budget found for category '%s'.", category)
 	}
 
 	h.events.Broadcast("budgets_updated", `{"status":"ok"}`)

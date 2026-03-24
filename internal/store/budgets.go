@@ -43,7 +43,11 @@ func (s *BudgetStore) Upsert(ctx context.Context, category string, amount float6
 	return err
 }
 
-func (s *BudgetStore) Delete(ctx context.Context, category string) error {
-	_, err := s.write.ExecContext(ctx, `DELETE FROM budgets WHERE category = ?`, category)
-	return err
+func (s *BudgetStore) Delete(ctx context.Context, category string) (bool, error) {
+	result, err := s.write.ExecContext(ctx, `DELETE FROM budgets WHERE category = ?`, category)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows > 0, nil
 }

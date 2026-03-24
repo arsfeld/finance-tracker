@@ -4,13 +4,6 @@ import { ChatPanel } from "@/components/ChatPanel";
 
 const STORAGE_KEY = "finance-chat-messages";
 
-const suggestions = [
-  "What did I spend the most on this month?",
-  "Show me my top 10 transactions",
-  "Categorize my uncategorized transactions",
-  "How much did I spend on dining?",
-];
-
 export default function Chat() {
   const [key, setKey] = useState(0);
 

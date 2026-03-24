@@ -268,6 +268,40 @@ func (s *TransactionStore) CountByCategory(ctx context.Context, start, end int64
 	return result, rows.Err()
 }
 
+// CountByCategoryGrouped returns per-category totals grouped by month for a date range.
+// Returns map[category]map[month]total.
+func (s *TransactionStore) CountByCategoryGrouped(ctx context.Context, start, end int64) (map[string]map[string]float64, error) {
+	rows, err := s.read.QueryContext(ctx, `
+		SELECT strftime('%Y-%m', t.posted, 'unixepoch') as month,
+			COALESCE(co.category, c.category, 'Uncategorized') as cat,
+			SUM(ABS(t.amount)) as total
+		FROM transactions t
+		JOIN accounts a ON t.account_id = a.id
+		LEFT JOIN categories c ON t.description = c.merchant_description
+		LEFT JOIN category_overrides co ON t.id = co.transaction_id
+		WHERE t.posted >= ? AND t.posted <= ? AND a.is_included = 1 AND t.amount < 0
+		GROUP BY month, cat
+		ORDER BY total DESC`, start, end)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string]map[string]float64)
+	for rows.Next() {
+		var month, cat string
+		var total float64
+		if err := rows.Scan(&month, &cat, &total); err != nil {
+			return nil, err
+		}
+		if result[cat] == nil {
+			result[cat] = make(map[string]float64)
+		}
+		result[cat][month] = total
+	}
+	return result, rows.Err()
+}
+
 // DailyTotal represents spending for a single day.
 type DailyTotal struct {
 	Date  string  `json:"date"` // YYYY-MM-DD

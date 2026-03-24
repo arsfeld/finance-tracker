@@ -65,9 +65,10 @@ interface CategoryPickerProps {
   transactionId: string;
   description: string;
   currentCategory: string;
+  onCategoryChanged?: (merchantDescription: string, category: string) => void;
 }
 
-export function CategoryPicker({ transactionId, description, currentCategory }: CategoryPickerProps) {
+export function CategoryPicker({ transactionId, description, currentCategory, onCategoryChanged }: CategoryPickerProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const existingCategories = useCategoryNames();
@@ -99,6 +100,11 @@ export function CategoryPicker({ transactionId, description, currentCategory }: 
   const handleSelect = (category: string) => {
     override.mutate(
       { txnId: transactionId, category, applyToMerchant: true },
+      {
+        onSuccess: () => {
+          onCategoryChanged?.(description, category);
+        },
+      },
     );
     setOpen(false);
     setSearch("");

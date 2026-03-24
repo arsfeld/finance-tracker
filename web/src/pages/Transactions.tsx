@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router";
 import { useTransactions, useBillingPeriods, useUniqueCategories, type BillingPeriod } from "@/api/queries";
 import { CategoryPicker } from "@/components/CategoryPicker";
+import { SimilarMerchantsDialog, useSimilarMerchants } from "@/components/SimilarMerchantsDialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -151,6 +152,8 @@ export default function Transactions() {
     updateParams({ page: "1" });
   };
 
+  const { triggerSimilarityCheck, currentSuggestions, currentCategory: similarCategory, dismiss: dismissSimilar } = useSimilarMerchants();
+
   const hasActiveFilters = urlCategory || urlSearch || hasCustomRange;
 
   // Custom range label
@@ -259,6 +262,7 @@ export default function Transactions() {
                             transactionId={t.id}
                             description={t.description}
                             currentCategory={t.category}
+                            onCategoryChanged={triggerSimilarityCheck}
                           />
                         </TableCell>
                         <TableCell className={`text-sm text-right font-medium whitespace-nowrap ${t.amount < 0 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}`}>
@@ -293,6 +297,12 @@ export default function Transactions() {
           )}
         </CardContent>
       </Card>
+
+      <SimilarMerchantsDialog
+        suggestions={currentSuggestions}
+        category={similarCategory}
+        onDismiss={dismissSimilar}
+      />
     </div>
   );
 }

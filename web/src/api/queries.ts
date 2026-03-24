@@ -6,6 +6,7 @@ import type {
   DBAccount,
   Analysis,
   CategoryEntry,
+  SimilarMerchantInfo,
   SyncLogEntry,
   CategoryTrendData,
   DailyTotalsData,
@@ -185,6 +186,27 @@ export function useCategoryNames() {
     }
   }
   return Array.from(names).sort();
+}
+
+// Similar merchants (for propagation suggestions)
+export function useFindSimilarMerchants() {
+  return useMutation({
+    mutationFn: (body: { merchant_description: string; category: string }) =>
+      postApi<SimilarMerchantInfo[]>("/api/categories/similar", body),
+  });
+}
+
+export function useBulkApplyCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { merchants: string[]; category: string }) =>
+      postApi("/api/categories/bulk-apply", body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["transactions"] });
+      qc.invalidateQueries({ queryKey: ["categories"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
 }
 
 // Sync

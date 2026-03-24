@@ -109,6 +109,12 @@ export interface BudgetStatusResponse {
   unbudgeted: UnbudgetedCategory[];
 }
 
+export interface SimilarMerchantInfo {
+  merchant_description: string;
+  current_category: string;
+  transaction_count: number;
+}
+
 export interface DashboardData {
   period: { label: string; start: number; end: number };
   summary: {

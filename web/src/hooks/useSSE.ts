@@ -75,6 +75,10 @@ export function useSSE() {
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     });
 
+    es.addEventListener("budgets_updated", () => {
+      queryClient.invalidateQueries({ queryKey: ["budgets"] });
+    });
+
     es.onerror = () => { /* EventSource will auto-reconnect. */ };
 
     return () => {

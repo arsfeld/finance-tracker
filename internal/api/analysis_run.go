@@ -24,6 +24,7 @@ type AnalysisRunHandler struct {
 	acctStore     *store.AccountStore
 	catStore      *store.CategoryStore
 	analysisStore *store.AnalysisStore
+	budgetStore   *store.BudgetStore
 	scheduler     *scheduler.Scheduler
 	events        *EventHub
 }
@@ -34,6 +35,7 @@ func NewAnalysisRunHandler(
 	accts *store.AccountStore,
 	cats *store.CategoryStore,
 	analyses *store.AnalysisStore,
+	budgets *store.BudgetStore,
 	sched *scheduler.Scheduler,
 	events *EventHub,
 ) *AnalysisRunHandler {
@@ -43,6 +45,7 @@ func NewAnalysisRunHandler(
 		acctStore:     accts,
 		catStore:      cats,
 		analysisStore: analyses,
+		budgetStore:   budgets,
 		scheduler:     sched,
 		events:        events,
 	}
@@ -116,8 +119,11 @@ func (h *AnalysisRunHandler) runAnalysis(ctx context.Context) {
 		txns = filtered
 	}
 
+	// Load budgets for prompt context.
+	budgets, _ := h.budgetStore.GetAll(ctx)
+
 	// Build prompt.
-	prompt := llmclient.GeneratePrompt(txns, accounts, startDate, endDate, billingDay, true)
+	prompt := llmclient.GeneratePrompt(txns, accounts, startDate, endDate, billingDay, true, budgets...)
 
 	if h.cfg.OpenRouterURL == "" || h.cfg.OpenRouterAPIKey == "" || h.cfg.OpenRouterModel == "" {
 		log.Error().Msg("OpenRouter not configured")

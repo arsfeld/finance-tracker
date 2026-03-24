@@ -24,6 +24,7 @@ func GeneratePrompt(
 	startDate, endDate time.Time,
 	billingDay int,
 	isMultiPeriod bool,
+	budgets ...models.Budget,
 ) string {
 	// Filter to expenses only.
 	var expenses []models.DBTransaction
@@ -37,10 +38,19 @@ func GeneratePrompt(
 	acctTable := formatDBAccounts(accounts)
 	totalExpenses := calcTotalExpenses(expenses)
 
+	var prompt string
 	if isMultiPeriod {
-		return generateMultiPeriodPrompt(expenses, accounts, startDate, endDate, billingDay, acctTable, txnTable, totalExpenses)
+		prompt = generateMultiPeriodPrompt(expenses, accounts, startDate, endDate, billingDay, acctTable, txnTable, totalExpenses)
+	} else {
+		prompt = generateSinglePeriodPrompt(expenses, startDate, endDate, acctTable, txnTable, totalExpenses)
 	}
-	return generateSinglePeriodPrompt(expenses, startDate, endDate, acctTable, txnTable, totalExpenses)
+
+	// Append budget status if budgets are configured.
+	if len(budgets) > 0 {
+		prompt += "\n\n" + buildBudgetSection(budgets, expenses)
+	}
+
+	return prompt
 }
 
 func generateSinglePeriodPrompt(
@@ -290,6 +300,45 @@ func buildCategoryBreakdown(txns []models.DBTransaction) string {
 		}
 		b.WriteString(fmt.Sprintf("- %s: $%.2f (%.1f%%)\n", c.name, c.total, pct))
 	}
+	return b.String()
+}
+
+func buildBudgetSection(budgets []models.Budget, expenses []models.DBTransaction) string {
+	// Compute spending per category from expenses.
+	spending := make(map[string]float64)
+	for _, t := range expenses {
+		cat := t.Category
+		if cat == "" {
+			cat = "Uncategorized"
+		}
+		spending[cat] += math.Abs(t.Amount)
+	}
+
+	var b strings.Builder
+	b.WriteString("Budget Status:\n")
+	for _, budget := range budgets {
+		spent := spending[budget.Category]
+		// Case-insensitive fallback.
+		if spent == 0 {
+			for cat, val := range spending {
+				if strings.EqualFold(cat, budget.Category) {
+					spent = val
+					break
+				}
+			}
+		}
+		pct := 0.0
+		if budget.Amount > 0 {
+			pct = (spent / budget.Amount) * 100
+		}
+		status := ""
+		if pct >= 100 {
+			status = fmt.Sprintf(" — OVER by $%.2f", spent-budget.Amount)
+		}
+		b.WriteString(fmt.Sprintf("- %s: $%.2f spent / $%.2f budget (%.0f%%)%s\n",
+			budget.Category, spent, budget.Amount, pct, status))
+	}
+	b.WriteString("\nComment on budget adherence where budgets are set. Note any categories that are significantly over budget.")
 	return b.String()
 }
 

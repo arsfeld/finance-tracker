@@ -15,6 +15,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"finance_tracker/internal/billing"
 	"finance_tracker/internal/config"
 	"finance_tracker/internal/store"
 )
@@ -25,6 +26,7 @@ type ChatHandler struct {
 	acctStore     *store.AccountStore
 	catStore      *store.CategoryStore
 	analysisStore *store.AnalysisStore
+	budgetStore   *store.BudgetStore
 	events        *EventHub
 }
 
@@ -34,6 +36,7 @@ func NewChatHandler(
 	accts *store.AccountStore,
 	cats *store.CategoryStore,
 	analyses *store.AnalysisStore,
+	budgets *store.BudgetStore,
 	events *EventHub,
 ) *ChatHandler {
 	return &ChatHandler{
@@ -42,6 +45,7 @@ func NewChatHandler(
 		acctStore:     accts,
 		catStore:      cats,
 		analysisStore: analyses,
+		budgetStore:   budgets,
 		events:        events,
 	}
 }
@@ -186,16 +190,60 @@ var chatTools = []toolDef{
 			Parameters:  map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
 		},
 	},
+	{
+		Type: "function",
+		Function: toolDefFunc{
+			Name:        "get_budget_status",
+			Description: "Get all budgets with current spending progress for the current billing period, including unbudgeted categories.",
+			Parameters:  map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+		},
+	},
+	{
+		Type: "function",
+		Function: toolDefFunc{
+			Name:        "set_budget",
+			Description: "Create or update a monthly spending budget for a category. Always confirm with the user before calling this.",
+			Parameters: map[string]interface{}{
+				"type":     "object",
+				"required": []string{"category", "amount"},
+				"properties": map[string]interface{}{
+					"category": map[string]string{"type": "string", "description": "The category name (e.g. Groceries, Dining)"},
+					"amount":   map[string]string{"type": "number", "description": "The monthly budget amount in dollars (must be > 0)"},
+				},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: toolDefFunc{
+			Name:        "delete_budget",
+			Description: "Remove a budget for a category. Always confirm with the user before calling this.",
+			Parameters: map[string]interface{}{
+				"type":     "object",
+				"required": []string{"category"},
+				"properties": map[string]interface{}{
+					"category": map[string]string{"type": "string", "description": "The category name to remove the budget for"},
+				},
+			},
+		},
+	},
 }
 
-const chatSystemPrompt = `You are a helpful financial assistant for a personal finance tracker. You can search transactions, view spending summaries, change transaction categories, and retrieve analysis reports.
+const chatSystemPrompt = `You are a helpful financial assistant for a personal finance tracker. You can search transactions, view spending summaries, change transaction categories, retrieve analysis reports, and manage budgets.
 
 When the user asks about their spending, use the tools to look up real data before answering.
 When categorizing transactions, use common categories like: Groceries, Dining, Transportation, Gas, Entertainment, Shopping, Subscriptions, Healthcare, Utilities, Insurance, Housing, Childcare, Education, Clothing, Personal Care, Fitness, Travel, Gifts, Coffee, Parking, Fees, Other.
 Be concise and helpful. Format monetary values as $X.XX in CAD.
-When bulk categorizing, group similar merchants together and confirm with the user what you plan to do before executing.`
+When bulk categorizing, group similar merchants together and confirm with the user what you plan to do before executing.
+
+You can also view and manage the user's budgets:
+- Use get_budget_status to see current budgets and spending progress
+- Use set_budget to create or update a budget for a category
+- Use delete_budget to remove a budget
+Always describe what you plan to do and ask for confirmation before modifying or deleting budgets.`
 
 func (h *ChatHandler) Handle(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 2<<20) // 2 MB limit
 	var req chatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		WriteError(w, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON")
@@ -327,6 +375,12 @@ func (h *ChatHandler) executeTool(ctx context.Context, name, argsJSON string) st
 		return h.toolGetAccounts(ctx)
 	case "get_latest_analysis":
 		return h.toolGetLatestAnalysis(ctx)
+	case "get_budget_status":
+		return h.toolGetBudgetStatus(ctx)
+	case "set_budget":
+		return h.toolSetBudget(ctx, args)
+	case "delete_budget":
+		return h.toolDeleteBudget(ctx, args)
 	default:
 		return fmt.Sprintf("Unknown tool: %s", name)
 	}
@@ -488,6 +542,125 @@ func (h *ChatHandler) toolGetLatestAnalysis(ctx context.Context) string {
 		return "No analysis reports found. Try running an analysis first."
 	}
 	return fmt.Sprintf("Latest analysis from %s:\n\n%s", a.CreatedAt, a.ResponseText)
+}
+
+func (h *ChatHandler) toolGetBudgetStatus(ctx context.Context) string {
+	start, end := billing.CurrentBillingPeriod(h.cfg.BillingDay)
+
+	budgets, err := h.budgetStore.GetAll(ctx)
+	if err != nil {
+		return fmt.Sprintf("Error loading budgets: %s", err)
+	}
+
+	spending, err := h.txnStore.CountByCategory(ctx, start.Unix(), end.Unix())
+	if err != nil {
+		return fmt.Sprintf("Error loading spending: %s", err)
+	}
+
+	budgetMap := make(map[string]float64)
+	for _, b := range budgets {
+		budgetMap[strings.ToLower(b.Category)] = b.Amount
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("Budget status for %s %d (billing period: %s to %s):\n\n",
+		start.Month().String()[:3], start.Year(),
+		start.Format("Jan 2"), end.Format("Jan 2")))
+
+	if len(budgets) == 0 && len(spending) == 0 {
+		b.WriteString("No budgets set and no spending data for this period.\n")
+		return b.String()
+	}
+
+	matched := make(map[string]bool)
+	if len(budgets) > 0 {
+		b.WriteString("Budgeted categories:\n")
+		for _, budget := range budgets {
+			key := strings.ToLower(budget.Category)
+			spent := spending[budget.Category]
+			// Case-insensitive match
+			if spent == 0 {
+				for cat, val := range spending {
+					if strings.EqualFold(cat, budget.Category) {
+						spent = val
+						break
+					}
+				}
+			}
+			matched[key] = true
+			pct := 0.0
+			if budget.Amount > 0 {
+				pct = (spent / budget.Amount) * 100
+			}
+			status := "on track"
+			if pct >= 100 {
+				status = fmt.Sprintf("OVER by $%.2f", spent-budget.Amount)
+			} else if pct >= 75 {
+				status = "approaching limit"
+			}
+			b.WriteString(fmt.Sprintf("- %s: $%.2f spent / $%.2f budget (%.0f%%) — %s\n",
+				budget.Category, spent, budget.Amount, pct, status))
+		}
+	}
+
+	// Unbudgeted categories
+	var unbudgeted []string
+	for cat, spent := range spending {
+		if !matched[strings.ToLower(cat)] {
+			unbudgeted = append(unbudgeted, fmt.Sprintf("- %s: $%.2f spent (no budget)", cat, spent))
+		}
+	}
+	if len(unbudgeted) > 0 {
+		sort.Strings(unbudgeted)
+		b.WriteString("\nUnbudgeted categories:\n")
+		for _, line := range unbudgeted {
+			b.WriteString(line + "\n")
+		}
+	}
+
+	return b.String()
+}
+
+func (h *ChatHandler) toolSetBudget(ctx context.Context, args map[string]interface{}) string {
+	category := strings.TrimSpace(strArg(args, "category"))
+
+	amountRaw, ok := args["amount"]
+	if !ok {
+		return "Error: amount is required"
+	}
+	amount, ok := amountRaw.(float64)
+	if !ok {
+		return "Error: amount must be a number"
+	}
+
+	if msg := validateBudgetInput(category, amount); msg != "" {
+		return "Error: " + msg
+	}
+
+	if err := h.budgetStore.Upsert(ctx, category, amount); err != nil {
+		return fmt.Sprintf("Error saving budget: %s", err)
+	}
+
+	h.events.Broadcast("budgets_updated", `{"status":"ok"}`)
+	return fmt.Sprintf("Budget set: %s = $%.2f per month.", category, amount)
+}
+
+func (h *ChatHandler) toolDeleteBudget(ctx context.Context, args map[string]interface{}) string {
+	category := strings.TrimSpace(strArg(args, "category"))
+	if category == "" {
+		return "Error: category is required"
+	}
+
+	deleted, err := h.budgetStore.Delete(ctx, category)
+	if err != nil {
+		return fmt.Sprintf("Error deleting budget: %s", err)
+	}
+	if !deleted {
+		return fmt.Sprintf("No budget found for category '%s'.", category)
+	}
+
+	h.events.Broadcast("budgets_updated", `{"status":"ok"}`)
+	return fmt.Sprintf("Budget for '%s' has been removed.", category)
 }
 
 // Arg helpers.

@@ -89,6 +89,26 @@ export interface TopMerchantsData {
   end: number;
 }
 
+export interface BudgetedCategory {
+  category: string;
+  amount: number;
+  spent: number;
+  remaining: number;
+  percent: number;
+}
+
+export interface UnbudgetedCategory {
+  category: string;
+  spent: number;
+  suggested_amount?: number;
+}
+
+export interface BudgetStatusResponse {
+  period: { label: string; start: number; end: number };
+  budgeted: BudgetedCategory[];
+  unbudgeted: UnbudgetedCategory[];
+}
+
 export interface DashboardData {
   period: { label: string; start: number; end: number };
   summary: {

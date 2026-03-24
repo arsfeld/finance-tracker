@@ -75,6 +75,12 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	s.mux.HandleFunc("POST /api/categories/exclude", catHandler.SetExcluded)
 	s.mux.HandleFunc("GET /api/categories/summary", catHandler.Summary)
 
+	// Analytics
+	analyticsHandler := api.NewAnalyticsHandler(cfg, txnStore)
+	s.mux.HandleFunc("GET /api/analytics/category-trend", analyticsHandler.CategoryTrend)
+	s.mux.HandleFunc("GET /api/analytics/daily-totals", analyticsHandler.DailyTotals)
+	s.mux.HandleFunc("GET /api/analytics/top-merchants", analyticsHandler.TopMerchants)
+
 	// Analyses
 	analysisHandler := api.NewAnalysisHandler(analysisStore)
 	s.mux.HandleFunc("GET /api/analyses", analysisHandler.List)

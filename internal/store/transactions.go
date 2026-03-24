@@ -67,6 +67,7 @@ type TransactionFilter struct {
 	StartDate       int64 // Unix timestamp
 	EndDate         int64 // Unix timestamp
 	IncludePositive bool
+	IncludedOnly    bool // When true, only show transactions from included accounts
 	Page            int
 	Limit           int
 	SortBy          string // "posted", "amount", "description"
@@ -110,9 +111,16 @@ func (s *TransactionStore) List(ctx context.Context, f TransactionFilter) ([]mod
 	if !f.IncludePositive {
 		where = append(where, "t.amount < 0")
 	}
+	if f.IncludedOnly {
+		where = append(where, "a.is_included = 1")
+	}
 	if f.Category != "" {
-		where = append(where, "(COALESCE(co.category, c.category, '') = ?)")
-		args = append(args, f.Category)
+		if strings.EqualFold(f.Category, "Uncategorized") {
+			where = append(where, "COALESCE(co.category, c.category, '') = ''")
+		} else {
+			where = append(where, "(COALESCE(co.category, c.category, '') = ?)")
+			args = append(args, f.Category)
+		}
 	}
 
 	whereClause := ""
@@ -135,13 +143,19 @@ func (s *TransactionStore) List(ctx context.Context, f TransactionFilter) ([]mod
 		sortDir = "ASC"
 	}
 
+	accountsJoin := ""
+	if f.IncludedOnly {
+		accountsJoin = "JOIN accounts a ON t.account_id = a.id"
+	}
+
 	// Count total.
 	countQuery := fmt.Sprintf(`
 		SELECT COUNT(*)
 		FROM transactions t
+		%s
 		LEFT JOIN categories c ON t.description = c.merchant_description
 		LEFT JOIN category_overrides co ON t.id = co.transaction_id
-		%s`, whereClause)
+		%s`, accountsJoin, whereClause)
 
 	var total int
 	if err := s.read.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
@@ -155,11 +169,12 @@ func (s *TransactionStore) List(ctx context.Context, f TransactionFilter) ([]mod
 			COALESCE(co.category, c.category, '') as category,
 			t.cached_at, t.updated_at
 		FROM transactions t
+		%s
 		LEFT JOIN categories c ON t.description = c.merchant_description
 		LEFT JOIN category_overrides co ON t.id = co.transaction_id
 		%s
 		ORDER BY %s %s
-		LIMIT ? OFFSET ?`, whereClause, sortCol, sortDir)
+		LIMIT ? OFFSET ?`, accountsJoin, whereClause, sortCol, sortDir)
 
 	dataArgs := append(args, f.Limit, offset)
 	rows, err := s.read.QueryContext(ctx, dataQuery, dataArgs...)
@@ -249,6 +264,76 @@ func (s *TransactionStore) CountByCategory(ctx context.Context, start, end int64
 			return nil, err
 		}
 		result[cat] = total
+	}
+	return result, rows.Err()
+}
+
+// DailyTotal represents spending for a single day.
+type DailyTotal struct {
+	Date  string  `json:"date"`  // YYYY-MM-DD
+	Total float64 `json:"total"`
+}
+
+// DailyTotals returns per-day expense totals for a date range (included accounts only).
+func (s *TransactionStore) DailyTotals(ctx context.Context, start, end int64) ([]DailyTotal, error) {
+	rows, err := s.read.QueryContext(ctx, `
+		SELECT date(t.posted, 'unixepoch') as day,
+			SUM(ABS(t.amount)) as total
+		FROM transactions t
+		JOIN accounts a ON t.account_id = a.id
+		WHERE t.posted >= ? AND t.posted <= ? AND a.is_included = 1 AND t.amount < 0
+		GROUP BY day
+		ORDER BY day ASC`, start, end)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []DailyTotal
+	for rows.Next() {
+		var d DailyTotal
+		if err := rows.Scan(&d.Date, &d.Total); err != nil {
+			return nil, err
+		}
+		result = append(result, d)
+	}
+	return result, rows.Err()
+}
+
+// MerchantTotal represents spending for a single merchant.
+type MerchantTotal struct {
+	Name  string  `json:"name"`
+	Total float64 `json:"total"`
+	Count int     `json:"count"`
+}
+
+// TopMerchants returns the top N merchants by total spending for a date range (included accounts only).
+func (s *TransactionStore) TopMerchants(ctx context.Context, start, end int64, limit int) ([]MerchantTotal, error) {
+	if limit < 1 || limit > 50 {
+		limit = 10
+	}
+	rows, err := s.read.QueryContext(ctx, `
+		SELECT t.description,
+			SUM(ABS(t.amount)) as total,
+			COUNT(*) as cnt
+		FROM transactions t
+		JOIN accounts a ON t.account_id = a.id
+		WHERE t.posted >= ? AND t.posted <= ? AND a.is_included = 1 AND t.amount < 0
+		GROUP BY t.description
+		ORDER BY total DESC
+		LIMIT ?`, start, end, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []MerchantTotal
+	for rows.Next() {
+		var m MerchantTotal
+		if err := rows.Scan(&m.Name, &m.Total, &m.Count); err != nil {
+			return nil, err
+		}
+		result = append(result, m)
 	}
 	return result, rows.Err()
 }

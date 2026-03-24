@@ -45,6 +45,8 @@ type SpendingSummary struct {
 type TrendPoint struct {
 	Label string  `json:"label"`
 	Total float64 `json:"total"`
+	Start int64   `json:"start"`
+	End   int64   `json:"end"`
 }
 
 func (h *DashboardHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -104,7 +106,7 @@ func (h *DashboardHandler) Get(w http.ResponseWriter, r *http.Request) {
 		for _, v := range pTotals {
 			total += v
 		}
-		trendData = append(trendData, TrendPoint{Label: p.Label, Total: total})
+		trendData = append(trendData, TrendPoint{Label: p.Label, Total: total, Start: p.Start.Unix(), End: p.End.Unix()})
 	}
 
 	resp := DashboardResponse{

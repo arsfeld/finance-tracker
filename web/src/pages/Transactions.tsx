@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router";
-import { useTransactions, useBillingPeriods, useUniqueCategories, type BillingPeriod } from "@/api/queries";
+import { useTransactions, useTransactionSummary, useBillingPeriods, useUniqueCategories, type BillingPeriod } from "@/api/queries";
 import { CategoryPicker } from "@/components/CategoryPicker";
 import { SimilarMerchantsDialog, useSimilarMerchants } from "@/components/SimilarMerchantsDialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -102,6 +102,9 @@ export default function Transactions() {
   const { data, isLoading } = useTransactions(apiParams);
   const transactions = data?.data || [];
   const meta = data?.meta;
+
+  const { data: summary, isLoading: summaryLoading } = useTransactionSummary(apiParams);
+  const [breakdownOpen, setBreakdownOpen] = useState(false);
 
   const updateParams = useCallback(
     (updates: Record<string, string | null>) => {
@@ -223,6 +226,105 @@ export default function Transactions() {
           </a>
         </Button>
       </div>
+
+      {/* Stats strip */}
+      {summaryLoading ? (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {[...Array(3)].map((_, i) => (
+            <Card key={i}>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Loading...</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-muted-foreground">—</div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : summary ? (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Total Spending</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">${summary.total_spending.toFixed(2)}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Transactions</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{summary.transaction_count}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Daily Average</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">${summary.daily_average.toFixed(2)}</div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Collapsible category breakdown */}
+          {summary.categories && summary.categories.length > 0 && (
+            <div>
+              <button
+                onClick={() => setBreakdownOpen((o) => !o)}
+                className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              >
+                <span className="text-xs">{breakdownOpen ? "▼" : "▶"}</span>
+                Category Breakdown
+              </button>
+              {breakdownOpen && (
+                <div className="mt-2 rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Category</TableHead>
+                        <TableHead className="text-right">Transactions</TableHead>
+                        <TableHead className="text-right">Total</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {summary.categories.map((cat) => {
+                        const isActive = urlCategory === cat.name || (urlCategory === "Uncategorized" && cat.name === "Uncategorized");
+                        return (
+                          <TableRow
+                            key={cat.name}
+                            className={`cursor-pointer hover:bg-muted/50 ${isActive ? "bg-muted" : ""}`}
+                            onClick={() => {
+                              if (isActive) {
+                                handleCategoryChange("");
+                              } else {
+                                handleCategoryChange(cat.name);
+                              }
+                            }}
+                          >
+                            <TableCell className="text-sm font-medium">
+                              {cat.name}
+                            </TableCell>
+                            <TableCell className="text-sm text-right text-muted-foreground">
+                              {cat.count}
+                            </TableCell>
+                            <TableCell className="text-sm text-right font-medium">
+                              ${cat.total.toFixed(2)}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      ) : null}
 
       <Card>
         <CardHeader>

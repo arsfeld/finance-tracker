@@ -12,6 +12,7 @@ import type {
   DailyTotalsData,
   TopMerchantsData,
   BudgetStatusResponse,
+  TransactionSummary,
 } from "./types";
 
 async function fetchApi<T>(url: string): Promise<T> {
@@ -80,6 +81,24 @@ export function useTransactions(params?: Record<string, string>) {
       const json = await res.json();
       return { data: json.data as DBTransaction[] | null, meta: json.meta };
     },
+  });
+}
+
+// Transaction summary (stats + category breakdown)
+export function useTransactionSummary(params?: Record<string, string>) {
+  const searchParams = new URLSearchParams(params);
+  searchParams.delete("page");
+  searchParams.delete("limit");
+  searchParams.delete("sort_by");
+  searchParams.delete("sort_dir");
+  searchParams.delete("include_positive");
+  const key = Object.fromEntries(searchParams);
+  return useQuery({
+    queryKey: ["transactions", "summary", key],
+    queryFn: () =>
+      fetchApi<TransactionSummary>(
+        `/api/transactions/summary?${searchParams}`
+      ),
   });
 }
 

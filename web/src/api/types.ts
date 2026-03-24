@@ -115,6 +115,20 @@ export interface SimilarMerchantInfo {
   transaction_count: number;
 }
 
+export interface CategoryBreakdown {
+  name: string;
+  count: number;
+  total: number;
+}
+
+export interface TransactionSummary {
+  total_spending: number;
+  transaction_count: number;
+  daily_average: number;
+  days_in_period: number;
+  categories: CategoryBreakdown[];
+}
+
 export interface DashboardData {
   period: { label: string; start: number; end: number };
   summary: {

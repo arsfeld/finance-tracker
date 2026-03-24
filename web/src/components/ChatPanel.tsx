@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MarkdownContent } from "@/components/MarkdownContent";
@@ -9,19 +9,20 @@ export interface ChatMessage {
 }
 
 interface ChatPanelProps {
-  initialMessages?: ChatMessage[];
   storageKey?: string | null;
   className?: string;
   placeholder?: string;
-  autoSendFirst?: boolean;
+  /** A message to append and auto-send. Set to null after consumed. */
+  pendingMessage?: string | null;
+  onPendingConsumed?: () => void;
 }
 
 export function ChatPanel({
-  initialMessages,
   storageKey = null,
   className = "",
   placeholder = "Ask about your finances...",
-  autoSendFirst = false,
+  pendingMessage = null,
+  onPendingConsumed,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     if (storageKey) {
@@ -38,9 +39,9 @@ export function ChatPanel({
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const autoSentRef = useRef(false);
+  const pendingHandled = useRef<string | null>(null);
 
-  // Persist messages on change (only if storageKey is set).
+  // Persist messages on change.
   useEffect(() => {
     if (storageKey) {
       localStorage.setItem(storageKey, JSON.stringify(messages));
@@ -51,7 +52,7 @@ export function ChatPanel({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  const sendMessages = async (msgs: ChatMessage[]) => {
+  const sendMessages = useCallback(async (msgs: ChatMessage[]) => {
     setLoading(true);
     try {
       const res = await fetch("/api/chat", {
@@ -65,31 +66,36 @@ export function ChatPanel({
       if (json.data?.message) {
         setMessages([...msgs, { role: "assistant", content: json.data.message }]);
       } else if (json.error) {
-        setMessages([...msgs, { role: "assistant", content: `Error: ${json.error.message}` }]);
+        setMessages([
+          ...msgs,
+          { role: "assistant", content: `Error: ${json.error.message}` },
+        ]);
       }
     } catch (err) {
-      setMessages([...msgs, { role: "assistant", content: `Error: ${err}` }]);
+      setMessages([
+        ...msgs,
+        {
+          role: "assistant",
+          content: `Error: ${err instanceof Error ? err.message : String(err)}`,
+        },
+      ]);
     } finally {
       setLoading(false);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
-  };
+  }, []);
 
-  // Auto-send the first initial message if requested.
+  // Handle pending message: append to existing history and auto-send.
   useEffect(() => {
-    if (
-      autoSendFirst &&
-      !autoSentRef.current &&
-      initialMessages &&
-      initialMessages.length > 0 &&
-      messages.length === 0
-    ) {
-      autoSentRef.current = true;
-      setMessages(initialMessages);
-      sendMessages(initialMessages);
+    if (pendingMessage && pendingMessage !== pendingHandled.current && !loading) {
+      pendingHandled.current = pendingMessage;
+      const userMsg: ChatMessage = { role: "user", content: pendingMessage };
+      const updated = [...messages, userMsg];
+      setMessages(updated);
+      sendMessages(updated);
+      onPendingConsumed?.();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialMessages, autoSendFirst]);
+  }, [pendingMessage, loading, messages, sendMessages, onPendingConsumed]);
 
   const send = async () => {
     const text = input.trim();

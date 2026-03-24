@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ChatPanel } from "@/components/ChatPanel";
-
-const STORAGE_KEY = "finance-chat-messages";
+import { CHAT_STORAGE_KEY } from "@/hooks/useChatDrawer";
 
 export default function Chat() {
   const [key, setKey] = useState(0);
@@ -21,7 +20,7 @@ export default function Chat() {
           variant="outline"
           size="sm"
           onClick={() => {
-            localStorage.removeItem(STORAGE_KEY);
+            localStorage.removeItem(CHAT_STORAGE_KEY);
             setKey((k) => k + 1);
           }}
         >
@@ -31,7 +30,7 @@ export default function Chat() {
 
       <ChatPanel
         key={key}
-        storageKey={STORAGE_KEY}
+        storageKey={CHAT_STORAGE_KEY}
         className="flex-1 min-h-0"
         placeholder="Ask about your finances..."
       />

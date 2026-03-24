@@ -13,7 +13,8 @@ const ChatDrawerContext = createContext<ChatDrawerContextValue>({
   close: () => {},
 });
 
-const STORAGE_KEY = "finance-chat-drawer-messages";
+// Shared with /chat page — one conversation everywhere.
+export const CHAT_STORAGE_KEY = "finance-chat-messages";
 
 export function ChatDrawerProvider({
   children,
@@ -22,20 +23,13 @@ export function ChatDrawerProvider({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [key, setKey] = useState(0);
-  const [initialMessages, setInitialMessages] = useState<ChatMessage[]>([]);
-  const [autoSend, setAutoSend] = useState(false);
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
 
   const open = useCallback((message?: string) => {
     if (message) {
-      // Context-specific: start a new conversation with this message
-      localStorage.removeItem(STORAGE_KEY);
-      setInitialMessages([{ role: "user", content: message }]);
-      setAutoSend(true);
+      // Context-specific: append this message to existing conversation and auto-send
+      setPendingMessage(message);
       setKey((k) => k + 1);
-    } else {
-      // General: resume existing conversation
-      setInitialMessages([]);
-      setAutoSend(false);
     }
     setIsOpen(true);
   }, []);
@@ -51,8 +45,8 @@ export function ChatDrawerProvider({
         isOpen={isOpen}
         onOpenChange={setIsOpen}
         chatKey={key}
-        initialMessages={initialMessages}
-        autoSend={autoSend}
+        pendingMessage={pendingMessage}
+        onPendingConsumed={() => setPendingMessage(null)}
       />
     </ChatDrawerContext.Provider>
   );
@@ -62,7 +56,6 @@ export function useChatDrawer() {
   return useContext(ChatDrawerContext);
 }
 
-// Lazy import to avoid circular deps — inline the Sheet here
 import {
   Sheet,
   SheetContent,
@@ -70,19 +63,20 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { ChatPanel } from "@/components/ChatPanel";
+import { Button } from "@/components/ui/button";
 
 function ChatDrawerSheet({
   isOpen,
   onOpenChange,
   chatKey,
-  initialMessages,
-  autoSend,
+  pendingMessage,
+  onPendingConsumed,
 }: {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   chatKey: number;
-  initialMessages: ChatMessage[];
-  autoSend: boolean;
+  pendingMessage: string | null;
+  onPendingConsumed: () => void;
 }) {
   return (
     <Sheet open={isOpen} onOpenChange={onOpenChange}>
@@ -90,14 +84,29 @@ function ChatDrawerSheet({
         side="right"
         className="w-[420px] sm:w-[420px] p-0 flex flex-col"
       >
-        <SheetHeader className="p-4 border-b border-border">
+        <SheetHeader className="p-4 border-b border-border flex flex-row items-center justify-between">
           <SheetTitle>AI Assistant</SheetTitle>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs"
+            onClick={() => {
+              localStorage.removeItem(CHAT_STORAGE_KEY);
+              onOpenChange(true);
+              onPendingConsumed();
+              // Force remount by closing and reopening
+              onOpenChange(false);
+              setTimeout(() => onOpenChange(true), 0);
+            }}
+          >
+            New Chat
+          </Button>
         </SheetHeader>
         <ChatPanel
           key={chatKey}
-          storageKey={STORAGE_KEY}
-          initialMessages={initialMessages}
-          autoSendFirst={autoSend}
+          storageKey={CHAT_STORAGE_KEY}
+          pendingMessage={pendingMessage}
+          onPendingConsumed={onPendingConsumed}
           className="flex-1 min-h-0"
           placeholder="Ask about your finances..."
         />

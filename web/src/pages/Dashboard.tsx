@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router";
 import { useDashboard } from "@/api/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MarkdownContent } from "@/components/MarkdownContent";
@@ -18,6 +19,7 @@ const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884D8", "#82CA9D"
 
 export default function Dashboard() {
   const { data, isLoading, error } = useDashboard();
+  const navigate = useNavigate();
 
   if (isLoading) return <div className="text-muted-foreground">Loading dashboard...</div>;
   if (error) return <div className="text-destructive">Error: {error.message}</div>;
@@ -31,7 +33,27 @@ export default function Dashboard() {
   const trendData = (data.trend_data || []).map((d) => ({
     name: d.label,
     total: d.total,
+    start: d.start,
+    end: d.end,
   }));
+
+  const handleCategoryClick = (name: string) => {
+    const params = new URLSearchParams({
+      category: name,
+      start: String(data.period.start),
+      end: String(data.period.end),
+      included_only: "true",
+    });
+    navigate(`/transactions?${params}`);
+  };
+
+  const handleTrendBarClick = (entry: { start: number; end: number }) => {
+    const params = new URLSearchParams({
+      start: String(entry.start),
+      end: String(entry.end),
+    });
+    navigate(`/transactions?${params}`);
+  };
 
   return (
     <div className="space-y-6">
@@ -84,14 +106,29 @@ export default function Dashboard() {
             <CardContent>
               <ResponsiveContainer width="100%" height={300}>
                 <PieChart>
-                  <Pie data={categoryData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label>
+                  <Pie
+                    data={categoryData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={100}
+                    label
+                    className="cursor-pointer"
+                    onClick={(_, idx) => handleCategoryClick(categoryData[idx].name)}
+                  >
                     {categoryData.map((_, i) => (
-                      <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                      <Cell
+                        key={i}
+                        fill={COLORS[i % COLORS.length]}
+                        className="hover:opacity-80 transition-opacity cursor-pointer"
+                      />
                     ))}
                   </Pie>
                   <Tooltip formatter={(v) => `$${Number(v).toFixed(2)}`} />
                 </PieChart>
               </ResponsiveContainer>
+              <p className="text-xs text-muted-foreground text-center mt-2">Click a category to view transactions</p>
             </CardContent>
           </Card>
         )}
@@ -108,9 +145,15 @@ export default function Dashboard() {
                   <XAxis dataKey="name" />
                   <YAxis />
                   <Tooltip formatter={(v) => `$${Number(v).toFixed(2)}`} />
-                  <Bar dataKey="total" fill="#0088FE" />
+                  <Bar
+                    dataKey="total"
+                    fill="#0088FE"
+                    className="cursor-pointer"
+                    onClick={(entry) => handleTrendBarClick(entry)}
+                  />
                 </BarChart>
               </ResponsiveContainer>
+              <p className="text-xs text-muted-foreground text-center mt-2">Click a bar to view transactions for that period</p>
             </CardContent>
           </Card>
         )}

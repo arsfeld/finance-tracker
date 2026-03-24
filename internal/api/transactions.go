@@ -110,6 +110,29 @@ func (h *TransactionHandler) OverrideCategory(w http.ResponseWriter, r *http.Req
 	WriteData(w, map[string]string{"status": "ok"})
 }
 
+func (h *TransactionHandler) Summary(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	startDate, _ := strconv.ParseInt(q.Get("start"), 10, 64)
+	endDate, _ := strconv.ParseInt(q.Get("end"), 10, 64)
+
+	f := store.TransactionFilter{
+		AccountID:    q.Get("account_id"),
+		Category:     q.Get("category"),
+		Search:       q.Get("search"),
+		StartDate:    startDate,
+		EndDate:      endDate,
+		IncludedOnly: q.Get("included_only") == "true",
+	}
+
+	summary, err := h.store.Summary(r.Context(), f)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error())
+		return
+	}
+
+	WriteData(w, summary)
+}
+
 func (h *TransactionHandler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	startDate, _ := strconv.ParseInt(q.Get("start"), 10, 64)

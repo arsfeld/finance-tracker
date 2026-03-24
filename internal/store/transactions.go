@@ -334,6 +334,164 @@ func (s *TransactionStore) DailyTotals(ctx context.Context, start, end int64) ([
 	return result, rows.Err()
 }
 
+// CategoryTotal represents spending for a single category.
+type CategoryTotal struct {
+	Name  string  `json:"name"`
+	Count int     `json:"count"`
+	Total float64 `json:"total"`
+}
+
+// SummaryResult holds aggregate stats and per-category breakdown.
+type SummaryResult struct {
+	TotalSpending    float64         `json:"total_spending"`
+	TransactionCount int             `json:"transaction_count"`
+	DaysInPeriod     int             `json:"days_in_period"`
+	DailyAverage     float64         `json:"daily_average"`
+	Categories       []CategoryTotal `json:"categories"`
+}
+
+// Summary returns aggregate spending stats and per-category breakdown.
+// The aggregate stats respect all filters including category.
+// The category breakdown ignores the category filter to preserve comparative context.
+func (s *TransactionStore) Summary(ctx context.Context, f TransactionFilter) (*SummaryResult, error) {
+	// --- Build WHERE clause for aggregates (respects all filters including category) ---
+	var aggWhere []string
+	var aggArgs []interface{}
+
+	aggWhere = append(aggWhere, "t.amount < 0") // expenses only
+
+	if f.AccountID != "" {
+		aggWhere = append(aggWhere, "t.account_id = ?")
+		aggArgs = append(aggArgs, f.AccountID)
+	}
+	if f.StartDate > 0 {
+		aggWhere = append(aggWhere, "t.posted >= ?")
+		aggArgs = append(aggArgs, f.StartDate)
+	}
+	if f.EndDate > 0 {
+		aggWhere = append(aggWhere, "t.posted <= ?")
+		aggArgs = append(aggArgs, f.EndDate)
+	}
+	if f.Search != "" {
+		aggWhere = append(aggWhere, "t.description LIKE ?")
+		aggArgs = append(aggArgs, "%"+f.Search+"%")
+	}
+	if f.IncludedOnly {
+		aggWhere = append(aggWhere, "a.is_included = 1")
+	}
+	if f.Category != "" {
+		if strings.EqualFold(f.Category, "Uncategorized") {
+			aggWhere = append(aggWhere, "COALESCE(co.category, c.category, '') = ''")
+		} else {
+			aggWhere = append(aggWhere, "(COALESCE(co.category, c.category, '') = ?)")
+			aggArgs = append(aggArgs, f.Category)
+		}
+	}
+
+	accountsJoin := ""
+	if f.IncludedOnly {
+		accountsJoin = "JOIN accounts a ON t.account_id = a.id"
+	}
+
+	aggWhereClause := "WHERE " + strings.Join(aggWhere, " AND ")
+
+	// Aggregate query: total spending and count
+	aggQuery := fmt.Sprintf(`
+		SELECT COUNT(*), COALESCE(SUM(ABS(t.amount)), 0)
+		FROM transactions t
+		%s
+		LEFT JOIN categories c ON t.description = c.merchant_description
+		LEFT JOIN category_overrides co ON t.id = co.transaction_id
+		%s`, accountsJoin, aggWhereClause)
+
+	var totalCount int
+	var totalSpending float64
+	if err := s.read.QueryRowContext(ctx, aggQuery, aggArgs...).Scan(&totalCount, &totalSpending); err != nil {
+		return nil, err
+	}
+
+	// --- Build WHERE clause for category breakdown (ignores category filter) ---
+	var catWhere []string
+	var catArgs []interface{}
+
+	catWhere = append(catWhere, "t.amount < 0")
+
+	if f.AccountID != "" {
+		catWhere = append(catWhere, "t.account_id = ?")
+		catArgs = append(catArgs, f.AccountID)
+	}
+	if f.StartDate > 0 {
+		catWhere = append(catWhere, "t.posted >= ?")
+		catArgs = append(catArgs, f.StartDate)
+	}
+	if f.EndDate > 0 {
+		catWhere = append(catWhere, "t.posted <= ?")
+		catArgs = append(catArgs, f.EndDate)
+	}
+	if f.Search != "" {
+		catWhere = append(catWhere, "t.description LIKE ?")
+		catArgs = append(catArgs, "%"+f.Search+"%")
+	}
+	if f.IncludedOnly {
+		catWhere = append(catWhere, "a.is_included = 1")
+	}
+	// NOTE: Category filter intentionally omitted for breakdown
+
+	catWhereClause := "WHERE " + strings.Join(catWhere, " AND ")
+
+	catQuery := fmt.Sprintf(`
+		SELECT COALESCE(co.category, c.category, 'Uncategorized') as cat,
+			COUNT(*) as cnt,
+			SUM(ABS(t.amount)) as total
+		FROM transactions t
+		%s
+		LEFT JOIN categories c ON t.description = c.merchant_description
+		LEFT JOIN category_overrides co ON t.id = co.transaction_id
+		%s
+		GROUP BY cat
+		ORDER BY total DESC`, accountsJoin, catWhereClause)
+
+	rows, err := s.read.QueryContext(ctx, catQuery, catArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var categories []CategoryTotal
+	for rows.Next() {
+		var ct CategoryTotal
+		if err := rows.Scan(&ct.Name, &ct.Count, &ct.Total); err != nil {
+			return nil, err
+		}
+		categories = append(categories, ct)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Calculate days in period
+	daysInPeriod := 0
+	if f.StartDate > 0 && f.EndDate > 0 {
+		daysInPeriod = int((f.EndDate - f.StartDate) / 86400)
+		if daysInPeriod < 1 {
+			daysInPeriod = 1
+		}
+	}
+
+	dailyAverage := 0.0
+	if daysInPeriod > 0 {
+		dailyAverage = totalSpending / float64(daysInPeriod)
+	}
+
+	return &SummaryResult{
+		TotalSpending:    totalSpending,
+		TransactionCount: totalCount,
+		DaysInPeriod:     daysInPeriod,
+		DailyAverage:     dailyAverage,
+		Categories:       categories,
+	}, nil
+}
+
 // MerchantTotal represents spending for a single merchant.
 type MerchantTotal struct {
 	Name  string  `json:"name"`

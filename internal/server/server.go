@@ -60,6 +60,7 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	// Transactions
 	txnHandler := api.NewTransactionHandler(txnStore, catStore, events)
 	s.mux.HandleFunc("GET /api/transactions", txnHandler.List)
+	s.mux.HandleFunc("GET /api/transactions/summary", txnHandler.Summary)
 	s.mux.HandleFunc("GET /api/transactions/export", txnHandler.ExportCSV)
 	s.mux.HandleFunc("GET /api/transactions/{id}", txnHandler.GetByID)
 	s.mux.HandleFunc("PATCH /api/transactions/{id}/category", txnHandler.OverrideCategory)

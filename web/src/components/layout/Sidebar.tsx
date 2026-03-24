@@ -4,6 +4,7 @@ const links = [
   { to: "/", label: "Dashboard" },
   { to: "/transactions", label: "Transactions" },
   { to: "/analytics", label: "Analytics" },
+  { to: "/budgets", label: "Budgets" },
   { to: "/analysis", label: "Analysis" },
   { to: "/chat", label: "Chat" },
   { to: "/settings", label: "Settings" },

@@ -120,6 +120,29 @@ func CalculateBillingPeriods(start, end time.Time, billingDay int) []models.Bill
 	return periods
 }
 
+// CurrentBillingPeriod returns the current billing cycle boundaries without
+// the 5-day auto-rollback heuristic used by CalculateDateRange.
+func CurrentBillingPeriod(billingDay int) (time.Time, time.Time) {
+	if billingDay < 1 {
+		billingDay = 1
+	} else if billingDay > 28 {
+		billingDay = 28
+	}
+
+	today := time.Now().UTC()
+	year, month, _ := today.Date()
+
+	var start time.Time
+	if today.Day() >= billingDay {
+		start = time.Date(year, month, billingDay, 0, 0, 0, 0, time.UTC)
+	} else {
+		start = time.Date(year, month, billingDay, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 0)
+	}
+	end := start.AddDate(0, 1, 0).Add(-time.Second)
+
+	return start, end
+}
+
 // ValidateBillingPeriod ensures start is before end.
 func ValidateBillingPeriod(start, end time.Time) error {
 	if start.After(end) {

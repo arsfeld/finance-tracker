@@ -161,6 +161,12 @@ type SyncLogEntry struct {
 	APIErrors           string `json:"api_errors,omitempty"`
 }
 
+// Budget represents a per-category spending limit.
+type Budget struct {
+	Category string  `json:"category"`
+	Amount   float64 `json:"amount"`
+}
+
 // CategoryEntry represents a merchant-to-category mapping.
 type CategoryEntry struct {
 	MerchantDescription string `json:"merchant_description"`

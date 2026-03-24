@@ -10,6 +10,7 @@ import type {
   CategoryTrendData,
   DailyTotalsData,
   TopMerchantsData,
+  BudgetStatusResponse,
 } from "./types";
 
 async function fetchApi<T>(url: string): Promise<T> {
@@ -34,6 +35,16 @@ async function postApi<T>(url: string, body?: unknown): Promise<T> {
   }
   const json: ApiResponse<T> = await res.json();
   return json.data;
+}
+
+async function deleteApi(url: string): Promise<void> {
+  const res = await fetch(url, { method: "DELETE" });
+  if (!res.ok) {
+    const err = await res
+      .json()
+      .catch(() => ({ error: { message: res.statusText } }));
+    throw new Error(err.error?.message || res.statusText);
+  }
 }
 
 // Billing periods
@@ -233,6 +244,37 @@ export function useTriggerAnalysis() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["analyses"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
+// Budgets
+export function useBudgetStatus() {
+  return useQuery({
+    queryKey: ["budgets", "status"],
+    queryFn: () => fetchApi<BudgetStatusResponse>("/api/budgets/status"),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useUpsertBudget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { category: string; amount: number }) =>
+      postApi("/api/budgets", body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["budgets"] });
+    },
+  });
+}
+
+export function useDeleteBudget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (category: string) =>
+      deleteApi(`/api/budgets/${encodeURIComponent(category)}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["budgets"] });
     },
   });
 }

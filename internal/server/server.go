@@ -29,6 +29,7 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	catStore := store.NewCategoryStore(db.Read, db.Write)
 	analysisStore := store.NewAnalysisStore(db.Read, db.Write)
 	syncLogStore := store.NewSyncLogStore(db.Read, db.Write)
+	budgetStore := store.NewBudgetStore(db.Read, db.Write)
 
 	syncHandler := api.NewSyncHandler(cfg, accountStore, txnStore, catStore, syncLogStore, sched, events)
 	analysisRunHandler := api.NewAnalysisRunHandler(cfg, txnStore, accountStore, catStore, analysisStore, sched, events)
@@ -97,6 +98,12 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	settingsHandler := api.NewSettingsHandler(cfg)
 	s.mux.HandleFunc("GET /api/settings", settingsHandler.Get)
 	s.mux.HandleFunc("POST /api/settings/test-notification", settingsHandler.TestNotification)
+
+	// Budgets
+	budgetHandler := api.NewBudgetHandler(budgetStore, txnStore, cfg)
+	s.mux.HandleFunc("POST /api/budgets", budgetHandler.Upsert)
+	s.mux.HandleFunc("DELETE /api/budgets/{category}", budgetHandler.Delete)
+	s.mux.HandleFunc("GET /api/budgets/status", budgetHandler.Status)
 
 	// Chat
 	chatHandler := api.NewChatHandler(cfg, txnStore, accountStore, catStore, analysisStore, events)

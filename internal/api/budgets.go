@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog/log"
 
@@ -36,8 +38,9 @@ type BudgetedCategory struct {
 
 // UnbudgetedCategory represents a category with spending but no budget set.
 type UnbudgetedCategory struct {
-	Category string  `json:"category"`
-	Spent    float64 `json:"spent"`
+	Category        string   `json:"category"`
+	Spent           float64  `json:"spent"`
+	SuggestedAmount *float64 `json:"suggested_amount,omitempty"`
 }
 
 // BudgetPeriodInfo contains the current billing period boundaries.
@@ -49,8 +52,8 @@ type BudgetPeriodInfo struct {
 
 // BudgetStatusResponse is the response for GET /api/budgets/status.
 type BudgetStatusResponse struct {
-	Period     BudgetPeriodInfo    `json:"period"`
-	Budgeted   []BudgetedCategory  `json:"budgeted"`
+	Period     BudgetPeriodInfo     `json:"period"`
+	Budgeted   []BudgetedCategory   `json:"budgeted"`
 	Unbudgeted []UnbudgetedCategory `json:"unbudgeted"`
 }
 
@@ -178,6 +181,18 @@ func (h *BudgetHandler) Status(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Compute 3-month average suggestions for unbudgeted categories.
+	if len(unbudgeted) > 0 {
+		suggestions := h.computeSuggestedAmounts(ctx, start, h.cfg.BillingDay)
+		for i := range unbudgeted {
+			key := strings.ToLower(unbudgeted[i].Category)
+			if avg, ok := suggestions[key]; ok {
+				rounded := math.Ceil(avg/10) * 10
+				unbudgeted[i].SuggestedAmount = &rounded
+			}
+		}
+	}
+
 	// Sort budgeted by percent descending (highest risk first).
 	sortBudgetedByPercent(budgeted)
 
@@ -192,6 +207,37 @@ func (h *BudgetHandler) Status(w http.ResponseWriter, r *http.Request) {
 		Budgeted:   budgeted,
 		Unbudgeted: unbudgeted,
 	})
+}
+
+// computeSuggestedAmounts returns average spending per category over the prior 3 billing periods.
+func (h *BudgetHandler) computeSuggestedAmounts(ctx context.Context, currentStart time.Time, billingDay int) map[string]float64 {
+	totals := make(map[string]float64)
+	counts := make(map[string]int)
+
+	// Look at 3 prior billing periods.
+	periodStart := currentStart
+	for i := 0; i < 3; i++ {
+		periodStart = periodStart.AddDate(0, -1, 0)
+		periodEnd := periodStart.AddDate(0, 1, 0).Add(-time.Second)
+
+		spending, err := h.txnStore.CountByCategory(ctx, periodStart.Unix(), periodEnd.Unix())
+		if err != nil {
+			continue
+		}
+		for cat, amount := range spending {
+			key := strings.ToLower(cat)
+			totals[key] += amount
+			counts[key]++
+		}
+	}
+
+	result := make(map[string]float64)
+	for key, total := range totals {
+		if counts[key] > 0 {
+			result[key] = total / float64(counts[key])
+		}
+	}
+	return result
 }
 
 // sortBudgetedByPercent sorts budgeted categories by percent descending.

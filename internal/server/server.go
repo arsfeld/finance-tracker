@@ -32,7 +32,7 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	budgetStore := store.NewBudgetStore(db.Read, db.Write)
 
 	syncHandler := api.NewSyncHandler(cfg, accountStore, txnStore, catStore, syncLogStore, sched, events)
-	analysisRunHandler := api.NewAnalysisRunHandler(cfg, txnStore, accountStore, catStore, analysisStore, sched, events)
+	analysisRunHandler := api.NewAnalysisRunHandler(cfg, txnStore, accountStore, catStore, analysisStore, budgetStore, sched, events)
 
 	s := &Server{
 		db:        db,
@@ -106,7 +106,7 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	s.mux.HandleFunc("GET /api/budgets/status", budgetHandler.Status)
 
 	// Chat
-	chatHandler := api.NewChatHandler(cfg, txnStore, accountStore, catStore, analysisStore, events)
+	chatHandler := api.NewChatHandler(cfg, txnStore, accountStore, catStore, analysisStore, budgetStore, events)
 	s.mux.HandleFunc("POST /api/chat", chatHandler.Handle)
 
 	// SPA fallback: must be last (least specific pattern).

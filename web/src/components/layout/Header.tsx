@@ -2,11 +2,13 @@ import { Button } from "@/components/ui/button";
 import { useTheme } from "@/hooks/useTheme";
 import { useJobStatus } from "@/hooks/JobStatusContext";
 import { useTriggerSync } from "@/api/queries";
+import { useChatDrawer } from "@/hooks/useChatDrawer";
 
 export function Header({ onMenuToggle }: { onMenuToggle?: () => void }) {
   const { dark, toggle } = useTheme();
   const sync = useTriggerSync();
   const job = useJobStatus();
+  const chatDrawer = useChatDrawer();
 
   const isRunning = job.state === "running";
 
@@ -24,6 +26,13 @@ export function Header({ onMenuToggle }: { onMenuToggle?: () => void }) {
         </button>
         <span className="md:hidden font-semibold text-sm">Finance Tracker</span>
         <div className="flex-1" />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => chatDrawer.open()}
+        >
+          AI Chat
+        </Button>
         <Button
           variant="outline"
           size="sm"

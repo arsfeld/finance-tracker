@@ -7,13 +7,7 @@ import {
 import type { BudgetedCategory, UnbudgetedCategory } from "@/api/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import { ChatPanel, type ChatMessage } from "@/components/ChatPanel";
+import { useChatDrawer } from "@/hooks/useChatDrawer";
 import { cn } from "@/lib/utils";
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
@@ -388,11 +382,7 @@ export default function Budgets() {
   const { data, isLoading, error } = useBudgetStatus();
   const upsertBudget = useUpsertBudget();
   const deleteBudget = useDeleteBudget();
-
-  // Drawer state
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [drawerKey, setDrawerKey] = useState(0);
-  const [drawerMessages, setDrawerMessages] = useState<ChatMessage[]>([]);
+  const chatDrawer = useChatDrawer();
 
   const handleEdit = (category: string, amount: number) => {
     upsertBudget.mutate({ category, amount });
@@ -400,12 +390,6 @@ export default function Budgets() {
 
   const handleDelete = (category: string) => {
     deleteBudget.mutate(category);
-  };
-
-  const openDrawer = (message: string) => {
-    setDrawerMessages([{ role: "user", content: message }]);
-    setDrawerKey((k) => k + 1);
-    setDrawerOpen(true);
   };
 
   const handleFixWithAI = (
@@ -416,9 +400,9 @@ export default function Budgets() {
     const periodLabel = data?.period.label || "this period";
     if (amount) {
       const pct = Math.round((spent / amount) * 100);
-      openDrawer(`Help me with my ${category} budget. Current status: ${formatCurrency(spent)} spent of ${formatCurrency(amount)} limit (${pct}%). This billing period: ${periodLabel}.`);
+      chatDrawer.open(`Help me with my ${category} budget. Current status: ${formatCurrency(spent)} spent of ${formatCurrency(amount)} limit (${pct}%). This billing period: ${periodLabel}.`);
     } else {
-      openDrawer(`I'm spending ${formatCurrency(spent)} on ${category} this period but have no budget set. Help me decide on a budget for ${periodLabel}.`);
+      chatDrawer.open(`I'm spending ${formatCurrency(spent)} on ${category} this period but have no budget set. Help me decide on a budget for ${periodLabel}.`);
     }
   };
 
@@ -428,7 +412,7 @@ export default function Budgets() {
       ...(unbudgeted || []).map((u) => `- ${u.category}: ${formatCurrency(u.spent)} spent (no budget)`),
     ];
     const periodLabel = data?.period.label || "this period";
-    openDrawer(
+    chatDrawer.open(
       `Help me set up my budget for ${periodLabel}. Here's my current spending:\n\n${cats.join("\n")}\n\nPlease suggest and create a reasonable budget for each category. Use get_budget_status first to check what's already set, then use set_budget for each category.`
     );
   };
@@ -524,21 +508,6 @@ export default function Budgets() {
         </>
       )}
 
-      {/* AI Budget Assistant Drawer */}
-      <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
-        <SheetContent side="right" className="w-[420px] sm:w-[420px] p-0 flex flex-col">
-          <SheetHeader className="p-4 border-b border-border">
-            <SheetTitle>Budget Assistant</SheetTitle>
-          </SheetHeader>
-          <ChatPanel
-            key={drawerKey}
-            initialMessages={drawerMessages}
-            autoSendFirst={true}
-            className="flex-1 min-h-0"
-            placeholder="Ask about this budget..."
-          />
-        </SheetContent>
-      </Sheet>
     </div>
   );
 }

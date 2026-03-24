@@ -176,3 +176,67 @@ func generateCategorizationPrompt(uncategorized []string, existingCategories map
 
 	return sb.String()
 }
+
+const similaritySystemPrompt = "You are a merchant matching system. Given a merchant that a user has categorized, identify which candidate merchants are the same brand or company. Respond with valid JSON only."
+
+// SimilarityResponse is the LLM response for similarity queries.
+type SimilarityResponse struct {
+	Similar []string `json:"similar"`
+}
+
+// FindSimilarMerchants asks the LLM to identify which candidate merchants are likely the same
+// brand/company as the corrected merchant. Returns only merchant descriptions that exist in candidates.
+func FindSimilarMerchants(client *Client, correctedMerchant, category string, candidates []models.CategoryEntry) ([]string, error) {
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+
+	// Build candidate set for the LLM prompt.
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("The user has categorized %q as %q.\n", correctedMerchant, category))
+	sb.WriteString("Which of the following merchants are likely the SAME merchant, brand, or company?\n")
+	sb.WriteString("Only include merchants that are clearly the same company/brand. Be conservative.\n\n")
+	sb.WriteString("Candidates:\n")
+
+	// Track valid candidates for validation.
+	validCandidates := make(map[string]bool)
+	for _, c := range candidates {
+		sb.WriteString(fmt.Sprintf("- %s (current: %s)\n", c.MerchantDescription, c.Category))
+		validCandidates[c.MerchantDescription] = true
+	}
+
+	sb.WriteString("\nRespond with valid JSON only in this exact format:\n")
+	sb.WriteString(`{"similar": ["MERCHANT NAME 1", "MERCHANT NAME 2"]}`)
+	sb.WriteString("\nIf no merchants are similar, respond with: {\"similar\": []}\n")
+
+	prompt := sb.String()
+
+	log.Info().
+		Str("merchant", correctedMerchant).
+		Str("category", category).
+		Int("candidates", len(candidates)).
+		Msg("Finding similar merchants via LLM")
+
+	jsonResp, err := client.CategorizeJSON(similaritySystemPrompt, prompt)
+	if err != nil {
+		return nil, fmt.Errorf("LLM similarity: %w", err)
+	}
+
+	var resp SimilarityResponse
+	if err := json.Unmarshal([]byte(jsonResp), &resp); err != nil {
+		return nil, fmt.Errorf("parse similarity response: %w (response: %s)", err, jsonResp)
+	}
+
+	// Validate results against actual candidate list to filter hallucinations.
+	var validated []string
+	for _, m := range resp.Similar {
+		if validCandidates[m] {
+			validated = append(validated, m)
+		} else {
+			log.Warn().Str("merchant", m).Msg("LLM returned merchant not in candidate set, filtering out")
+		}
+	}
+
+	log.Info().Int("found", len(validated)).Msg("Similar merchants identified")
+	return validated, nil
+}

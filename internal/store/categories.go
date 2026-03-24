@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"strings"
 
 	"finance_tracker/internal/models"
 )
@@ -136,6 +137,104 @@ func (s *CategoryStore) BulkUpsert(ctx context.Context, entries []models.Categor
 
 	for _, e := range entries {
 		if _, err := stmt.ExecContext(ctx, e.MerchantDescription, e.Category, e.Source); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// SimilarMerchantInfo holds a candidate merchant with its current category and transaction count.
+type SimilarMerchantInfo struct {
+	MerchantDescription string `json:"merchant_description"`
+	CurrentCategory     string `json:"current_category"`
+	TransactionCount    int    `json:"transaction_count"`
+}
+
+// ListCandidatesForSimilarity returns merchants that are candidates for similarity matching:
+// source='llm' and category differs from the target category.
+func (s *CategoryStore) ListCandidatesForSimilarity(ctx context.Context, excludeCategory string) ([]models.CategoryEntry, error) {
+	rows, err := s.read.QueryContext(ctx, `
+		SELECT merchant_description, category, source, excluded, updated_at
+		FROM categories
+		WHERE source = 'llm' AND category != ?
+		ORDER BY merchant_description`, excludeCategory)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []models.CategoryEntry
+	for rows.Next() {
+		var e models.CategoryEntry
+		if err := rows.Scan(&e.MerchantDescription, &e.Category, &e.Source, &e.Excluded, &e.UpdatedAt); err != nil {
+			return nil, err
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
+// GetMerchantTransactionCounts returns the number of transactions per merchant description.
+func (s *CategoryStore) GetMerchantTransactionCounts(ctx context.Context, merchants []string) (map[string]int, error) {
+	if len(merchants) == 0 {
+		return map[string]int{}, nil
+	}
+
+	// Build placeholder query.
+	placeholders := make([]string, len(merchants))
+	args := make([]interface{}, len(merchants))
+	for i, m := range merchants {
+		placeholders[i] = "?"
+		args[i] = m
+	}
+
+	query := `SELECT description, COUNT(*) FROM transactions WHERE description IN (` +
+		strings.Join(placeholders, ",") + `) GROUP BY description`
+
+	rows, err := s.read.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int)
+	for rows.Next() {
+		var desc string
+		var count int
+		if err := rows.Scan(&desc, &count); err != nil {
+			return nil, err
+		}
+		counts[desc] = count
+	}
+	return counts, rows.Err()
+}
+
+// BulkSetCategory sets the category for multiple merchants with source='user'.
+func (s *CategoryStore) BulkSetCategory(ctx context.Context, merchants []string, category string) error {
+	if len(merchants) == 0 {
+		return nil
+	}
+
+	tx, err := s.write.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO categories (merchant_description, category, source, updated_at)
+		VALUES (?, ?, 'user', datetime('now'))
+		ON CONFLICT(merchant_description) DO UPDATE SET
+			category = excluded.category,
+			source = 'user',
+			updated_at = datetime('now')`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, m := range merchants {
+		if _, err := stmt.ExecContext(ctx, m, category); err != nil {
 			return err
 		}
 	}

@@ -70,11 +70,13 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	s.mux.HandleFunc("PATCH /api/accounts/{id}", acctHandler.UpdateInclusion)
 
 	// Categories
-	catHandler := api.NewCategoryHandler(catStore, txnStore, events)
+	catHandler := api.NewCategoryHandler(catStore, txnStore, events, cfg)
 	s.mux.HandleFunc("GET /api/categories", catHandler.List)
 	s.mux.HandleFunc("GET /api/categories/unique", catHandler.ListUnique)
 	s.mux.HandleFunc("POST /api/categories/exclude", catHandler.SetExcluded)
 	s.mux.HandleFunc("GET /api/categories/summary", catHandler.Summary)
+	s.mux.HandleFunc("POST /api/categories/similar", catHandler.FindSimilar)
+	s.mux.HandleFunc("POST /api/categories/bulk-apply", catHandler.BulkApply)
 
 	// Analytics
 	analyticsHandler := api.NewAnalyticsHandler(cfg, txnStore)

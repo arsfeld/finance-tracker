@@ -334,10 +334,12 @@ function EmptyState({
   unbudgeted,
   onSetBudget,
   onFixWithAI,
+  onCreateAllWithAI,
 }: {
   unbudgeted: UnbudgetedCategory[];
   onSetBudget: (category: string, amount: number) => void;
   onFixWithAI: (category: string, spent: number) => void;
+  onCreateAllWithAI: () => void;
 }) {
   return (
     <div className="text-center py-12">
@@ -348,23 +350,33 @@ function EmptyState({
         compares to your goals.
       </p>
       {unbudgeted.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Your categories</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="divide-y divide-border">
-              {unbudgeted.map((item) => (
-                <UnbudgetedRow
-                  key={item.category}
-                  item={item}
-                  onSetBudget={onSetBudget}
-                  onFixWithAI={onFixWithAI}
-                />
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+        <div className="space-y-4">
+          <Button onClick={onCreateAllWithAI} size="lg">
+            Create Budget with AI
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            AI will analyze your spending and suggest budgets for each category
+          </p>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">
+                Or set budgets manually
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="divide-y divide-border">
+                {unbudgeted.map((item) => (
+                  <UnbudgetedRow
+                    key={item.category}
+                    item={item}
+                    onSetBudget={onSetBudget}
+                    onFixWithAI={onFixWithAI}
+                  />
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       )}
     </div>
   );
@@ -390,22 +402,35 @@ export default function Budgets() {
     deleteBudget.mutate(category);
   };
 
+  const openDrawer = (message: string) => {
+    setDrawerMessages([{ role: "user", content: message }]);
+    setDrawerKey((k) => k + 1);
+    setDrawerOpen(true);
+  };
+
   const handleFixWithAI = (
     category: string,
     spent: number,
     amount?: number
   ) => {
     const periodLabel = data?.period.label || "this period";
-    let contextMsg: string;
     if (amount) {
       const pct = Math.round((spent / amount) * 100);
-      contextMsg = `Help me with my ${category} budget. Current status: ${formatCurrency(spent)} spent of ${formatCurrency(amount)} limit (${pct}%). This billing period: ${periodLabel}.`;
+      openDrawer(`Help me with my ${category} budget. Current status: ${formatCurrency(spent)} spent of ${formatCurrency(amount)} limit (${pct}%). This billing period: ${periodLabel}.`);
     } else {
-      contextMsg = `I'm spending ${formatCurrency(spent)} on ${category} this period but have no budget set. Help me decide on a budget for ${periodLabel}.`;
+      openDrawer(`I'm spending ${formatCurrency(spent)} on ${category} this period but have no budget set. Help me decide on a budget for ${periodLabel}.`);
     }
-    setDrawerMessages([{ role: "user", content: contextMsg }]);
-    setDrawerKey((k) => k + 1);
-    setDrawerOpen(true);
+  };
+
+  const handleCreateAllWithAI = () => {
+    const cats = [
+      ...(budgeted || []).map((b) => `- ${b.category}: ${formatCurrency(b.spent)} spent (budget: ${formatCurrency(b.amount)})`),
+      ...(unbudgeted || []).map((u) => `- ${u.category}: ${formatCurrency(u.spent)} spent (no budget)`),
+    ];
+    const periodLabel = data?.period.label || "this period";
+    openDrawer(
+      `Help me set up my budget for ${periodLabel}. Here's my current spending:\n\n${cats.join("\n")}\n\nPlease suggest and create a reasonable budget for each category. Use get_budget_status first to check what's already set, then use set_budget for each category.`
+    );
   };
 
   if (isLoading) {
@@ -429,7 +454,18 @@ export default function Budgets() {
     <div className="space-y-6 p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Budgets</h1>
-        <span className="text-sm text-muted-foreground">{period.label}</span>
+        <div className="flex items-center gap-3">
+          {hasBudgets && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCreateAllWithAI}
+            >
+              Ask AI
+            </Button>
+          )}
+          <span className="text-sm text-muted-foreground">{period.label}</span>
+        </div>
       </div>
 
       {!hasBudgets ? (
@@ -437,6 +473,7 @@ export default function Budgets() {
           unbudgeted={unbudgeted || []}
           onSetBudget={handleEdit}
           onFixWithAI={(cat, spent) => handleFixWithAI(cat, spent)}
+          onCreateAllWithAI={handleCreateAllWithAI}
         />
       ) : (
         <>

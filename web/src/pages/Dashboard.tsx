@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router";
 import { useDashboard } from "@/api/queries";
+import { useChartColors } from "@/lib/chart-colors";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import {
@@ -15,11 +16,10 @@ import {
   Tooltip,
 } from "recharts";
 
-const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884D8", "#82CA9D", "#FFC658", "#D0ED57"];
-
 export default function Dashboard() {
   const { data, isLoading, error } = useDashboard();
   const navigate = useNavigate();
+  const COLORS = useChartColors();
 
   if (isLoading) return <div className="text-muted-foreground">Loading dashboard...</div>;
   if (error) return <div className="text-destructive">Error: {error.message}</div>;
@@ -147,7 +147,7 @@ export default function Dashboard() {
                   <Tooltip formatter={(v) => `$${Number(v).toFixed(2)}`} />
                   <Bar
                     dataKey="total"
-                    fill="#0088FE"
+                    fill={COLORS[0]}
                     className="cursor-pointer"
                     onClick={(entry) => handleTrendBarClick(entry)}
                   />

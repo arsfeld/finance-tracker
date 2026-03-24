@@ -4,8 +4,8 @@ import {
   useCategoryTrend,
   useDailyTotals,
   useTopMerchants,
-  useBillingPeriods,
 } from "@/api/queries";
+import { useChartColors } from "@/lib/chart-colors";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,16 +20,10 @@ import {
   Bar,
 } from "recharts";
 
-const CHART_COLORS = [
-  "#0088FE", "#00C49F", "#FFBB28", "#FF8042",
-  "#8884D8", "#82CA9D", "#FFC658", "#D0ED57",
-];
-
 export default function Analytics() {
   const [months, setMonths] = useState(6);
   const navigate = useNavigate();
-
-  const { data: periods } = useBillingPeriods();
+  const CHART_COLORS = useChartColors();
   const { data: trendData, isLoading: trendLoading } = useCategoryTrend(months);
   const { data: dailyData, isLoading: dailyLoading } = useDailyTotals();
   const { data: merchantData, isLoading: merchantLoading } = useTopMerchants();
@@ -209,7 +203,7 @@ export default function Analytics() {
                     <Tooltip formatter={(v) => `$${Number(v).toFixed(2)}`} />
                     <Bar
                       dataKey="total"
-                      fill="#0088FE"
+                      fill={CHART_COLORS[0]}
                       className="cursor-pointer"
                       onClick={(entry) => handleMerchantClick(entry.name)}
                     />

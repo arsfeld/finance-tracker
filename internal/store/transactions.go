@@ -270,7 +270,7 @@ func (s *TransactionStore) CountByCategory(ctx context.Context, start, end int64
 
 // DailyTotal represents spending for a single day.
 type DailyTotal struct {
-	Date  string  `json:"date"`  // YYYY-MM-DD
+	Date  string  `json:"date"` // YYYY-MM-DD
 	Total float64 `json:"total"`
 }
 

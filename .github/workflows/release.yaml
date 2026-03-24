@@ -80,7 +80,16 @@ jobs:
     steps:
       - name: Checkout the code
         uses: actions/checkout@v4
-      
+        with:
+          fetch-depth: 0  # Required for git-cliff to access full history
+
+      - name: Generate Release Notes
+        id: changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+
       - name: Download x86_64 binary
         uses: actions/download-artifact@v4
         with:
@@ -108,13 +117,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           new_tag="${{ needs.tag-release.outputs.new_tag }}"
-          
-          # Create a new release
+
+          # Create a new release with git-cliff generated notes
           gh release create "$new_tag" \
             --title "$new_tag" \
-            --generate-notes \
+            --notes "${{ steps.changelog.outputs.content }}" \
             "release-bins/final/finance-tracker-linux-x86_64" \
-            "release-bins/final/finance-tracker-linux-arm64" 
+            "release-bins/final/finance-tracker-linux-arm64"
+
+      - name: Notify via ntfy
+        continue-on-error: true
+        env:
+          CHANGELOG: ${{ steps.changelog.outputs.content }}
+        run: |
+          new_tag="${{ needs.tag-release.outputs.new_tag }}"
+          printf '%s\n\nView app: https://finance-tracker.arsfeld.one' "$CHANGELOG" > /tmp/ntfy-body.txt
+          curl -s \
+            -H "Title: Finance Tracker ${new_tag} released" \
+            -H "Tags: rocket" \
+            -H "Click: https://finance-tracker.arsfeld.one" \
+            -d @/tmp/ntfy-body.txt \
+            "https://${{ vars.NTFY_RELEASE_SERVER }}/${{ vars.NTFY_RELEASE_TOPIC }}"
 
   docker:
     name: Build and push Docker image

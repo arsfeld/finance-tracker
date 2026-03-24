@@ -161,12 +161,12 @@ function CategoryChip({ category }: { category: CategoryInfoItem }) {
 
 function SettingRow({ label, value, status }: { label: string; value?: string; status?: boolean }) {
   return (
-    <div className="flex items-center justify-between py-1">
+    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 py-1">
       <span className="text-sm text-muted-foreground">{label}</span>
       <div className="flex items-center gap-2">
-        <code className="text-sm bg-muted px-2 py-0.5 rounded">{value || "-"}</code>
+        <code className="text-sm bg-muted px-2 py-0.5 rounded break-all">{value || "-"}</code>
         {status !== undefined && (
-          <span className={`w-2 h-2 rounded-full ${status ? "bg-green-500" : "bg-red-400"}`} />
+          <span className={`w-2 h-2 rounded-full shrink-0 ${status ? "bg-green-500" : "bg-red-400"}`} />
         )}
       </div>
     </div>

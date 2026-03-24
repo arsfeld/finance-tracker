@@ -8,9 +8,9 @@ const links = [
   { to: "/settings", label: "Settings" },
 ];
 
-export function Sidebar() {
+export function Sidebar({ onClose }: { onClose?: () => void }) {
   return (
-    <aside className="w-56 border-r border-border bg-card p-4 flex flex-col gap-1">
+    <aside className="w-56 h-full border-r border-border bg-card p-4 flex flex-col gap-1">
       <div className="font-semibold text-lg mb-4 px-2">Finance Tracker</div>
       <nav className="flex flex-col gap-0.5">
         {links.map((link) => (
@@ -18,6 +18,7 @@ export function Sidebar() {
             key={link.to}
             to={link.to}
             end={link.to === "/"}
+            onClick={onClose}
             className={({ isActive }) =>
               `px-3 py-2 rounded-md text-sm transition-colors ${
                 isActive

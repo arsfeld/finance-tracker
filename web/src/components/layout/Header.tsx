@@ -3,7 +3,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { useJobStatus } from "@/hooks/JobStatusContext";
 import { useTriggerSync } from "@/api/queries";
 
-export function Header() {
+export function Header({ onMenuToggle }: { onMenuToggle?: () => void }) {
   const { dark, toggle } = useTheme();
   const sync = useTriggerSync();
   const job = useJobStatus();
@@ -12,7 +12,18 @@ export function Header() {
 
   return (
     <header className="border-b border-border bg-card">
-      <div className="h-14 px-6 flex items-center justify-end gap-2">
+      <div className="h-14 px-4 md:px-6 flex items-center gap-2">
+        <button
+          onClick={onMenuToggle}
+          className="md:hidden p-2 -ml-2 rounded-md hover:bg-accent transition-colors"
+          aria-label="Toggle menu"
+        >
+          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+        <span className="md:hidden font-semibold text-sm">Finance Tracker</span>
+        <div className="flex-1" />
         <Button
           variant="outline"
           size="sm"

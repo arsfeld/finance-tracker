@@ -81,13 +81,13 @@ export default function Transactions() {
         </div>
       )}
 
-      <div className="flex gap-2">
+      <div className="flex flex-col sm:flex-row gap-2">
         <Input
           type="text"
           placeholder="Search transactions..."
           value={search}
           onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-          className="max-w-xs"
+          className="sm:max-w-xs"
         />
         <Button variant="outline" size="sm" asChild>
           <a href={`/api/transactions/export?${new URLSearchParams(params).toString()}`} download>
@@ -112,42 +112,44 @@ export default function Transactions() {
             <div className="text-muted-foreground">Loading...</div>
           ) : (
             <>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <SortableHead field="posted" label="Date" current={sortBy} dir={sortDir} onSort={handleSort} className="w-[100px]" />
-                    <SortableHead field="description" label="Description" current={sortBy} dir={sortDir} onSort={handleSort} />
-                    <TableHead className="w-[200px]">Category</TableHead>
-                    <SortableHead field="amount" label="Amount" current={sortBy} dir={sortDir} onSort={handleSort} className="text-right w-[100px]" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {transactions && transactions.length > 0 ? transactions.map((t) => (
-                    <TableRow key={t.id}>
-                      <TableCell className="text-sm whitespace-nowrap text-muted-foreground">
-                        {new Date(t.posted * 1000).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell className="text-sm">{t.description}</TableCell>
-                      <TableCell>
-                        <CategoryPicker
-                          transactionId={t.id}
-                          description={t.description}
-                          currentCategory={t.category}
-                        />
-                      </TableCell>
-                      <TableCell className={`text-sm text-right font-medium whitespace-nowrap ${t.amount < 0 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}`}>
-                        ${Math.abs(t.amount).toFixed(2)}
-                      </TableCell>
-                    </TableRow>
-                  )) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
-                        No transactions for this period.
-                      </TableCell>
+                      <SortableHead field="posted" label="Date" current={sortBy} dir={sortDir} onSort={handleSort} className="w-[100px]" />
+                      <SortableHead field="description" label="Description" current={sortBy} dir={sortDir} onSort={handleSort} />
+                      <TableHead className="w-[200px] hidden sm:table-cell">Category</TableHead>
+                      <SortableHead field="amount" label="Amount" current={sortBy} dir={sortDir} onSort={handleSort} className="text-right w-[100px]" />
                     </TableRow>
-                  )}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {transactions && transactions.length > 0 ? transactions.map((t) => (
+                      <TableRow key={t.id}>
+                        <TableCell className="text-sm whitespace-nowrap text-muted-foreground">
+                          {new Date(t.posted * 1000).toLocaleDateString()}
+                        </TableCell>
+                        <TableCell className="text-sm">{t.description}</TableCell>
+                        <TableCell className="hidden sm:table-cell">
+                          <CategoryPicker
+                            transactionId={t.id}
+                            description={t.description}
+                            currentCategory={t.category}
+                          />
+                        </TableCell>
+                        <TableCell className={`text-sm text-right font-medium whitespace-nowrap ${t.amount < 0 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}`}>
+                          ${Math.abs(t.amount).toFixed(2)}
+                        </TableCell>
+                      </TableRow>
+                    )) : (
+                      <TableRow>
+                        <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
+                          No transactions for this period.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
 
               {meta && meta.total > meta.limit && (
                 <div className="flex justify-center gap-2 mt-4">

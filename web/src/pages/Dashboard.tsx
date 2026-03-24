@@ -40,7 +40,7 @@ export default function Dashboard() {
         <p className="text-muted-foreground text-sm">{data.period.label}</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Total Spending</CardTitle>

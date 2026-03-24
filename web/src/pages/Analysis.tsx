@@ -31,7 +31,7 @@ export default function Analysis() {
             {isLoading ? (
               <div className="text-muted-foreground">Loading...</div>
             ) : analyses && analyses.length > 0 ? (
-              <div className="space-y-1">
+              <div className="space-y-1 max-h-64 lg:max-h-none overflow-y-auto">
                 {analyses.map((a) => (
                   <Button
                     key={a.id}

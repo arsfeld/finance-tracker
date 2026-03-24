@@ -77,7 +77,7 @@ export default function Chat() {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-3.5rem)]">
+    <div className="flex flex-col h-[calc(100dvh-3.5rem)]">
       <div className="px-2 py-3 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Chat</h1>

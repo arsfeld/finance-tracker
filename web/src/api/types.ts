@@ -100,6 +100,7 @@ export interface BudgetedCategory {
 export interface UnbudgetedCategory {
   category: string;
   spent: number;
+  suggested_amount?: number;
 }
 
 export interface BudgetStatusResponse {

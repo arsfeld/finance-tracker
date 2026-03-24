@@ -7,6 +7,13 @@ import {
 import type { BudgetedCategory, UnbudgetedCategory } from "@/api/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { ChatPanel, type ChatMessage } from "@/components/ChatPanel";
 import { cn } from "@/lib/utils";
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
@@ -135,13 +142,17 @@ function InlineBudgetEditor({
 
 function SetBudgetInput({
   category,
+  suggestedAmount,
   onSave,
 }: {
   category: string;
+  suggestedAmount?: number;
   onSave: (category: string, amount: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(
+    suggestedAmount ? String(suggestedAmount) : ""
+  );
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -156,19 +167,31 @@ function SetBudgetInput({
       onSave(category, parsed);
     }
     setEditing(false);
-    setValue("");
+    setValue(suggestedAmount ? String(suggestedAmount) : "");
   };
 
   if (!editing) {
     return (
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => setEditing(true)}
-        className="text-xs"
-      >
-        Set Budget
-      </Button>
+      <div className="flex items-center gap-2">
+        {suggestedAmount && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-xs"
+            onClick={() => onSave(category, suggestedAmount)}
+          >
+            Accept {formatCurrency(suggestedAmount)}
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setEditing(true)}
+          className="text-xs"
+        >
+          Custom
+        </Button>
+      </div>
     );
   }
 
@@ -186,7 +209,7 @@ function SetBudgetInput({
         if (e.key === "Enter") commit();
         if (e.key === "Escape") {
           setEditing(false);
-          setValue("");
+          setValue(suggestedAmount ? String(suggestedAmount) : "");
         }
       }}
       className="text-sm px-2 py-1 rounded border border-ring w-[100px] text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-ring"
@@ -200,10 +223,12 @@ function BudgetedRow({
   item,
   onEdit,
   onDelete,
+  onFixWithAI,
 }: {
   item: BudgetedCategory;
   onEdit: (category: string, amount: number) => void;
   onDelete: (category: string) => void;
+  onFixWithAI: (category: string, spent: number, amount: number) => void;
 }) {
   const isOver = item.percent >= 100;
   const statusText = isOver
@@ -215,6 +240,18 @@ function BudgetedRow({
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium">{item.category}</span>
         <div className="flex items-center gap-2">
+          {isOver && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs"
+              onClick={() =>
+                onFixWithAI(item.category, item.spent, item.amount)
+              }
+            >
+              Fix with AI
+            </Button>
+          )}
           <span
             className={cn(
               "text-sm tabular-nums",
@@ -258,9 +295,11 @@ function BudgetedRow({
 function UnbudgetedRow({
   item,
   onSetBudget,
+  onFixWithAI,
 }: {
   item: UnbudgetedCategory;
   onSetBudget: (category: string, amount: number) => void;
+  onFixWithAI: (category: string, spent: number) => void;
 }) {
   return (
     <div className="flex items-center justify-between py-2">
@@ -270,7 +309,21 @@ function UnbudgetedRow({
           {formatCurrency(item.spent)} spent
         </span>
       </div>
-      <SetBudgetInput category={item.category} onSave={onSetBudget} />
+      <div className="flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-xs"
+          onClick={() => onFixWithAI(item.category, item.spent)}
+        >
+          Ask AI
+        </Button>
+        <SetBudgetInput
+          category={item.category}
+          suggestedAmount={item.suggested_amount}
+          onSave={onSetBudget}
+        />
+      </div>
     </div>
   );
 }
@@ -280,9 +333,11 @@ function UnbudgetedRow({
 function EmptyState({
   unbudgeted,
   onSetBudget,
+  onFixWithAI,
 }: {
   unbudgeted: UnbudgetedCategory[];
   onSetBudget: (category: string, amount: number) => void;
+  onFixWithAI: (category: string, spent: number) => void;
 }) {
   return (
     <div className="text-center py-12">
@@ -304,6 +359,7 @@ function EmptyState({
                   key={item.category}
                   item={item}
                   onSetBudget={onSetBudget}
+                  onFixWithAI={onFixWithAI}
                 />
               ))}
             </div>
@@ -321,12 +377,35 @@ export default function Budgets() {
   const upsertBudget = useUpsertBudget();
   const deleteBudget = useDeleteBudget();
 
+  // Drawer state
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerKey, setDrawerKey] = useState(0);
+  const [drawerMessages, setDrawerMessages] = useState<ChatMessage[]>([]);
+
   const handleEdit = (category: string, amount: number) => {
     upsertBudget.mutate({ category, amount });
   };
 
   const handleDelete = (category: string) => {
     deleteBudget.mutate(category);
+  };
+
+  const handleFixWithAI = (
+    category: string,
+    spent: number,
+    amount?: number
+  ) => {
+    const periodLabel = data?.period.label || "this period";
+    let contextMsg: string;
+    if (amount) {
+      const pct = Math.round((spent / amount) * 100);
+      contextMsg = `Help me with my ${category} budget. Current status: ${formatCurrency(spent)} spent of ${formatCurrency(amount)} limit (${pct}%). This billing period: ${periodLabel}.`;
+    } else {
+      contextMsg = `I'm spending ${formatCurrency(spent)} on ${category} this period but have no budget set. Help me decide on a budget for ${periodLabel}.`;
+    }
+    setDrawerMessages([{ role: "user", content: contextMsg }]);
+    setDrawerKey((k) => k + 1);
+    setDrawerOpen(true);
   };
 
   if (isLoading) {
@@ -357,6 +436,7 @@ export default function Budgets() {
         <EmptyState
           unbudgeted={unbudgeted || []}
           onSetBudget={handleEdit}
+          onFixWithAI={(cat, spent) => handleFixWithAI(cat, spent)}
         />
       ) : (
         <>
@@ -372,6 +452,9 @@ export default function Budgets() {
                     item={item}
                     onEdit={handleEdit}
                     onDelete={handleDelete}
+                    onFixWithAI={(cat, spent, amt) =>
+                      handleFixWithAI(cat, spent, amt)
+                    }
                   />
                 ))}
               </div>
@@ -392,6 +475,9 @@ export default function Budgets() {
                       key={item.category}
                       item={item}
                       onSetBudget={handleEdit}
+                      onFixWithAI={(cat, spent) =>
+                        handleFixWithAI(cat, spent)
+                      }
                     />
                   ))}
                 </div>
@@ -400,6 +486,22 @@ export default function Budgets() {
           )}
         </>
       )}
+
+      {/* AI Budget Assistant Drawer */}
+      <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+        <SheetContent side="right" className="w-[420px] sm:w-[420px] p-0 flex flex-col">
+          <SheetHeader className="p-4 border-b border-border">
+            <SheetTitle>Budget Assistant</SheetTitle>
+          </SheetHeader>
+          <ChatPanel
+            key={drawerKey}
+            initialMessages={drawerMessages}
+            autoSendFirst={true}
+            className="flex-1 min-h-0"
+            placeholder="Ask about this budget..."
+          />
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

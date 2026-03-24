@@ -55,10 +55,13 @@ func CategorizeTransactions(ctx context.Context, client *Client, catStore *store
 		return fmt.Errorf("list categories: %w", err)
 	}
 
-	// Build category -> merchants map for the prompt.
-	catMap := make(map[string][]string)
+	// Build category -> merchants map for the prompt, preserving source metadata.
+	catMap := make(map[string][]categoryExample)
 	for _, e := range existingEntries {
-		catMap[e.Category] = append(catMap[e.Category], e.MerchantDescription)
+		catMap[e.Category] = append(catMap[e.Category], categoryExample{
+			MerchantDescription: e.MerchantDescription,
+			Source:              e.Source,
+		})
 	}
 
 	prompt := generateCategorizationPrompt(uncategorized, catMap)
@@ -94,7 +97,18 @@ func CategorizeTransactions(ctx context.Context, client *Client, catStore *store
 	return nil
 }
 
-func generateCategorizationPrompt(uncategorized []string, existingCategories map[string][]string) string {
+type categoryExample struct {
+	MerchantDescription string
+	Source              string
+}
+
+const (
+	maxUserExamples = 5
+	maxLLMExamples  = 2
+	maxTotalExamples = 200
+)
+
+func generateCategorizationPrompt(uncategorized []string, existingCategories map[string][]categoryExample) string {
 	var sb strings.Builder
 
 	sb.WriteString("Categorize the following merchant/transaction descriptions into spending categories.\n\n")
@@ -107,14 +121,48 @@ func generateCategorizationPrompt(uncategorized []string, existingCategories map
 		}
 		sort.Strings(catNames)
 
+		totalExamples := 0
 		for _, cat := range catNames {
-			merchants := existingCategories[cat]
-			if len(merchants) > 5 {
-				merchants = merchants[:5]
+			if totalExamples >= maxTotalExamples {
+				break
 			}
-			sb.WriteString(fmt.Sprintf("- %s: [%s]\n", cat, strings.Join(merchants, ", ")))
+
+			examples := existingCategories[cat]
+
+			// Partition by source: user-verified first, then LLM-assigned.
+			var userExamples, llmExamples []string
+			for _, ex := range examples {
+				if ex.Source == "user" {
+					userExamples = append(userExamples, ex.MerchantDescription)
+				} else {
+					llmExamples = append(llmExamples, ex.MerchantDescription)
+				}
+			}
+
+			// Cap each source type.
+			if len(userExamples) > maxUserExamples {
+				userExamples = userExamples[:maxUserExamples]
+			}
+			if len(llmExamples) > maxLLMExamples {
+				llmExamples = llmExamples[:maxLLMExamples]
+			}
+
+			// Build example strings with labels.
+			var parts []string
+			for _, m := range userExamples {
+				parts = append(parts, m+" (verified by user)")
+			}
+			parts = append(parts, llmExamples...)
+
+			if len(parts) == 0 {
+				continue
+			}
+
+			totalExamples += len(parts)
+			sb.WriteString(fmt.Sprintf("- %s: [%s]\n", cat, strings.Join(parts, ", ")))
 		}
-		sb.WriteString("\nAssign each new merchant to an existing category above if it fits. Create a new category only if none fit.\n\n")
+		sb.WriteString("\nAssign each new merchant to an existing category above if it fits. Create a new category only if none fit.\n")
+		sb.WriteString("Categories with merchants marked '(verified by user)' are confirmed correct — prefer matching their patterns.\n\n")
 	}
 
 	sb.WriteString("Merchant descriptions to categorize:\n")

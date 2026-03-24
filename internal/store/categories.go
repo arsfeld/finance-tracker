@@ -127,7 +127,8 @@ func (s *CategoryStore) BulkUpsert(ctx context.Context, entries []models.Categor
 		ON CONFLICT(merchant_description) DO UPDATE SET
 			category = excluded.category,
 			source = excluded.source,
-			updated_at = datetime('now')`)
+			updated_at = datetime('now')
+		WHERE categories.source != 'user'`)
 	if err != nil {
 		return err
 	}

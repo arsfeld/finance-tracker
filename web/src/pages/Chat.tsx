@@ -1,10 +1,9 @@
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { ChatPanel } from "@/components/ChatPanel";
-import { CHAT_STORAGE_KEY } from "@/hooks/useChatDrawer";
+import { ChatPanelView } from "@/components/ChatPanel";
+import { useChatDrawer } from "@/hooks/useChatDrawer";
 
 export default function Chat() {
-  const [key, setKey] = useState(0);
+  const { chat } = useChatDrawer();
 
   return (
     <div className="flex flex-col h-[calc(100dvh-3.5rem)]">
@@ -16,21 +15,15 @@ export default function Chat() {
             run analysis.
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            localStorage.removeItem(CHAT_STORAGE_KEY);
-            setKey((k) => k + 1);
-          }}
-        >
+        <Button variant="outline" size="sm" onClick={chat.clear}>
           New Chat
         </Button>
       </div>
 
-      <ChatPanel
-        key={key}
-        storageKey={CHAT_STORAGE_KEY}
+      <ChatPanelView
+        messages={chat.messages}
+        loading={chat.loading}
+        onSend={chat.send}
         className="flex-1 min-h-0"
         placeholder="Ask about your finances..."
       />

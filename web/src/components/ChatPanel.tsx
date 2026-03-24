@@ -1,111 +1,40 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MarkdownContent } from "@/components/MarkdownContent";
+import type { ChatMessage } from "@/hooks/useChatDrawer";
 
-export interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-}
+export type { ChatMessage };
 
-interface ChatPanelProps {
-  storageKey?: string | null;
+interface ChatPanelViewProps {
+  messages: ChatMessage[];
+  loading: boolean;
+  onSend: (text: string) => void;
   className?: string;
   placeholder?: string;
-  /** A message to append and auto-send. Set to null after consumed. */
-  pendingMessage?: string | null;
-  onPendingConsumed?: () => void;
 }
 
-export function ChatPanel({
-  storageKey = null,
+export function ChatPanelView({
+  messages,
+  loading,
+  onSend,
   className = "",
   placeholder = "Ask about your finances...",
-  pendingMessage = null,
-  onPendingConsumed,
-}: ChatPanelProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>(() => {
-    if (storageKey) {
-      try {
-        const raw = localStorage.getItem(storageKey);
-        return raw ? JSON.parse(raw) : [];
-      } catch {
-        return [];
-      }
-    }
-    return [];
-  });
+}: ChatPanelViewProps) {
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const pendingHandled = useRef<string | null>(null);
-
-  // Persist messages on change.
-  useEffect(() => {
-    if (storageKey) {
-      localStorage.setItem(storageKey, JSON.stringify(messages));
-    }
-  }, [messages, storageKey]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  const sendMessages = useCallback(async (msgs: ChatMessage[]) => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: msgs.map((m) => ({ role: m.role, content: m.content })),
-        }),
-      });
-      const json = await res.json();
-      if (json.data?.message) {
-        setMessages([...msgs, { role: "assistant", content: json.data.message }]);
-      } else if (json.error) {
-        setMessages([
-          ...msgs,
-          { role: "assistant", content: `Error: ${json.error.message}` },
-        ]);
-      }
-    } catch (err) {
-      setMessages([
-        ...msgs,
-        {
-          role: "assistant",
-          content: `Error: ${err instanceof Error ? err.message : String(err)}`,
-        },
-      ]);
-    } finally {
-      setLoading(false);
-      setTimeout(() => inputRef.current?.focus(), 50);
-    }
-  }, []);
-
-  // Handle pending message: append to existing history and auto-send.
-  useEffect(() => {
-    if (pendingMessage && pendingMessage !== pendingHandled.current && !loading) {
-      pendingHandled.current = pendingMessage;
-      const userMsg: ChatMessage = { role: "user", content: pendingMessage };
-      const updated = [...messages, userMsg];
-      setMessages(updated);
-      sendMessages(updated);
-      onPendingConsumed?.();
-    }
-  }, [pendingMessage, loading, messages, sendMessages, onPendingConsumed]);
-
-  const send = async () => {
+  const send = () => {
     const text = input.trim();
     if (!text || loading) return;
-
-    const userMsg: ChatMessage = { role: "user", content: text };
-    const newMessages = [...messages, userMsg];
-    setMessages(newMessages);
+    onSend(text);
     setInput("");
-    sendMessages(newMessages);
+    setTimeout(() => inputRef.current?.focus(), 50);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

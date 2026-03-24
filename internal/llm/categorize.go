@@ -103,8 +103,8 @@ type categoryExample struct {
 }
 
 const (
-	maxUserExamples = 5
-	maxLLMExamples  = 2
+	maxUserExamples  = 5
+	maxLLMExamples   = 2
 	maxTotalExamples = 200
 )
 

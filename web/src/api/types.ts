@@ -65,6 +65,30 @@ export interface SyncLogEntry {
   api_errors: string;
 }
 
+export interface CategoryTrendPeriod {
+  label: string;
+  start: number;
+  end: number;
+  totals: Record<string, number>;
+}
+
+export interface CategoryTrendData {
+  categories: string[];
+  periods: CategoryTrendPeriod[];
+}
+
+export interface DailyTotalsData {
+  days: { date: string; total: number }[];
+  start: number;
+  end: number;
+}
+
+export interface TopMerchantsData {
+  merchants: { name: string; total: number; count: number }[];
+  start: number;
+  end: number;
+}
+
 export interface DashboardData {
   period: { label: string; start: number; end: number };
   summary: {
@@ -76,5 +100,5 @@ export interface DashboardData {
   category_totals: Record<string, number>;
   recent_transactions: DBTransaction[] | null;
   latest_analysis: Analysis | null;
-  trend_data: { label: string; total: number }[] | null;
+  trend_data: { label: string; total: number; start: number; end: number }[] | null;
 }

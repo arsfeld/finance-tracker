@@ -7,6 +7,9 @@ import type {
   Analysis,
   CategoryEntry,
   SyncLogEntry,
+  CategoryTrendData,
+  DailyTotalsData,
+  TopMerchantsData,
 } from "./types";
 
 async function fetchApi<T>(url: string): Promise<T> {
@@ -190,6 +193,35 @@ export function useSyncLog() {
   return useQuery({
     queryKey: ["sync-log"],
     queryFn: () => fetchApi<SyncLogEntry[] | null>("/api/sync/log"),
+  });
+}
+
+// Analytics
+export function useCategoryTrend(months = 6) {
+  return useQuery({
+    queryKey: ["analytics", "category-trend", months],
+    queryFn: () => fetchApi<CategoryTrendData>(`/api/analytics/category-trend?months=${months}`),
+  });
+}
+
+export function useDailyTotals(start?: number, end?: number) {
+  const params = new URLSearchParams();
+  if (start) params.set("start", String(start));
+  if (end) params.set("end", String(end));
+  return useQuery({
+    queryKey: ["analytics", "daily-totals", start, end],
+    queryFn: () => fetchApi<DailyTotalsData>(`/api/analytics/daily-totals?${params}`),
+  });
+}
+
+export function useTopMerchants(start?: number, end?: number, limit = 10) {
+  const params = new URLSearchParams();
+  if (start) params.set("start", String(start));
+  if (end) params.set("end", String(end));
+  params.set("limit", String(limit));
+  return useQuery({
+    queryKey: ["analytics", "top-merchants", start, end, limit],
+    queryFn: () => fetchApi<TopMerchantsData>(`/api/analytics/top-merchants?${params}`),
   });
 }
 

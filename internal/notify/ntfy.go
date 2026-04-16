@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"time"
 
@@ -32,6 +33,12 @@ func SendNtfy(server, topic, warningSuffix, message, notificationType string) er
 
 	req.Header.Set("Content-Type", "text/plain")
 	req.Header.Set("Title", "Finance Tracker")
+
+	if user := os.Getenv("NTFY_PUBLISHER_USER"); user != "" {
+		if pass := os.Getenv("NTFY_PUBLISHER_PASS"); pass != "" {
+			req.SetBasicAuth(user, pass)
+		}
+	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)

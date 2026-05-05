@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"finance_tracker/internal/billing"
 	"finance_tracker/internal/models"
 )
 
@@ -47,7 +48,7 @@ func GeneratePrompt(
 
 	// Append budget status if budgets are configured.
 	if len(budgets) > 0 {
-		prompt += "\n\n" + buildBudgetSection(budgets, expenses)
+		prompt += "\n\n" + buildBudgetSection(budgets, expenses, billingDay)
 	}
 
 	return prompt
@@ -303,10 +304,18 @@ func buildCategoryBreakdown(txns []models.DBTransaction) string {
 	return b.String()
 }
 
-func buildBudgetSection(budgets []models.Budget, expenses []models.DBTransaction) string {
-	// Compute spending per category from expenses.
+func buildBudgetSection(budgets []models.Budget, expenses []models.DBTransaction, billingDay int) string {
+	// Budgets are monthly, so compare against spending in the current billing period only.
+	// The analysis range often spans several billing periods; including all of it would make
+	// every category look massively over budget.
+	periodStart, periodEnd := billing.CurrentBillingPeriod(billingDay)
+	startUnix, endUnix := periodStart.Unix(), periodEnd.Unix()
+
 	spending := make(map[string]float64)
 	for _, t := range expenses {
+		if t.Posted < startUnix || t.Posted > endUnix {
+			continue
+		}
 		cat := t.Category
 		if cat == "" {
 			cat = "Uncategorized"
@@ -315,7 +324,8 @@ func buildBudgetSection(budgets []models.Budget, expenses []models.DBTransaction
 	}
 
 	var b strings.Builder
-	b.WriteString("Budget Status:\n")
+	fmt.Fprintf(&b, "Budget Status (current billing period: %s to %s):\n",
+		periodStart.Format("2006-01-02"), periodEnd.Format("2006-01-02"))
 	for _, budget := range budgets {
 		spent := spending[budget.Category]
 		// Case-insensitive fallback.

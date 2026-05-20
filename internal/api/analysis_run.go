@@ -123,7 +123,7 @@ func (h *AnalysisRunHandler) runAnalysis(ctx context.Context) {
 	budgets, _ := h.budgetStore.GetAll(ctx)
 
 	// Build prompt.
-	prompt := llmclient.GeneratePrompt(txns, accounts, startDate, endDate, billingDay, true, budgets...)
+	prompt := llmclient.GeneratePrompt(txns, accounts, startDate, endDate, time.Now().UTC(), billingDay, true, budgets...)
 
 	if h.cfg.OpenRouterURL == "" || h.cfg.OpenRouterAPIKey == "" || h.cfg.OpenRouterModel == "" {
 		log.Error().Msg("OpenRouter not configured")

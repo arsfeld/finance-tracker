@@ -23,10 +23,22 @@ func GeneratePrompt(
 	transactions []models.DBTransaction,
 	accounts []models.DBAccount,
 	startDate, endDate time.Time,
+	now time.Time,
 	billingDay int,
 	isMultiPeriod bool,
 	budgets ...models.Budget,
 ) string {
+	// Find latest transaction date to check for lag.
+	latestTxnDate := getLatestTransactionDate(transactions)
+	var dataLagWarning string
+	if !latestTxnDate.IsZero() {
+		lag := now.Sub(latestTxnDate)
+		if lag > 72*time.Hour { // More than 3 days
+			days := int(lag.Hours() / 24)
+			dataLagWarning = fmt.Sprintf("\n> [!WARNING]\n> **DATA LAG DETECTED**: The most recent transaction is from %s (%d days ago). Analysis for the current period is based on INCOMPLETE data. Do not congratulate the user on low spending if it is likely due to this lag.\n",
+				latestTxnDate.Format("Jan 2, 2006"), days)
+		}
+	}
 	// Filter to expenses only.
 	var expenses []models.DBTransaction
 	for _, t := range transactions {
@@ -41,9 +53,9 @@ func GeneratePrompt(
 
 	var prompt string
 	if isMultiPeriod {
-		prompt = generateMultiPeriodPrompt(expenses, accounts, startDate, endDate, billingDay, acctTable, txnTable, totalExpenses)
+		prompt = generateMultiPeriodPrompt(expenses, accounts, startDate, endDate, now, billingDay, acctTable, txnTable, totalExpenses, dataLagWarning)
 	} else {
-		prompt = generateSinglePeriodPrompt(expenses, startDate, endDate, acctTable, txnTable, totalExpenses)
+		prompt = generateSinglePeriodPrompt(expenses, startDate, endDate, now, acctTable, txnTable, totalExpenses, dataLagWarning)
 	}
 
 	// Append budget status if budgets are configured.
@@ -57,8 +69,10 @@ func GeneratePrompt(
 func generateSinglePeriodPrompt(
 	expenses []models.DBTransaction,
 	startDate, endDate time.Time,
+	now time.Time,
 	acctTable, txnTable string,
 	totalExpenses float64,
+	dataLagWarning string,
 ) string {
 	calDays := int(endDate.Sub(startDate).Hours()/24) + 1
 	txnDays := countTxnDays(expenses, startDate, endDate)
@@ -82,6 +96,7 @@ Total Expenses: $%.2f
 Daily Burn Rate: $%.2f/day (based on transaction days)
 Monthly Projection: $%.2f (at current rate)
 
+%s
 %s
 
 Please create a concise report (~250 words) with:
@@ -107,7 +122,7 @@ All Transactions:
 %s`,
 		startDate.Format("2006-01-02"), endDate.Format("2006-01-02"),
 		calDays, txnDays, totalExpenses, burnRate, monthlyProjection,
-		catBreakdown,
+		catBreakdown, dataLagWarning,
 		totalExpenses, topExpenses, acctTable, txnTable)
 }
 
@@ -115,9 +130,11 @@ func generateMultiPeriodPrompt(
 	expenses []models.DBTransaction,
 	accounts []models.DBAccount,
 	startDate, endDate time.Time,
+	now time.Time,
 	billingDay int,
 	acctTable, txnTable string,
 	totalExpenses float64,
+	dataLagWarning string,
 ) string {
 	periods := calcBillingPeriods(startDate, endDate, billingDay)
 	periodTotals := calcPeriodTotals(expenses, periods)
@@ -190,6 +207,7 @@ Household: 2 adults, 2 children (born 2021 and 2024, currently ~4 and ~1 years o
 
 %s
 %s
+%s
 
 ### Instructions
 
@@ -212,7 +230,7 @@ Accounts Information:
 %s
 
 All Transactions:
-%s`, summary.String(), catBreakdown, topExpenses, acctTable, txnTable)
+%s`, summary.String(), catBreakdown, dataLagWarning, topExpenses, acctTable, txnTable)
 }
 
 // Helper functions operating on DB types.
@@ -431,4 +449,21 @@ func calcPeriodTotals(txns []models.DBTransaction, periods []models.BillingPerio
 		}
 	}
 	return totals
+}
+
+func getLatestTransactionDate(txns []models.DBTransaction) time.Time {
+	var latest int64
+	for _, t := range txns {
+		ts := t.Posted
+		if t.TransactedAt != nil {
+			ts = *t.TransactedAt
+		}
+		if ts > latest {
+			latest = ts
+		}
+	}
+	if latest == 0 {
+		return time.Time{}
+	}
+	return time.Unix(latest, 0)
 }

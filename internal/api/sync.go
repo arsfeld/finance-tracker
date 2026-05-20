@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -73,7 +74,7 @@ func (h *SyncHandler) runSync(ctx context.Context) {
 	end := time.Now().UTC()
 	start := simplefin.ClampToAPILimit(end.AddDate(0, -3, 0), end)
 
-	accountCount, apiErrors, err := client.FetchAndStore(ctx, start, end, h.accounts, h.txns)
+	txnAdded, apiErrors, err := client.FetchAndStore(ctx, start, end, h.accounts, h.txns)
 	if err != nil {
 		apiErrJSON, _ := json.Marshal(apiErrors)
 		h.syncLog.Complete(ctx, logID, "error", 0, 0, err.Error(), string(apiErrJSON))
@@ -87,11 +88,11 @@ func (h *SyncHandler) runSync(ctx context.Context) {
 	}
 
 	apiErrJSON, _ := json.Marshal(apiErrors)
-	h.syncLog.Complete(ctx, logID, status, accountCount, 0, "", string(apiErrJSON))
-	h.events.Broadcast("sync_complete", `{"status":"`+status+`","accounts":`+
-		string(rune(accountCount+'0'))+`}`)
+	h.syncLog.Complete(ctx, logID, status, txnAdded, 0, "", string(apiErrJSON))
+	h.events.Broadcast("sync_complete", `{"status":"`+status+`","transactions":`+
+		fmt.Sprintf("%d", txnAdded)+`}`)
 
-	log.Info().Int("accounts", accountCount).Int("api_errors", len(apiErrors)).Msg("Sync complete")
+	log.Info().Int("transactions", txnAdded).Int("api_errors", len(apiErrors)).Msg("Sync complete")
 
 	// Run categorization on fetched transactions.
 	h.runCategorization(ctx, start, end)

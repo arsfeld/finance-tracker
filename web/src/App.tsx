@@ -6,6 +6,7 @@ import Transactions from "@/pages/Transactions";
 import Analysis from "@/pages/Analysis";
 import Settings from "@/pages/Settings";
 import Chat from "@/pages/Chat";
+import SyncHistory from "@/pages/SyncHistory";
 import Analytics from "@/pages/Analytics";
 import Budgets from "@/pages/Budgets";
 
@@ -20,6 +21,7 @@ export default function App() {
           <Route path="budgets" element={<Budgets />} />
           <Route path="analysis" element={<Analysis />} />
           <Route path="chat" element={<Chat />} />
+          <Route path="sync-history" element={<SyncHistory />} />
           <Route path="settings" element={<Settings />} />
         </Route>
       </Routes>

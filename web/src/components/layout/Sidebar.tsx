@@ -7,6 +7,7 @@ const links = [
   { to: "/budgets", label: "Budgets" },
   { to: "/analysis", label: "Analysis" },
   { to: "/chat", label: "Chat" },
+  { to: "/sync-history", label: "Sync History" },
   { to: "/settings", label: "Settings" },
 ];
 

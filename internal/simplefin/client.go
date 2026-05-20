@@ -86,7 +86,7 @@ func (c *Client) FetchAndStore(ctx context.Context, startDate, endDate time.Time
 		}
 	}
 
-	return len(fetched), apiErrors, nil
+	return totalAdded, apiErrors, nil
 }
 
 func (c *Client) fetch(startDate, endDate time.Time) ([]models.Account, []string, error) {

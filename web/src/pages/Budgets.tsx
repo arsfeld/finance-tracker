@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router";
 import {
   useBudgetStatus,
+  useBudgetHistory,
   useUpsertBudget,
   useDeleteBudget,
   useCategoryTransactions,
@@ -9,10 +10,20 @@ import {
 import type {
   BudgetedCategory,
   UnbudgetedCategory,
+  BudgetHistoryResponse,
+  BudgetImprovementProposal,
   DBTransaction,
 } from "@/api/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { useChatDrawer } from "@/hooks/useChatDrawer";
 import { cn } from "@/lib/utils";
 import { ChevronRightIcon } from "lucide-react";
@@ -484,6 +495,263 @@ function UnbudgetedRow({
   );
 }
 
+function getPercentColor(percent: number): string {
+  if (percent >= 100) return "text-red-600 font-medium";
+  if (percent >= 90) return "text-red-500";
+  if (percent >= 75) return "text-amber-600";
+  return "text-muted-foreground";
+}
+
+function getCellBg(percent: number): string {
+  if (percent >= 100) return "bg-red-100 dark:bg-red-950/50";
+  if (percent >= 90) return "bg-red-50 dark:bg-red-950/30";
+  if (percent >= 75) return "bg-amber-50 dark:bg-amber-950/30";
+  return "";
+}
+
+function ProposalRow({
+  proposal,
+  onApply,
+}: {
+  proposal: BudgetImprovementProposal;
+  onApply: (category: string, amount: number) => void;
+}) {
+  const typeLabel =
+    proposal.type === "increase"
+      ? "Increase"
+      : proposal.type === "decrease"
+        ? "Decrease"
+        : "Watch";
+
+  return (
+    <div className="flex items-start justify-between gap-4 py-3">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">{proposal.category}</span>
+          <span
+            className={cn(
+              "text-xs px-1.5 py-0.5 rounded",
+              proposal.type === "increase" && "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
+              proposal.type === "decrease" && "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
+              proposal.type === "watch" && "bg-muted text-muted-foreground"
+            )}
+          >
+            {typeLabel}
+          </span>
+        </div>
+        <p className="text-xs text-muted-foreground mt-1">{proposal.reason}</p>
+        {proposal.type !== "watch" && (
+          <p className="text-xs tabular-nums mt-1">
+            {formatCurrency(proposal.current_amount)} →{" "}
+            {formatCurrency(proposal.suggested_amount)}
+          </p>
+        )}
+      </div>
+      {proposal.type !== "watch" && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-xs shrink-0"
+          onClick={() => onApply(proposal.category, proposal.suggested_amount)}
+        >
+          Apply
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function BudgetHistorySection({
+  history,
+  isLoading,
+  months,
+  onMonthsChange,
+  onApplyProposal,
+  onAnalyzeWithAI,
+}: {
+  history: BudgetHistoryResponse | undefined;
+  isLoading: boolean;
+  months: number;
+  onMonthsChange: (months: number) => void;
+  onApplyProposal: (category: string, amount: number) => void;
+  onAnalyzeWithAI: () => void;
+}) {
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-muted-foreground text-sm">
+          Loading history...
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!history || history.periods.length === 0) {
+    return null;
+  }
+
+  const periodLabels = history.periods.map((p) => p.label);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">Budget History</h2>
+        <div className="flex items-center gap-2">
+          {[3, 6].map((n) => (
+            <Button
+              key={n}
+              variant={months === n ? "default" : "outline"}
+              size="sm"
+              onClick={() => onMonthsChange(n)}
+            >
+              {n} periods
+            </Button>
+          ))}
+          <Button variant="outline" size="sm" onClick={onAnalyzeWithAI}>
+            Improve with AI
+          </Button>
+        </div>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Period Summary</CardTitle>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Period</TableHead>
+                <TableHead className="text-right">Spent</TableHead>
+                <TableHead className="text-right">Budget</TableHead>
+                <TableHead className="text-right">Used</TableHead>
+                <TableHead className="text-right">Over</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {history.periods.map((p) => (
+                <TableRow key={p.label}>
+                  <TableCell>
+                    {p.label}
+                    {!p.is_complete && (
+                      <span className="text-xs text-muted-foreground ml-2">
+                        (current)
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {formatCurrency(p.summary.total_spent)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {formatCurrency(p.summary.total_budget)}
+                  </TableCell>
+                  <TableCell
+                    className={cn(
+                      "text-right tabular-nums",
+                      getPercentColor(p.summary.total_percent)
+                    )}
+                  >
+                    {Math.round(p.summary.total_percent)}%
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {p.summary.over_count}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Category Trends</CardTitle>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Category</TableHead>
+                <TableHead className="text-right">Limit</TableHead>
+                <TableHead className="text-right">Avg</TableHead>
+                {periodLabels.map((label) => (
+                  <TableHead key={label} className="text-right">
+                    {label}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {history.categories.map((cat) => {
+                const byLabel = new Map(
+                  cat.by_period.map((bp) => [bp.label, bp])
+                );
+                return (
+                  <TableRow key={cat.category}>
+                    <TableCell className="font-medium">{cat.category}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatCurrency(cat.amount)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {formatCurrency(cat.avg_spent)}
+                    </TableCell>
+                    {periodLabels.map((label) => {
+                      const bp = byLabel.get(label);
+                      const percent = bp?.percent ?? 0;
+                      return (
+                        <TableCell
+                          key={label}
+                          className={cn(
+                            "text-right tabular-nums text-xs",
+                            getCellBg(percent),
+                            getPercentColor(percent)
+                          )}
+                        >
+                          {bp ? (
+                            <>
+                              {formatCurrency(bp.spent)}
+                              <span className="block">{Math.round(percent)}%</span>
+                            </>
+                          ) : (
+                            "—"
+                          )}
+                        </TableCell>
+                      );
+                    })}
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+          <p className="text-xs text-muted-foreground mt-3">
+            Historical periods use your current budget limits. Change limits to
+            see how past periods would compare.
+          </p>
+        </CardContent>
+      </Card>
+
+      {history.proposals.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Suggested Adjustments</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="divide-y divide-border">
+              {history.proposals.map((proposal) => (
+                <ProposalRow
+                  key={`${proposal.category}-${proposal.type}`}
+                  proposal={proposal}
+                  onApply={onApplyProposal}
+                />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 // --- Empty State ---
 
 function EmptyState({
@@ -544,7 +812,10 @@ function EmptyState({
 // --- Main Page ---
 
 export default function Budgets() {
+  const [historyMonths, setHistoryMonths] = useState(6);
   const { data, isLoading, error } = useBudgetStatus();
+  const { data: history, isLoading: historyLoading } =
+    useBudgetHistory(historyMonths);
   const upsertBudget = useUpsertBudget();
   const deleteBudget = useDeleteBudget();
   const chatDrawer = useChatDrawer();
@@ -573,12 +844,35 @@ export default function Budgets() {
 
   const handleCreateAllWithAI = () => {
     const cats = [
-      ...(budgeted || []).map((b) => `- ${b.category}: ${formatCurrency(b.spent)} spent (budget: ${formatCurrency(b.amount)})`),
-      ...(unbudgeted || []).map((u) => `- ${u.category}: ${formatCurrency(u.spent)} spent (no budget)`),
+      ...(data?.budgeted || []).map((b) => `- ${b.category}: ${formatCurrency(b.spent)} spent (budget: ${formatCurrency(b.amount)})`),
+      ...(data?.unbudgeted || []).map((u) => `- ${u.category}: ${formatCurrency(u.spent)} spent (no budget)`),
     ];
     const periodLabel = data?.period.label || "this period";
     chatDrawer.open(
       `Help me set up my budget for ${periodLabel}. Here's my current spending:\n\n${cats.join("\n")}\n\nPlease suggest and create a reasonable budget for each category. Use get_budget_status first to check what's already set, then use set_budget for each category.`
+    );
+  };
+
+  const handleAnalyzeHistoryWithAI = () => {
+    if (!history) return;
+    const periodLines = history.periods
+      .map(
+        (p) =>
+          `- ${p.label}: ${formatCurrency(p.summary.total_spent)} spent / ${formatCurrency(p.summary.total_budget)} budget (${Math.round(p.summary.total_percent)}%, ${p.summary.over_count} categories over)`
+      )
+      .join("\n");
+    const proposalLines =
+      history.proposals.length > 0
+        ? history.proposals
+            .map((p) =>
+              p.type === "watch"
+                ? `- ${p.category}: ${p.reason}`
+                : `- ${p.category}: ${formatCurrency(p.current_amount)} → ${formatCurrency(p.suggested_amount)} (${p.type}) — ${p.reason}`
+            )
+            .join("\n")
+        : "No automatic proposals generated.";
+    chatDrawer.open(
+      `Analyze my budget history over the last ${historyMonths} billing periods and suggest improvements.\n\nPeriod totals:\n${periodLines}\n\nSystem proposals:\n${proposalLines}\n\nUse get_budget_history for full details. Explain trends, prioritize changes, and ask before applying any set_budget updates.`
     );
   };
 
@@ -673,6 +967,15 @@ export default function Budgets() {
               </CardContent>
             </Card>
           )}
+
+          <BudgetHistorySection
+            history={history}
+            isLoading={historyLoading}
+            months={historyMonths}
+            onMonthsChange={setHistoryMonths}
+            onApplyProposal={handleEdit}
+            onAnalyzeWithAI={handleAnalyzeHistoryWithAI}
+          />
         </>
       )}
 

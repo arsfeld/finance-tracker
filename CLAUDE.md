@@ -8,48 +8,74 @@ Finance Tracker is a Go-based CLI tool that fetches financial transactions from 
 
 By default, the tool focuses analysis on **credit card accounts only**, filtering out checking, savings, and investment accounts. This provides more targeted insights into credit card spending patterns. Use the `--all-accounts` flag to analyze all account types.
 
+## Development Environment
+
+This project uses **[devenv](https://devenv.sh/)** for reproducible tooling (Go, gcc, just). Direnv loads it automatically via `.envrc` when you `cd` into the repo.
+
+**Always run `just` inside devenv.** Bare `just` or `go` commands outside the devenv shell can fail (wrong `GOROOT`, missing gcc, mismatched toolchain).
+
+- **Interactive shell with direnv active:** run `just` directly — direnv already loaded devenv.
+- **Subprocesses without direnv** (CI, IDE agents, fresh terminals): wrap every `just` invocation:
+
+```bash
+devenv shell -- just build
+devenv shell -- just build-web
+devenv shell -- just dev
+```
+
+When running commands as an AI agent, **default to `devenv shell -- just …`** unless `$DEVENV_PROFILE` is already set in the environment.
+
+Go and Node tooling (`go`, `gcc`, `just`, frontend npm scripts invoked via `just build-web`) must come from devenv — do not rely on system Go.
+
 ## Common Commands
 
 ### Build and Run
 ```bash
-# Build the project (includes version from git tags)
-just build
+# Build the web server (includes version from git tags)
+devenv shell -- just build
 
-# Run with forced analysis
-just run
+# Build the frontend
+devenv shell -- just build-web
 
-# Run with verbose logging
-just run-verbose
+# Run the web server (builds first)
+devenv shell -- just run
 
-# Run with specific notification channels
-just run-notify "email,ntfy"
+# Dev mode: Go server + Vite hot-reload on :8099
+devenv shell -- just dev
 
-# Manual build (for specific version control)
-go build -ldflags="-X main.Version=$(git describe --tags --always --dirty) -X main.BuildTime=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" -o bin/finance_tracker ./src
+# Build the legacy CLI
+devenv shell -- just build-cli
+
+# Run the legacy CLI with forced analysis
+devenv shell -- just run-cli
+
+# Run the legacy CLI with verbose logging
+devenv shell -- just run-verbose
+
+# Run the legacy CLI with specific notification channels
+devenv shell -- just run-notify "email,ntfy"
 ```
 
 ### Development
 ```bash
-# Format code
-go fmt ./src
+# Format and vet (legacy CLI under ./src)
+devenv shell -- go fmt ./...
+devenv shell -- go vet ./...
 
-# Check for issues
-go vet ./src
+# Run tests when present
+devenv shell -- go test -v ./...
 
-# Run the application with custom options
+# Run the legacy CLI with custom options
 ./bin/finance_tracker --verbose --date-range last_month
 
 # Analyze all account types (not just credit cards)
 ./bin/finance_tracker --all-accounts
-
-# Analyze credit cards only (default behavior)
-./bin/finance_tracker
 ```
 
 ### Testing
-Currently, the project has no test files. When adding tests, use:
+When adding tests, use:
 ```bash
-go test -v ./src
+devenv shell -- go test -v ./...
 ```
 
 ## Architecture

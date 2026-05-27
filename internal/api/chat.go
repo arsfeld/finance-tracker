@@ -201,6 +201,19 @@ var chatTools = []toolDef{
 	{
 		Type: "function",
 		Function: toolDefFunc{
+			Name:        "get_budget_history",
+			Description: "Get budget performance across recent billing periods with improvement proposals. Use when analyzing trends or suggesting budget changes.",
+			Parameters: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"months": map[string]string{"type": "integer", "description": "Number of billing periods to include (default 6, max 12)"},
+				},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: toolDefFunc{
 			Name:        "set_budget",
 			Description: "Create or update a monthly spending budget for a category. Always confirm with the user before calling this.",
 			Parameters: map[string]interface{}{
@@ -238,9 +251,11 @@ When bulk categorizing, group similar merchants together and confirm with the us
 
 You can also view and manage the user's budgets:
 - Use get_budget_status to see current budgets and spending progress
+- Use get_budget_history to analyze budget performance over recent billing periods and review improvement proposals
 - Use set_budget to create or update a budget for a category
 - Use delete_budget to remove a budget
-Always describe what you plan to do and ask for confirmation before modifying or deleting budgets.`
+Always describe what you plan to do and ask for confirmation before modifying or deleting budgets.
+When suggesting budget changes based on history, explain the trend and ask before applying set_budget.`
 
 func (h *ChatHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 2<<20) // 2 MB limit
@@ -377,6 +392,8 @@ func (h *ChatHandler) executeTool(ctx context.Context, name, argsJSON string) st
 		return h.toolGetLatestAnalysis(ctx)
 	case "get_budget_status":
 		return h.toolGetBudgetStatus(ctx)
+	case "get_budget_history":
+		return h.toolGetBudgetHistory(ctx, args)
 	case "set_budget":
 		return h.toolSetBudget(ctx, args)
 	case "delete_budget":
@@ -616,6 +633,60 @@ func (h *ChatHandler) toolGetBudgetStatus(ctx context.Context) string {
 		for _, line := range unbudgeted {
 			b.WriteString(line + "\n")
 		}
+	}
+
+	return b.String()
+}
+
+func (h *ChatHandler) toolGetBudgetHistory(ctx context.Context, args map[string]interface{}) string {
+	months := intArg(args, "months", 6)
+	if months < 1 || months > 12 {
+		months = 6
+	}
+
+	history, err := computeBudgetHistory(ctx, h.budgetStore, h.txnStore, h.cfg.BillingDay, months)
+	if err != nil {
+		return fmt.Sprintf("Error loading budget history: %s", err)
+	}
+	if len(history.Periods) == 0 {
+		return "No budgets set. Set budgets first to analyze historical performance."
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("Budget history for the last %d billing periods (current limits applied to each period):\n\n", len(history.Periods)))
+
+	for _, p := range history.Periods {
+		status := "in progress"
+		if p.IsComplete {
+			status = "complete"
+		}
+		b.WriteString(fmt.Sprintf("## %s (%s)\n", p.Label, status))
+		b.WriteString(fmt.Sprintf("Total: $%.2f spent / $%.2f budget (%.0f%%, %d categories over)\n",
+			p.Summary.TotalSpent, p.Summary.TotalBudget, p.Summary.TotalPercent, p.Summary.OverCount))
+		for _, item := range p.Budgeted {
+			flag := ""
+			if item.Percent >= 100 {
+				flag = " OVER"
+			}
+			b.WriteString(fmt.Sprintf("- %s: $%.2f / $%.2f (%.0f%%)%s\n",
+				item.Category, item.Spent, item.Amount, item.Percent, flag))
+		}
+		b.WriteString("\n")
+	}
+
+	if len(history.Proposals) > 0 {
+		b.WriteString("Improvement proposals:\n")
+		for _, p := range history.Proposals {
+			switch p.Type {
+			case "increase", "decrease":
+				b.WriteString(fmt.Sprintf("- [%s] %s: $%.0f → $%.0f — %s\n",
+					p.Type, p.Category, p.CurrentAmount, p.SuggestedAmount, p.Reason))
+			default:
+				b.WriteString(fmt.Sprintf("- [watch] %s ($%.0f): %s\n", p.Category, p.CurrentAmount, p.Reason))
+			}
+		}
+	} else {
+		b.WriteString("No automatic improvement proposals — budgets appear reasonably aligned with spending.\n")
 	}
 
 	return b.String()

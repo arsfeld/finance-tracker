@@ -107,6 +107,7 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	s.mux.HandleFunc("POST /api/budgets", budgetHandler.Upsert)
 	s.mux.HandleFunc("DELETE /api/budgets/{category}", budgetHandler.Delete)
 	s.mux.HandleFunc("GET /api/budgets/status", budgetHandler.Status)
+	s.mux.HandleFunc("GET /api/budgets/history", budgetHandler.History)
 
 	// Chat
 	chatHandler := api.NewChatHandler(cfg, txnStore, accountStore, catStore, analysisStore, budgetStore, events)

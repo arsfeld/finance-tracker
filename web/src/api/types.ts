@@ -109,6 +109,52 @@ export interface BudgetStatusResponse {
   unbudgeted: UnbudgetedCategory[];
 }
 
+export interface BudgetPeriodSummary {
+  total_budget: number;
+  total_spent: number;
+  total_remaining: number;
+  total_percent: number;
+  over_count: number;
+}
+
+export interface BudgetHistoryPeriod {
+  label: string;
+  start: number;
+  end: number;
+  is_complete: boolean;
+  budgeted: BudgetedCategory[];
+  summary: BudgetPeriodSummary;
+}
+
+export interface BudgetCategoryPeriodValue {
+  label: string;
+  spent: number;
+  percent: number;
+}
+
+export interface BudgetCategoryHistory {
+  category: string;
+  amount: number;
+  avg_spent: number;
+  periods_over: number;
+  periods_under: number;
+  by_period: BudgetCategoryPeriodValue[];
+}
+
+export interface BudgetImprovementProposal {
+  category: string;
+  current_amount: number;
+  suggested_amount: number;
+  type: "increase" | "decrease" | "watch";
+  reason: string;
+}
+
+export interface BudgetHistoryResponse {
+  periods: BudgetHistoryPeriod[];
+  categories: BudgetCategoryHistory[];
+  proposals: BudgetImprovementProposal[];
+}
+
 export interface SimilarMerchantInfo {
   merchant_description: string;
   current_category: string;

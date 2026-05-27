@@ -12,6 +12,7 @@ import type {
   DailyTotalsData,
   TopMerchantsData,
   BudgetStatusResponse,
+  BudgetHistoryResponse,
   TransactionSummary,
 } from "./types";
 
@@ -321,6 +322,15 @@ export function useBudgetStatus() {
   return useQuery({
     queryKey: ["budgets", "status"],
     queryFn: () => fetchApi<BudgetStatusResponse>("/api/budgets/status"),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useBudgetHistory(months = 6) {
+  return useQuery({
+    queryKey: ["budgets", "history", months],
+    queryFn: () =>
+      fetchApi<BudgetHistoryResponse>(`/api/budgets/history?months=${months}`),
     staleTime: 5 * 60 * 1000,
   });
 }

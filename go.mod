@@ -1,6 +1,6 @@
 module finance_tracker
 
-go 1.25.0
+go 1.26.3
 
 require (
 	github.com/gomarkdown/markdown v0.0.0-20250810172220-2e2c11897d1a

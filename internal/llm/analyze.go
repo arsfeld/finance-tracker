@@ -467,3 +467,31 @@ func getLatestTransactionDate(txns []models.DBTransaction) time.Time {
 	}
 	return time.Unix(latest, 0)
 }
+
+// FilterExcludedCategories removes transactions belonging to categories the user
+// has excluded from analysis. Exclusion is independent of the sign of the amount:
+// both legs of an excluded transfer must disappear, otherwise the negative leg
+// would be counted as spending while the positive leg is silently dropped.
+func FilterExcludedCategories(txns []models.DBTransaction, excluded []string) []models.DBTransaction {
+	if len(excluded) == 0 {
+		return txns
+	}
+
+	set := make(map[string]bool, len(excluded))
+	for _, c := range excluded {
+		if c != "" {
+			set[c] = true
+		}
+	}
+	if len(set) == 0 {
+		return txns
+	}
+
+	filtered := make([]models.DBTransaction, 0, len(txns))
+	for _, t := range txns {
+		if !set[t.Category] {
+			filtered = append(filtered, t)
+		}
+	}
+	return filtered
+}

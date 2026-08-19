@@ -13,7 +13,11 @@ import (
 	"finance_tracker/internal/store"
 )
 
-const categorizationSystemPrompt = "You are a financial transaction categorization system. Respond with valid JSON only. Categorize merchants into clear spending categories like Dining, Groceries, Transportation, Entertainment, Subscriptions, Shopping, Healthcare, Utilities, etc."
+const categorizationSystemPrompt = "You are a financial transaction categorization system. Respond with valid JSON only. " +
+	"Categorize merchants into clear spending categories like Dining, Groceries, Transportation, Entertainment, Subscriptions, Shopping, Healthcare, Utilities, etc. " +
+	"Money moving between the user's own accounts is not spending: always use the category \"Payment\" for credit card payments, " +
+	"balance transfers, e-transfers, and similar descriptions (for example \"PAYMENT - THANK YOU\", \"TFR-TO C/C\", \"E-TRANSFER\"). " +
+	"Card fees and interest charges also belong in \"Payment\"."
 
 // CategorizeTransactions identifies uncategorized merchants and calls the LLM to categorize them.
 // Results are persisted in the category store.

@@ -105,16 +105,7 @@ func (h *AnalysisRunHandler) runAnalysis(ctx context.Context) {
 	// Filter out transactions in excluded categories.
 	excludedCats, _ := h.catStore.ExcludedCategoryNames(ctx)
 	if len(excludedCats) > 0 {
-		excluded := make(map[string]bool)
-		for _, c := range excludedCats {
-			excluded[c] = true
-		}
-		var filtered []models.DBTransaction
-		for _, t := range txns {
-			if !excluded[t.Category] {
-				filtered = append(filtered, t)
-			}
-		}
+		filtered := llmclient.FilterExcludedCategories(txns, excludedCats)
 		log.Info().Int("before", len(txns)).Int("after", len(filtered)).Int("excluded_categories", len(excludedCats)).Msg("Filtered excluded categories from analysis")
 		txns = filtered
 	}

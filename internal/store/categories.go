@@ -40,8 +40,11 @@ func (s *CategoryStore) Set(ctx context.Context, merchantDesc, category, source 
 
 func (s *CategoryStore) ListAll(ctx context.Context) ([]models.CategoryEntry, error) {
 	rows, err := s.read.QueryContext(ctx, `
-		SELECT merchant_description, category, source, excluded, updated_at
-		FROM categories ORDER BY category, merchant_description`)
+		SELECT c.merchant_description, c.category, c.source,
+			(e.category IS NOT NULL) AS excluded, c.updated_at
+		FROM categories c
+		LEFT JOIN excluded_categories e ON c.category = e.category
+		ORDER BY c.category, c.merchant_description`)
 	if err != nil {
 		return nil, err
 	}
@@ -67,10 +70,13 @@ type CategoryInfo struct {
 
 func (s *CategoryStore) ListUniqueCategories(ctx context.Context) ([]CategoryInfo, error) {
 	rows, err := s.read.QueryContext(ctx, `
-		SELECT category, MAX(excluded) as excluded, COUNT(*) as count
-		FROM categories
-		GROUP BY category
-		ORDER BY category`)
+		SELECT c.category,
+			(MAX(e.category) IS NOT NULL) AS excluded,
+			COUNT(*) AS count
+		FROM categories c
+		LEFT JOIN excluded_categories e ON c.category = e.category
+		GROUP BY c.category
+		ORDER BY c.category`)
 	if err != nil {
 		return nil, err
 	}
@@ -87,18 +93,25 @@ func (s *CategoryStore) ListUniqueCategories(ctx context.Context) ([]CategoryInf
 	return cats, rows.Err()
 }
 
-// SetCategoryExcluded sets the excluded flag for all merchants in a category.
+// SetCategoryExcluded excludes or re-includes a category in analysis. The
+// exclusion is recorded against the category name, so it keeps applying to
+// merchants that join the category later and never follows a merchant that
+// leaves it.
 func (s *CategoryStore) SetCategoryExcluded(ctx context.Context, category string, excluded bool) error {
-	_, err := s.write.ExecContext(ctx, `
-		UPDATE categories SET excluded = ?, updated_at = datetime('now')
-		WHERE category = ?`, excluded, category)
+	if excluded {
+		_, err := s.write.ExecContext(ctx, `
+			INSERT INTO excluded_categories (category) VALUES (?)
+			ON CONFLICT(category) DO NOTHING`, category)
+		return err
+	}
+	_, err := s.write.ExecContext(ctx, `DELETE FROM excluded_categories WHERE category = ?`, category)
 	return err
 }
 
 // ExcludedCategoryNames returns the list of excluded category names.
 func (s *CategoryStore) ExcludedCategoryNames(ctx context.Context) ([]string, error) {
 	rows, err := s.read.QueryContext(ctx, `
-		SELECT DISTINCT category FROM categories WHERE excluded = 1 ORDER BY category`)
+		SELECT category FROM excluded_categories ORDER BY category`)
 	if err != nil {
 		return nil, err
 	}
@@ -154,10 +167,12 @@ type SimilarMerchantInfo struct {
 // source='llm' and category differs from the target category.
 func (s *CategoryStore) ListCandidatesForSimilarity(ctx context.Context, excludeCategory string) ([]models.CategoryEntry, error) {
 	rows, err := s.read.QueryContext(ctx, `
-		SELECT merchant_description, category, source, excluded, updated_at
-		FROM categories
-		WHERE source = 'llm' AND category != ?
-		ORDER BY merchant_description`, excludeCategory)
+		SELECT c.merchant_description, c.category, c.source,
+			(e.category IS NOT NULL) AS excluded, c.updated_at
+		FROM categories c
+		LEFT JOIN excluded_categories e ON c.category = e.category
+		WHERE c.source = 'llm' AND c.category != ?
+		ORDER BY c.merchant_description`, excludeCategory)
 	if err != nil {
 		return nil, err
 	}
@@ -278,4 +293,15 @@ func (s *CategoryStore) SetOverrideAndMerchant(ctx context.Context, txnID, merch
 	}
 
 	return tx.Commit()
+}
+
+// IsCategoryExcluded reports whether a category is excluded from analysis.
+func (s *CategoryStore) IsCategoryExcluded(ctx context.Context, category string) (bool, error) {
+	var n int
+	err := s.read.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM excluded_categories WHERE category = ?`, category).Scan(&n)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }

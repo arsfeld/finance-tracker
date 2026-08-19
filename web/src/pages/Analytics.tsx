@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useNavigate } from "react-router";
 import {
   useCategoryTrend,
@@ -62,6 +62,10 @@ export default function Analytics() {
     return { chartData, topCategories: cats };
   }, [trendData]);
 
+  // Which stacked area was clicked. The Area sets it, then the chart-level
+  // onClick (which knows the active data index) consumes it.
+  const pendingCategory = useRef<string | null>(null);
+
   // Handle category trend click
   const handleTrendClick = (category: string, dataPoint: Record<string, string | number>) => {
     const params = new URLSearchParams({
@@ -124,7 +128,15 @@ export default function Analytics() {
           ) : trendChartData.length > 0 ? (
             <>
               <ResponsiveContainer width="100%" height={350}>
-                <AreaChart data={trendChartData}>
+                <AreaChart
+                  data={trendChartData}
+                  onClick={(state) => {
+                    const category = pendingCategory.current;
+                    pendingCategory.current = null;
+                    const point = trendChartData[Number(state?.activeIndex)];
+                    if (category && point) handleTrendClick(category, point);
+                  }}
+                >
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="name" />
                   <YAxis />
@@ -139,10 +151,8 @@ export default function Analytics() {
                       stroke={CHART_COLORS[i % CHART_COLORS.length]}
                       fillOpacity={0.6}
                       className="cursor-pointer"
-                      onClick={(_, __, e) => {
-                        if (e && 'activePayload' in e && e.activePayload?.[0]) {
-                          handleTrendClick(cat, e.activePayload[0].payload);
-                        }
+                      onClick={() => {
+                        pendingCategory.current = cat;
                       }}
                     />
                   ))}
@@ -205,7 +215,10 @@ export default function Analytics() {
                       dataKey="total"
                       fill={CHART_COLORS[0]}
                       className="cursor-pointer"
-                      onClick={(entry) => handleMerchantClick(entry.name)}
+                      onClick={(entry) => {
+                        const name = entry.payload?.name;
+                        if (name) handleMerchantClick(name);
+                      }}
                     />
                   </BarChart>
                 </ResponsiveContainer>

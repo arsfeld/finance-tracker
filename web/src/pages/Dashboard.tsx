@@ -149,7 +149,7 @@ export default function Dashboard() {
                     dataKey="total"
                     fill={COLORS[0]}
                     className="cursor-pointer"
-                    onClick={(entry) => handleTrendBarClick(entry)}
+                    onClick={(entry) => handleTrendBarClick(entry.payload)}
                   />
                 </BarChart>
               </ResponsiveContainer>

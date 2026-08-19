@@ -60,10 +60,14 @@ export default function Transactions() {
     }
   }, [debouncedSearch, urlSearch, setSearchParams]);
 
-  // Sync URL search to input when URL changes externally (e.g. browser back)
-  useEffect(() => {
+  // Sync URL search to input when URL changes externally (e.g. browser back).
+  // Adjusting state during render instead of in an effect avoids the extra
+  // cascading render pass. https://react.dev/learn/you-might-not-need-an-effect
+  const [prevUrlSearch, setPrevUrlSearch] = useState(urlSearch);
+  if (urlSearch !== prevUrlSearch) {
+    setPrevUrlSearch(urlSearch);
     setSearchInput(urlSearch);
-  }, [urlSearch]);
+  }
 
   const { data: periods } = useBillingPeriods();
   const { data: uniqueCategories } = useUniqueCategories();

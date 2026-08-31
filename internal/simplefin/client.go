@@ -124,15 +124,11 @@ func (c *Client) fetch(startDate, endDate time.Time) ([]models.Account, []string
 		}
 	}
 
-	// Filter out zero-balance accounts.
-	var filtered []models.Account
-	for _, acct := range accountsResp.Accounts {
-		if float64(acct.Balance) != 0 {
-			filtered = append(filtered, acct)
-		}
-	}
-
-	return filtered, accountsResp.Errors, nil
+	// Every account the bridge returns is kept. A balance of exactly zero is the
+	// normal end state of a paid-off credit card, and discarding it dropped a
+	// whole cycle of transactions with it; is_included is the supported way to
+	// leave an account out.
+	return accountsResp.Accounts, accountsResp.Errors, nil
 }
 
 // ClampToAPILimit returns a start date that is at most 90 days before end.

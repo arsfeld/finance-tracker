@@ -5,6 +5,9 @@ import (
 	"net/http"
 
 	"github.com/rs/zerolog/log"
+
+	"finance_tracker/internal/config"
+	"finance_tracker/internal/notify"
 )
 
 // Response wraps API data responses.
@@ -54,5 +57,19 @@ func WriteDataWithMeta(w http.ResponseWriter, data interface{}, meta *Meta) {
 func WriteError(w http.ResponseWriter, status int, code, message string) {
 	WriteJSON(w, status, ErrorBody{
 		Error: ErrorDetail{Code: code, Message: message},
+	})
+}
+
+// newDispatcher builds a notification dispatcher from the app config. Sync
+// alerts and analysis reports go out the same channels, so the wiring lives in
+// one place.
+func newDispatcher(cfg *config.Config) *notify.Dispatcher {
+	return notify.NewDispatcher(notify.Config{
+		NtfyServer:        cfg.NtfyServer,
+		NtfyTopic:         cfg.NtfyTopic,
+		NtfyWarningSuffix: cfg.NtfyWarningSuffix,
+		MailerURL:         cfg.MailerURL,
+		MailerFrom:        cfg.MailerFrom,
+		MailerTo:          cfg.MailerTo,
 	})
 }

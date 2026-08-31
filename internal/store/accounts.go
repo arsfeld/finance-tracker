@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"finance_tracker/internal/models"
 )
@@ -68,4 +69,38 @@ func (s *AccountStore) GetByID(ctx context.Context, id string) (*models.DBAccoun
 func (s *AccountStore) UpdateInclusion(ctx context.Context, id string, included bool) error {
 	_, err := s.write.ExecContext(ctx, `UPDATE accounts SET is_included = ?, updated_at = datetime('now') WHERE id = ?`, included, id)
 	return err
+}
+
+// StaleConnections returns included accounts whose balance has not been
+// refreshed within maxAge.
+//
+// balance_date is the signal rather than the newest transaction: SimpleFin
+// advances it on every successful refresh, so it freezes the moment a
+// connection needs re-authorization, whereas a card can legitimately go a week
+// without a charge. Excluded accounts are skipped — they are not part of any
+// analysis, so a dead connection on one is not worth an alert.
+func (s *AccountStore) StaleConnections(ctx context.Context, now time.Time, maxAge time.Duration) ([]models.StaleConnection, error) {
+	cutoff := now.Add(-maxAge).Unix()
+
+	rows, err := s.read.QueryContext(ctx, `
+		SELECT a.id, a.name, a.org_name, a.balance_date, COALESCE(MAX(t.posted), 0)
+		FROM accounts a
+		LEFT JOIN transactions t ON t.account_id = a.id
+		WHERE a.is_included = 1 AND a.balance_date < ?
+		GROUP BY a.id
+		ORDER BY a.balance_date`, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stale []models.StaleConnection
+	for rows.Next() {
+		var c models.StaleConnection
+		if err := rows.Scan(&c.ID, &c.Name, &c.OrgName, &c.BalanceDate, &c.LastTransaction); err != nil {
+			return nil, err
+		}
+		stale = append(stale, c)
+	}
+	return stale, rows.Err()
 }

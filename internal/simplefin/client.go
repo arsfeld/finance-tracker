@@ -25,14 +25,14 @@ func NewClient(bridgeURL string) *Client {
 }
 
 // FetchAndStore fetches transactions from SimpleFin and upserts them into the store.
-// Returns (accounts fetched, api errors, fatal error).
-func (c *Client) FetchAndStore(ctx context.Context, startDate, endDate time.Time, accounts *store.AccountStore, transactions *store.TransactionStore) (int, []string, error) {
+// Returns (transactions added, transactions updated, api errors, fatal error).
+func (c *Client) FetchAndStore(ctx context.Context, startDate, endDate time.Time, accounts *store.AccountStore, transactions *store.TransactionStore) (int, int, []string, error) {
 	fetched, apiErrors, err := c.fetch(startDate, endDate)
 	if err != nil {
-		return 0, nil, err
+		return 0, 0, nil, err
 	}
 
-	totalAdded := 0
+	totalAdded, totalUpdated := 0, 0
 	for _, acct := range fetched {
 		orgName := ""
 		if acct.Org.Name != nil {
@@ -57,7 +57,7 @@ func (c *Client) FetchAndStore(ctx context.Context, startDate, endDate time.Time
 			OrgDomain:   orgDomain,
 			IsIncluded:  true,
 		}); err != nil {
-			return 0, apiErrors, fmt.Errorf("upsert account %s: %w", acct.ID, err)
+			return 0, 0, apiErrors, fmt.Errorf("upsert account %s: %w", acct.ID, err)
 		}
 
 		var dbTxns []models.DBTransaction
@@ -78,15 +78,16 @@ func (c *Client) FetchAndStore(ctx context.Context, startDate, endDate time.Time
 		}
 
 		if len(dbTxns) > 0 {
-			added, _, err := transactions.UpsertBatch(ctx, dbTxns)
+			added, updated, err := transactions.UpsertBatch(ctx, dbTxns)
 			if err != nil {
-				return 0, apiErrors, fmt.Errorf("upsert transactions for account %s: %w", acct.ID, err)
+				return 0, 0, apiErrors, fmt.Errorf("upsert transactions for account %s: %w", acct.ID, err)
 			}
 			totalAdded += added
+			totalUpdated += updated
 		}
 	}
 
-	return totalAdded, apiErrors, nil
+	return totalAdded, totalUpdated, apiErrors, nil
 }
 
 func (c *Client) fetch(startDate, endDate time.Time) ([]models.Account, []string, error) {

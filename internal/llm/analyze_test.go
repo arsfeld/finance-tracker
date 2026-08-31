@@ -98,7 +98,7 @@ func TestGeneratePromptTotalExcludesTransfers(t *testing.T) {
 	}
 
 	kept := FilterExcludedCategories(txns, []string{"Payment"})
-	prompt := GeneratePrompt(kept, nil, start, end, day, 15, false)
+	prompt := GeneratePrompt(kept, nil, nil, start, end, day, 15, false)
 
 	if !strings.Contains(prompt, "Total Expenses: $150.00") {
 		t.Errorf("expected total of $150.00 with the transfer excluded; prompt said:\n%s",
@@ -121,7 +121,7 @@ func TestGeneratePromptCountsNonExcludedCharges(t *testing.T) {
 	}
 
 	kept := FilterExcludedCategories(txns, []string{"Payment"})
-	prompt := GeneratePrompt(kept, nil, start, end, day, 15, false)
+	prompt := GeneratePrompt(kept, nil, nil, start, end, day, 15, false)
 
 	if !strings.Contains(prompt, "Total Expenses: $239.00") {
 		t.Errorf("non-excluded charges should count as expenses; prompt said:\n%s", firstLines(prompt, 12))
@@ -143,7 +143,7 @@ func TestGeneratePromptDropsFeesBundledWithPaymentCategory(t *testing.T) {
 	}
 
 	kept := FilterExcludedCategories(txns, []string{"Payment"})
-	prompt := GeneratePrompt(kept, nil, start, end, day, 15, false)
+	prompt := GeneratePrompt(kept, nil, nil, start, end, day, 15, false)
 
 	if !strings.Contains(prompt, "Total Expenses: $100.00") {
 		t.Errorf("expected fees to be dropped with the Payment category; prompt said:\n%s",
@@ -157,4 +157,51 @@ func firstLines(s string, n int) string {
 		lines = lines[:n]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// A quiet card and a de-authorized bank connection look identical if you only
+// check the newest transaction across all accounts. Regression test: the TD
+// connection broke on Aug 21, the analysis kept reporting falling spend, and
+// the only hint was a generic lag line that named no account.
+func TestGeneratePromptNamesAccountsThatStoppedRefreshing(t *testing.T) {
+	start := time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+
+	txns := []models.DBTransaction{
+		txn("t1", "METRO BLANCHARD ST ALP", -100.00, "Groceries", time.Date(2026, 7, 22, 9, 0, 0, 0, time.UTC)),
+	}
+	stale := []models.StaleConnection{{
+		Name:            "TD AEROPLAN VISA INFINITE (4520)",
+		OrgName:         "TD Canada Trust",
+		BalanceDate:     time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC).Unix(),
+		LastTransaction: time.Date(2026, 7, 22, 9, 0, 0, 0, time.UTC).Unix(),
+	}}
+
+	prompt := GeneratePrompt(txns, nil, stale, start, end, now, 15, false)
+
+	if !strings.Contains(prompt, "DATA LAG") {
+		t.Errorf("a stale connection must raise the data lag warning; prompt said:\n%s", firstLines(prompt, 14))
+	}
+	if !strings.Contains(prompt, "TD AEROPLAN VISA INFINITE (4520)") {
+		t.Errorf("the warning must name the account that stopped refreshing; prompt said:\n%s", firstLines(prompt, 14))
+	}
+}
+
+// Spending really can be low. With every connection refreshing, a gap since the
+// last charge is real data and must not be explained away as a lag.
+func TestGeneratePromptOmitsLagWarningWhenConnectionsAreHealthy(t *testing.T) {
+	start := time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+
+	txns := []models.DBTransaction{
+		txn("t1", "METRO BLANCHARD ST ALP", -100.00, "Groceries", time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)),
+	}
+
+	prompt := GeneratePrompt(txns, nil, nil, start, end, now, 15, false)
+
+	if strings.Contains(prompt, "DATA LAG") {
+		t.Errorf("no connection is stale, so there is no lag to warn about; prompt said:\n%s", firstLines(prompt, 14))
+	}
 }

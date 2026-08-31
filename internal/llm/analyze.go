@@ -22,23 +22,14 @@ Be concise, specific, and use the pre-calculated data provided — do not recalc
 func GeneratePrompt(
 	transactions []models.DBTransaction,
 	accounts []models.DBAccount,
+	stale []models.StaleConnection,
 	startDate, endDate time.Time,
 	now time.Time,
 	billingDay int,
 	isMultiPeriod bool,
 	budgets ...models.Budget,
 ) string {
-	// Find latest transaction date to check for lag.
-	latestTxnDate := getLatestTransactionDate(transactions)
-	var dataLagWarning string
-	if !latestTxnDate.IsZero() {
-		lag := now.Sub(latestTxnDate)
-		if lag > 72*time.Hour { // More than 3 days
-			days := int(lag.Hours() / 24)
-			dataLagWarning = fmt.Sprintf("\n> [!WARNING]\n> **DATA LAG DETECTED**: The most recent transaction is from %s (%d days ago). Analysis for the current period is based on INCOMPLETE data. Do not congratulate the user on low spending if it is likely due to this lag.\n",
-				latestTxnDate.Format("Jan 2, 2006"), days)
-		}
-	}
+	dataLagWarning := buildDataLagWarning(stale, now)
 	// Filter to expenses only.
 	var expenses []models.DBTransaction
 	for _, t := range transactions {
@@ -451,23 +442,6 @@ func calcPeriodTotals(txns []models.DBTransaction, periods []models.BillingPerio
 	return totals
 }
 
-func getLatestTransactionDate(txns []models.DBTransaction) time.Time {
-	var latest int64
-	for _, t := range txns {
-		ts := t.Posted
-		if t.TransactedAt != nil {
-			ts = *t.TransactedAt
-		}
-		if ts > latest {
-			latest = ts
-		}
-	}
-	if latest == 0 {
-		return time.Time{}
-	}
-	return time.Unix(latest, 0)
-}
-
 // FilterExcludedCategories removes transactions belonging to categories the user
 // has excluded from analysis. Exclusion is independent of the sign of the amount:
 // both legs of an excluded transfer must disappear, otherwise the negative leg
@@ -494,4 +468,47 @@ func FilterExcludedCategories(txns []models.DBTransaction, excluded []string) []
 		}
 	}
 	return filtered
+}
+
+// buildDataLagWarning describes the accounts whose bank connection has stopped
+// refreshing, so the model can tell missing data from a genuinely quiet month.
+//
+// The trigger is the connection, not the transaction feed. A gap since the last
+// charge means nothing on its own — a card can go a fortnight without a
+// purchase — and a global "newest transaction" check stays silent as long as
+// any one account is still live, which is exactly how five dead accounts went
+// unnoticed for months.
+func buildDataLagWarning(stale []models.StaleConnection, now time.Time) string {
+	if len(stale) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("\n> [!WARNING]\n> **DATA LAG DETECTED**: ")
+	b.WriteString(fmt.Sprintf("%d account(s) have stopped syncing, so this analysis is based on INCOMPLETE data. ", len(stale)))
+	b.WriteString("Do not congratulate the user on low spending, and do not read a downward trend into it.\n")
+
+	for _, c := range stale {
+		lastSync := time.Unix(c.BalanceDate, 0).UTC()
+		line := fmt.Sprintf("> - **%s** (%s): last refreshed %s (%d days ago)",
+			c.Name, c.OrgName, lastSync.Format("Jan 2, 2006"), daysBetween(lastSync, now))
+		if c.LastTransaction > 0 {
+			lastTxn := time.Unix(c.LastTransaction, 0).UTC()
+			line += fmt.Sprintf("; newest transaction %s (%d days ago)",
+				lastTxn.Format("Jan 2, 2006"), daysBetween(lastTxn, now))
+		} else {
+			line += "; no transactions on record"
+		}
+		b.WriteString(line + "\n")
+	}
+
+	return b.String()
+}
+
+func daysBetween(from, to time.Time) int {
+	d := int(to.Sub(from).Hours() / 24)
+	if d < 0 {
+		return 0
+	}
+	return d
 }

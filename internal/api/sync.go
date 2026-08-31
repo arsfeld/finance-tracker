@@ -11,6 +11,7 @@ import (
 
 	"finance_tracker/internal/config"
 	llmclient "finance_tracker/internal/llm"
+	"finance_tracker/internal/notify"
 	"finance_tracker/internal/scheduler"
 	"finance_tracker/internal/simplefin"
 	"finance_tracker/internal/store"
@@ -74,7 +75,7 @@ func (h *SyncHandler) runSync(ctx context.Context) {
 	end := time.Now().UTC()
 	start := simplefin.ClampToAPILimit(end.AddDate(0, -3, 0), end)
 
-	txnAdded, apiErrors, err := client.FetchAndStore(ctx, start, end, h.accounts, h.txns)
+	txnAdded, txnUpdated, apiErrors, err := client.FetchAndStore(ctx, start, end, h.accounts, h.txns)
 	if err != nil {
 		apiErrJSON, _ := json.Marshal(apiErrors)
 		h.syncLog.Complete(ctx, logID, "error", 0, 0, err.Error(), string(apiErrJSON))
@@ -88,14 +89,51 @@ func (h *SyncHandler) runSync(ctx context.Context) {
 	}
 
 	apiErrJSON, _ := json.Marshal(apiErrors)
-	h.syncLog.Complete(ctx, logID, status, txnAdded, 0, "", string(apiErrJSON))
+	h.syncLog.Complete(ctx, logID, status, txnAdded, txnUpdated, "", string(apiErrJSON))
 	h.events.Broadcast("sync_complete", `{"status":"`+status+`","transactions":`+
 		fmt.Sprintf("%d", txnAdded)+`}`)
 
-	log.Info().Int("transactions", txnAdded).Int("api_errors", len(apiErrors)).Msg("Sync complete")
+	log.Info().
+		Int("added", txnAdded).Int("updated", txnUpdated).
+		Int("api_errors", len(apiErrors)).Msg("Sync complete")
+
+	h.alertOnStaleConnections(ctx, end, apiErrors)
 
 	// Run categorization on fetched transactions.
 	h.runCategorization(ctx, start, end)
+}
+
+// StaleConnectionThreshold is how long an included account may go without a
+// balance refresh before it is treated as a broken connection. SimpleFin
+// refreshes balances on every successful sync, so three days spans a missed
+// sync without crying wolf over a quiet card.
+const StaleConnectionThreshold = 72 * time.Hour
+
+// alertOnStaleConnections notifies when an included account has stopped syncing.
+//
+// This runs after the upserts so balance dates are current. Without it a
+// de-authorized connection is recorded only as a "partial" row in sync_log,
+// which is how the TD card went ten days unnoticed while every report showed
+// spending falling.
+func (h *SyncHandler) alertOnStaleConnections(ctx context.Context, now time.Time, apiErrors []string) {
+	stale, err := h.accounts.StaleConnections(ctx, now, StaleConnectionThreshold)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to check for stale connections")
+		return
+	}
+
+	message := notify.StaleConnectionAlert(stale, apiErrors, now)
+	if message == "" {
+		return
+	}
+
+	log.Warn().Int("stale_accounts", len(stale)).Msg("Accounts have stopped syncing")
+	h.events.Broadcast("sync_stale", `{"stale":`+fmt.Sprintf("%d", len(stale))+`}`)
+
+	dispatcher := newDispatcher(h.cfg)
+	if _, err := dispatcher.Send(message, nil, "warning"); err != nil {
+		log.Error().Err(err).Msg("Failed to send stale connection alert")
+	}
 }
 
 func (h *SyncHandler) runCategorization(ctx context.Context, start, end time.Time) {

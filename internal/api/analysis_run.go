@@ -12,7 +12,6 @@ import (
 	"finance_tracker/internal/config"
 	llmclient "finance_tracker/internal/llm"
 	"finance_tracker/internal/models"
-	"finance_tracker/internal/notify"
 	"finance_tracker/internal/scheduler"
 	"finance_tracker/internal/store"
 )
@@ -113,8 +112,16 @@ func (h *AnalysisRunHandler) runAnalysis(ctx context.Context) {
 	// Load budgets for prompt context.
 	budgets, _ := h.budgetStore.GetAll(ctx)
 
+	// A report built on a dead connection reads as a spending drop, so the model
+	// is told which accounts stopped syncing before it interprets the numbers.
+	now := time.Now().UTC()
+	stale, err := h.acctStore.StaleConnections(ctx, now, StaleConnectionThreshold)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to check for stale connections")
+	}
+
 	// Build prompt.
-	prompt := llmclient.GeneratePrompt(txns, accounts, startDate, endDate, time.Now().UTC(), billingDay, true, budgets...)
+	prompt := llmclient.GeneratePrompt(txns, accounts, stale, startDate, endDate, now, billingDay, true, budgets...)
 
 	if h.cfg.OpenRouterURL == "" || h.cfg.OpenRouterAPIKey == "" || h.cfg.OpenRouterModel == "" {
 		log.Error().Msg("OpenRouter not configured")
@@ -166,14 +173,7 @@ func (h *AnalysisRunHandler) runAnalysis(ctx context.Context) {
 }
 
 func (h *AnalysisRunHandler) sendNotifications(message string, txns []models.DBTransaction) {
-	dispatcher := notify.NewDispatcher(notify.Config{
-		NtfyServer:        h.cfg.NtfyServer,
-		NtfyTopic:         h.cfg.NtfyTopic,
-		NtfyWarningSuffix: h.cfg.NtfyWarningSuffix,
-		MailerURL:         h.cfg.MailerURL,
-		MailerFrom:        h.cfg.MailerFrom,
-		MailerTo:          h.cfg.MailerTo,
-	})
+	dispatcher := newDispatcher(h.cfg)
 
 	channels, err := dispatcher.Send(message, txns, "info")
 	if err != nil {

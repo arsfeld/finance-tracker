@@ -186,3 +186,14 @@ type TransactionCategory struct {
 type CategorizationResponse struct {
 	Categories []TransactionCategory `json:"categories"`
 }
+
+// StaleConnection describes an included account whose bank connection has
+// stopped refreshing at the source. Both the sync alert and the analysis prompt
+// are built from it, so the rule for "stale" lives in exactly one place.
+type StaleConnection struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	OrgName         string `json:"org_name"`
+	BalanceDate     int64  `json:"balance_date"`
+	LastTransaction int64  `json:"last_transaction"` // 0 when the account has no transactions
+}

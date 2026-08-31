@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -27,6 +28,19 @@ func (s *TransactionStore) UpsertBatch(ctx context.Context, txns []models.DBTran
 	}
 	defer tx.Rollback()
 
+	// SQLite reports one row affected for an upsert whether it inserted or
+	// updated, so the row has to be looked up before it is written to tell the
+	// two apart.
+	exists, err := tx.PrepareContext(ctx, `SELECT 1 FROM transactions WHERE id = ?`)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer exists.Close()
+
+	// The DO UPDATE is guarded so re-fetching an unchanged row reports zero rows
+	// affected. Without the guard every sync rewrites its whole window and
+	// reports the window size as activity, which hides a feed that has stopped
+	// returning anything new.
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO transactions (id, account_id, description, amount, posted, transacted_at, pending, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
@@ -36,23 +50,44 @@ func (s *TransactionStore) UpsertBatch(ctx context.Context, txns []models.DBTran
 			posted = excluded.posted,
 			transacted_at = excluded.transacted_at,
 			pending = excluded.pending,
-			updated_at = datetime('now')`)
+			updated_at = datetime('now')
+		WHERE transactions.description IS NOT excluded.description
+			OR transactions.amount IS NOT excluded.amount
+			OR transactions.posted IS NOT excluded.posted
+			OR transactions.transacted_at IS NOT excluded.transacted_at
+			OR transactions.pending IS NOT excluded.pending`)
 	if err != nil {
 		return 0, 0, err
 	}
 	defer stmt.Close()
 
 	added, updated := 0, 0
+	seen := make(map[string]bool, len(txns))
 	for _, t := range txns {
+		isNew := false
+		if !seen[t.ID] {
+			var one int
+			err := exists.QueryRowContext(ctx, t.ID).Scan(&one)
+			switch {
+			case errors.Is(err, sql.ErrNoRows):
+				isNew = true
+			case err != nil:
+				return added, updated, err
+			}
+			seen[t.ID] = true
+		}
+
 		res, err := stmt.ExecContext(ctx, t.ID, t.AccountID, t.Description, t.Amount, t.Posted, t.TransactedAt, t.Pending)
 		if err != nil {
 			return added, updated, err
 		}
 		rows, _ := res.RowsAffected()
-		if rows > 0 {
-			// SQLite: ON CONFLICT DO UPDATE always reports 1 row affected whether insert or update.
-			// We check if the row existed before to distinguish.
+
+		switch {
+		case isNew:
 			added++
+		case rows > 0:
+			updated++
 		}
 	}
 

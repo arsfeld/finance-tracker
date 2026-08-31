@@ -109,7 +109,7 @@ func (h *SyncHandler) runSync(ctx context.Context) {
 // sync without crying wolf over a quiet card.
 const StaleConnectionThreshold = 72 * time.Hour
 
-// alertOnStaleConnections notifies when an included account has stopped syncing.
+// alertOnStaleConnections notifies when an included account is not reporting in full.
 //
 // This runs after the upserts so balance dates are current. Without it a
 // de-authorized connection is recorded only as a "partial" row in sync_log,
@@ -122,13 +122,22 @@ func (h *SyncHandler) alertOnStaleConnections(ctx context.Context, now time.Time
 		return
 	}
 
-	message := notify.StaleConnectionAlert(stale, apiErrors, now)
+	drifted, err := h.accounts.UnreconciledAccounts(ctx, h.cfg.BalanceDriftThreshold)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to reconcile account balances")
+		return
+	}
+
+	message := notify.SyncHealthAlert(stale, drifted, apiErrors, now)
 	if message == "" {
 		return
 	}
 
-	log.Warn().Int("stale_accounts", len(stale)).Msg("Accounts have stopped syncing")
-	h.events.Broadcast("sync_stale", `{"stale":`+fmt.Sprintf("%d", len(stale))+`}`)
+	log.Warn().
+		Int("stale_accounts", len(stale)).
+		Int("unreconciled_accounts", len(drifted)).
+		Msg("Accounts are not reporting in full")
+	h.events.Broadcast("sync_stale", fmt.Sprintf(`{"stale":%d,"unreconciled":%d}`, len(stale), len(drifted)))
 
 	dispatcher := newDispatcher(h.cfg)
 	if _, err := dispatcher.Send(message, nil, "warning"); err != nil {

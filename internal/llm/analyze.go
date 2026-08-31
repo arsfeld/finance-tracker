@@ -23,13 +23,14 @@ func GeneratePrompt(
 	transactions []models.DBTransaction,
 	accounts []models.DBAccount,
 	stale []models.StaleConnection,
+	drifted []models.UnreconciledAccount,
 	startDate, endDate time.Time,
 	now time.Time,
 	billingDay int,
 	isMultiPeriod bool,
 	budgets ...models.Budget,
 ) string {
-	dataLagWarning := buildDataLagWarning(stale, now)
+	dataLagWarning := buildDataLagWarning(stale, drifted, now)
 	// Filter to expenses only.
 	var expenses []models.DBTransaction
 	for _, t := range transactions {
@@ -478,14 +479,14 @@ func FilterExcludedCategories(txns []models.DBTransaction, excluded []string) []
 // purchase — and a global "newest transaction" check stays silent as long as
 // any one account is still live, which is exactly how five dead accounts went
 // unnoticed for months.
-func buildDataLagWarning(stale []models.StaleConnection, now time.Time) string {
-	if len(stale) == 0 {
+func buildDataLagWarning(stale []models.StaleConnection, drifted []models.UnreconciledAccount, now time.Time) string {
+	if len(stale) == 0 && len(drifted) == 0 {
 		return ""
 	}
 
 	var b strings.Builder
 	b.WriteString("\n> [!WARNING]\n> **DATA LAG DETECTED**: ")
-	b.WriteString(fmt.Sprintf("%d account(s) have stopped syncing, so this analysis is based on INCOMPLETE data. ", len(stale)))
+	b.WriteString(fmt.Sprintf("%d account(s) are not reporting in full, so this analysis is based on INCOMPLETE data. ", len(stale)+len(drifted)))
 	b.WriteString("Do not congratulate the user on low spending, and do not read a downward trend into it.\n")
 
 	for _, c := range stale {
@@ -500,6 +501,11 @@ func buildDataLagWarning(stale []models.StaleConnection, now time.Time) string {
 			line += "; no transactions on record"
 		}
 		b.WriteString(line + "\n")
+	}
+
+	for _, u := range drifted {
+		fmt.Fprintf(&b, "> - **%s** (%s): still syncing, but its balance has moved $%.2f more than its transactions account for, so that spending is missing from this report\n",
+			u.Name, u.OrgName, math.Abs(u.Unexplained))
 	}
 
 	return b.String()

@@ -111,3 +111,152 @@ func TestStaleConnectionsReportsLastTransactionDate(t *testing.T) {
 		t.Errorf("want last transaction %d, got %d", lastTxn.Unix(), got.LastTransaction)
 	}
 }
+
+// A connection that refreshes balances but stops delivering transactions looks
+// perfectly healthy: balance_date stays current, so the staleness check is
+// quiet, while spending quietly vanishes from every report. Regression test:
+// the TD card's balance moved $1,876.50 with no transaction to explain it.
+func TestUnreconciledAccountsFlagsBalanceMovesWithNoTransactions(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	accts := NewAccountStore(db.Read, db.Write)
+	anchor := time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)
+
+	// First sight of the account fixes the anchor at -10,247.84.
+	seedAccountFull(t, accts, models.DBAccount{
+		ID: "ACT-td", Name: "TD AEROPLAN VISA INFINITE (4520)", OrgName: "TD Canada Trust",
+		Balance: -10247.84, BalanceDate: anchor.Unix(), IsIncluded: true,
+	})
+
+	// Ten days later the balance has moved but no transactions arrived.
+	seedAccountFull(t, accts, models.DBAccount{
+		ID: "ACT-td", Name: "TD AEROPLAN VISA INFINITE (4520)", OrgName: "TD Canada Trust",
+		Balance: -12124.34, BalanceDate: anchor.AddDate(0, 0, 10).Unix(), IsIncluded: true,
+	})
+
+	drifted, err := accts.UnreconciledAccounts(ctx, 250)
+	if err != nil {
+		t.Fatalf("unreconciled accounts: %v", err)
+	}
+	if len(drifted) != 1 {
+		t.Fatalf("an unexplained $1,876.50 move must be flagged; got %+v", drifted)
+	}
+	if got := drifted[0].Unexplained; got > -1876.0 || got < -1877.0 {
+		t.Errorf("want roughly -1876.50 unexplained, got %.2f", got)
+	}
+}
+
+// When the transactions do arrive, they must account for the move and close the
+// gap rather than leaving a permanent complaint.
+func TestUnreconciledAccountsQuietWhenTransactionsExplainTheMove(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	accts := NewAccountStore(db.Read, db.Write)
+	txns := NewTransactionStore(db.Read, db.Write)
+	anchor := time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)
+
+	seedAccountFull(t, accts, models.DBAccount{
+		ID: "ACT-td", Name: "TD AEROPLAN VISA INFINITE (4520)",
+		Balance: -10247.84, BalanceDate: anchor.Unix(), IsIncluded: true,
+	})
+	seedAccountFull(t, accts, models.DBAccount{
+		ID: "ACT-td", Name: "TD AEROPLAN VISA INFINITE (4520)",
+		Balance: -12124.34, BalanceDate: anchor.AddDate(0, 0, 10).Unix(), IsIncluded: true,
+	})
+	if _, _, err := txns.UpsertBatch(ctx, []models.DBTransaction{
+		{ID: "t1", AccountID: "ACT-td", Description: "COSTCO", Amount: -1876.50,
+			Posted: anchor.AddDate(0, 0, 5).Unix()},
+	}); err != nil {
+		t.Fatalf("seed transaction: %v", err)
+	}
+
+	drifted, err := accts.UnreconciledAccounts(ctx, 250)
+	if err != nil {
+		t.Fatalf("unreconciled accounts: %v", err)
+	}
+	if len(drifted) != 0 {
+		t.Errorf("the transaction explains the move, so nothing is unreconciled; got %+v", drifted)
+	}
+}
+
+// Transactions delivered late carry a posted date at or before the anchor. They
+// were already priced into the anchor balance, so counting them would invent a
+// discrepancy the moment a backfill lands.
+func TestUnreconciledAccountsIgnoresTransactionsBeforeTheAnchor(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	accts := NewAccountStore(db.Read, db.Write)
+	txns := NewTransactionStore(db.Read, db.Write)
+	anchor := time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC)
+
+	seedAccountFull(t, accts, models.DBAccount{
+		ID: "ACT-td", Name: "TD AEROPLAN VISA INFINITE (4520)",
+		Balance: -12124.34, BalanceDate: anchor.Unix(), IsIncluded: true,
+	})
+	// A month of backfill finally arrives, all of it predating the anchor.
+	if _, _, err := txns.UpsertBatch(ctx, []models.DBTransaction{
+		{ID: "t1", AccountID: "ACT-td", Description: "BACKFILL", Amount: -1876.50,
+			Posted: anchor.AddDate(0, 0, -14).Unix()},
+	}); err != nil {
+		t.Fatalf("seed backfill: %v", err)
+	}
+
+	drifted, err := accts.UnreconciledAccounts(ctx, 250)
+	if err != nil {
+		t.Fatalf("unreconciled accounts: %v", err)
+	}
+	if len(drifted) != 0 {
+		t.Errorf("backfill predating the anchor must not create drift; got %+v", drifted)
+	}
+}
+
+// Small gaps are the normal lag between a charge hitting the balance and
+// posting, and they close on their own. Only a material gap is worth reporting.
+func TestUnreconciledAccountsIgnoresGapsUnderThreshold(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	accts := NewAccountStore(db.Read, db.Write)
+	anchor := time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)
+
+	seedAccountFull(t, accts, models.DBAccount{
+		ID: "ACT-td", Name: "TD AEROPLAN VISA INFINITE (4520)",
+		Balance: -100.00, BalanceDate: anchor.Unix(), IsIncluded: true,
+	})
+	seedAccountFull(t, accts, models.DBAccount{
+		ID: "ACT-td", Name: "TD AEROPLAN VISA INFINITE (4520)",
+		Balance: -140.00, BalanceDate: anchor.AddDate(0, 0, 1).Unix(), IsIncluded: true,
+	})
+
+	drifted, err := accts.UnreconciledAccounts(ctx, 250)
+	if err != nil {
+		t.Fatalf("unreconciled accounts: %v", err)
+	}
+	if len(drifted) != 0 {
+		t.Errorf("a $40 gap is pending-charge lag, not a fault; got %+v", drifted)
+	}
+}
+
+// An excluded account is not analyzed, so its drift is nobody's problem.
+func TestUnreconciledAccountsIgnoresExcludedAccounts(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	accts := NewAccountStore(db.Read, db.Write)
+	anchor := time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)
+
+	seedAccountFull(t, accts, models.DBAccount{
+		ID: "ACT-x", Name: "Tangerine Chequing Account (2106)",
+		Balance: -100.00, BalanceDate: anchor.Unix(), IsIncluded: false,
+	})
+	seedAccountFull(t, accts, models.DBAccount{
+		ID: "ACT-x", Name: "Tangerine Chequing Account (2106)",
+		Balance: -9000.00, BalanceDate: anchor.AddDate(0, 0, 1).Unix(), IsIncluded: false,
+	})
+
+	drifted, err := accts.UnreconciledAccounts(ctx, 250)
+	if err != nil {
+		t.Fatalf("unreconciled accounts: %v", err)
+	}
+	if len(drifted) != 0 {
+		t.Errorf("excluded accounts must stay quiet; got %+v", drifted)
+	}
+}

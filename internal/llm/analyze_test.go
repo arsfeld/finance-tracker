@@ -98,7 +98,7 @@ func TestGeneratePromptTotalExcludesTransfers(t *testing.T) {
 	}
 
 	kept := FilterExcludedCategories(txns, []string{"Payment"})
-	prompt := GeneratePrompt(kept, nil, nil, start, end, day, 15, false)
+	prompt := GeneratePrompt(kept, nil, nil, nil, start, end, day, 15, false)
 
 	if !strings.Contains(prompt, "Total Expenses: $150.00") {
 		t.Errorf("expected total of $150.00 with the transfer excluded; prompt said:\n%s",
@@ -121,7 +121,7 @@ func TestGeneratePromptCountsNonExcludedCharges(t *testing.T) {
 	}
 
 	kept := FilterExcludedCategories(txns, []string{"Payment"})
-	prompt := GeneratePrompt(kept, nil, nil, start, end, day, 15, false)
+	prompt := GeneratePrompt(kept, nil, nil, nil, start, end, day, 15, false)
 
 	if !strings.Contains(prompt, "Total Expenses: $239.00") {
 		t.Errorf("non-excluded charges should count as expenses; prompt said:\n%s", firstLines(prompt, 12))
@@ -143,7 +143,7 @@ func TestGeneratePromptDropsFeesBundledWithPaymentCategory(t *testing.T) {
 	}
 
 	kept := FilterExcludedCategories(txns, []string{"Payment"})
-	prompt := GeneratePrompt(kept, nil, nil, start, end, day, 15, false)
+	prompt := GeneratePrompt(kept, nil, nil, nil, start, end, day, 15, false)
 
 	if !strings.Contains(prompt, "Total Expenses: $100.00") {
 		t.Errorf("expected fees to be dropped with the Payment category; prompt said:\n%s",
@@ -178,7 +178,7 @@ func TestGeneratePromptNamesAccountsThatStoppedRefreshing(t *testing.T) {
 		LastTransaction: time.Date(2026, 7, 22, 9, 0, 0, 0, time.UTC).Unix(),
 	}}
 
-	prompt := GeneratePrompt(txns, nil, stale, start, end, now, 15, false)
+	prompt := GeneratePrompt(txns, nil, stale, nil, start, end, now, 15, false)
 
 	if !strings.Contains(prompt, "DATA LAG") {
 		t.Errorf("a stale connection must raise the data lag warning; prompt said:\n%s", firstLines(prompt, 14))
@@ -199,9 +199,35 @@ func TestGeneratePromptOmitsLagWarningWhenConnectionsAreHealthy(t *testing.T) {
 		txn("t1", "METRO BLANCHARD ST ALP", -100.00, "Groceries", time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)),
 	}
 
-	prompt := GeneratePrompt(txns, nil, nil, start, end, now, 15, false)
+	prompt := GeneratePrompt(txns, nil, nil, nil, start, end, now, 15, false)
 
 	if strings.Contains(prompt, "DATA LAG") {
 		t.Errorf("no connection is stale, so there is no lag to warn about; prompt said:\n%s", firstLines(prompt, 14))
+	}
+}
+
+// The model must not read a healthy connection's missing transactions as a
+// spending drop. This is the case that survived the staleness fix: balance_date
+// current, transactions absent.
+func TestGeneratePromptWarnsOnUnexplainedBalanceMovement(t *testing.T) {
+	start := time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+
+	txns := []models.DBTransaction{
+		txn("t1", "METRO BLANCHARD ST ALP", -100.00, "Groceries", time.Date(2026, 7, 22, 9, 0, 0, 0, time.UTC)),
+	}
+	drifted := []models.UnreconciledAccount{{
+		Name: "TD AEROPLAN VISA INFINITE (4520)", OrgName: "TD Canada Trust",
+		Balance: -12124.34, BalanceDate: now.Unix(), Unexplained: -1876.50,
+	}}
+
+	prompt := GeneratePrompt(txns, nil, nil, drifted, start, end, now, 15, false)
+
+	if !strings.Contains(prompt, "DATA LAG") {
+		t.Errorf("unexplained balance movement must raise the warning; prompt said:\n%s", firstLines(prompt, 16))
+	}
+	if !strings.Contains(prompt, "TD AEROPLAN VISA INFINITE (4520)") {
+		t.Errorf("the warning must name the drifted account; prompt said:\n%s", firstLines(prompt, 16))
 	}
 }

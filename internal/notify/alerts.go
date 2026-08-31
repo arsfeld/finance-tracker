@@ -8,22 +8,32 @@ import (
 	"finance_tracker/internal/models"
 )
 
-// StaleConnectionAlert renders the warning sent when an included account has
-// stopped syncing. It returns "" when there is nothing to report, which is the
-// caller's signal to stay quiet.
+// SyncHealthAlert renders the warning sent when an included account is not
+// reporting properly. It returns "" when there is nothing to report, which is
+// the caller's signal to stay quiet.
 //
-// The trigger is a stale account rather than the presence of API errors: the
-// bridge attaches a 45-day range advisory to every single response, so alerting
-// on errors alone would fire on every sync forever. The errors are still
-// included, because they carry the reason ("Auth required") the account went
-// stale.
-func StaleConnectionAlert(stale []models.StaleConnection, apiErrors []string, now time.Time) string {
-	if len(stale) == 0 {
+// Two distinct faults produce the same symptom of spending that reads too low,
+// and both are covered here. An account goes stale when the connection stops
+// refreshing at all. An account goes unreconciled when the connection keeps
+// refreshing balances but stops delivering transactions — which the staleness
+// check cannot see, because balance_date stays current throughout.
+//
+// The trigger is one of those two conditions rather than the presence of API
+// errors: the bridge attaches a 45-day range advisory to every single response,
+// so alerting on errors alone would fire on every sync forever. The errors are
+// still quoted, because they carry the reason ("Auth required").
+func SyncHealthAlert(
+	stale []models.StaleConnection,
+	drifted []models.UnreconciledAccount,
+	apiErrors []string,
+	now time.Time,
+) string {
+	if len(stale) == 0 && len(drifted) == 0 {
 		return ""
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d account(s) stopped syncing\n\n", len(stale))
+	b.WriteString(headline(stale, drifted) + "\n\n")
 
 	for _, c := range stale {
 		lastSync := time.Unix(c.BalanceDate, 0).UTC()
@@ -38,6 +48,11 @@ func StaleConnectionAlert(stale []models.StaleConnection, apiErrors []string, no
 		}
 	}
 
+	for _, u := range drifted {
+		fmt.Fprintf(&b, "- %s (%s): balance %.2f has moved %.2f more than its transactions account for\n",
+			u.Name, u.OrgName, u.Balance, u.Unexplained)
+	}
+
 	if reasons := connectionErrors(apiErrors); len(reasons) > 0 {
 		b.WriteString("\nSimpleFin reported:\n")
 		for _, e := range reasons {
@@ -45,8 +60,22 @@ func StaleConnectionAlert(stale []models.StaleConnection, apiErrors []string, no
 		}
 	}
 
-	b.WriteString("\nSpending totals will read low until these connections are re-authorized.")
+	b.WriteString("\nSpending totals will read low until these accounts report in full.")
 	return b.String()
+}
+
+// headline names the dominant fault so the first line of the push notification
+// says what is actually wrong.
+func headline(stale []models.StaleConnection, drifted []models.UnreconciledAccount) string {
+	switch {
+	case len(stale) > 0 && len(drifted) > 0:
+		return fmt.Sprintf("%d account(s) stopped syncing, %d reporting incomplete transactions",
+			len(stale), len(drifted))
+	case len(stale) > 0:
+		return fmt.Sprintf("%d account(s) stopped syncing", len(stale))
+	default:
+		return fmt.Sprintf("%d account(s) reporting incomplete transactions", len(drifted))
+	}
 }
 
 // connectionErrors keeps the API errors that describe a connection and drops

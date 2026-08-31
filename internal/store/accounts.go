@@ -19,8 +19,9 @@ func NewAccountStore(read, write *sql.DB) *AccountStore {
 
 func (s *AccountStore) Upsert(ctx context.Context, acct models.DBAccount) error {
 	_, err := s.write.ExecContext(ctx, `
-		INSERT INTO accounts (id, name, balance, balance_date, currency, org_name, org_domain, is_included, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+		INSERT INTO accounts (id, name, balance, balance_date, currency, org_name, org_domain, is_included,
+			anchor_balance, anchor_balance_date, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			balance = excluded.balance,
@@ -30,6 +31,7 @@ func (s *AccountStore) Upsert(ctx context.Context, acct models.DBAccount) error 
 			org_domain = excluded.org_domain,
 			updated_at = datetime('now')`,
 		acct.ID, acct.Name, acct.Balance, acct.BalanceDate, acct.Currency, acct.OrgName, acct.OrgDomain, acct.IsIncluded,
+		acct.Balance, acct.BalanceDate,
 	)
 	return err
 }
@@ -103,4 +105,47 @@ func (s *AccountStore) StaleConnections(ctx context.Context, now time.Time, maxA
 		stale = append(stale, c)
 	}
 	return stale, rows.Err()
+}
+
+// UnreconciledAccounts returns included accounts whose balance has drifted from
+// what their transactions account for by more than minUnexplained.
+//
+// Each account is anchored to the first balance ever recorded for it, so the
+// check is expected = anchor + everything posted since. A connection that
+// refreshes balances while delivering no transactions drifts further every day,
+// which is the one failure the staleness check cannot see: balance_date stays
+// current the whole time.
+//
+// Only transactions posted strictly after the anchor count. A late delivery
+// carries an older posted date and was already priced into the anchor balance,
+// so a backfill closes the gap instead of inventing a new one.
+func (s *AccountStore) UnreconciledAccounts(ctx context.Context, minUnexplained float64) ([]models.UnreconciledAccount, error) {
+	rows, err := s.read.QueryContext(ctx, `
+		WITH reconciled AS (
+			SELECT a.id, a.name, a.org_name, a.balance, a.balance_date,
+				a.balance - (a.anchor_balance + COALESCE((
+					SELECT SUM(t.amount) FROM transactions t
+					WHERE t.account_id = a.id AND t.posted > a.anchor_balance_date
+				), 0)) AS unexplained
+			FROM accounts a
+			WHERE a.is_included = 1 AND a.anchor_balance IS NOT NULL
+		)
+		SELECT id, name, org_name, balance, balance_date, unexplained
+		FROM reconciled
+		WHERE ABS(unexplained) > ?
+		ORDER BY ABS(unexplained) DESC`, minUnexplained)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var drifted []models.UnreconciledAccount
+	for rows.Next() {
+		var u models.UnreconciledAccount
+		if err := rows.Scan(&u.ID, &u.Name, &u.OrgName, &u.Balance, &u.BalanceDate, &u.Unexplained); err != nil {
+			return nil, err
+		}
+		drifted = append(drifted, u)
+	}
+	return drifted, rows.Err()
 }

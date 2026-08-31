@@ -197,3 +197,15 @@ type StaleConnection struct {
 	BalanceDate     int64  `json:"balance_date"`
 	LastTransaction int64  `json:"last_transaction"` // 0 when the account has no transactions
 }
+
+// UnreconciledAccount describes an account whose balance has moved by more than
+// its transactions explain — the signature of a connection that still refreshes
+// balances but has stopped delivering transactions.
+type UnreconciledAccount struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	OrgName     string  `json:"org_name"`
+	Balance     float64 `json:"balance"`
+	BalanceDate int64   `json:"balance_date"`
+	Unexplained float64 `json:"unexplained"` // balance minus what the transactions account for
+}

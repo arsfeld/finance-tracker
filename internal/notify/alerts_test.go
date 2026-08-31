@@ -23,7 +23,7 @@ func tdStale(now time.Time) []models.StaleConnection {
 // on Aug 21 and the only record was a "partial" row in a table nobody reads.
 func TestStaleConnectionAlertNamesAccountAndReason(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
-	msg := StaleConnectionAlert(tdStale(now), []string{
+	msg := SyncHealthAlert(tdStale(now), nil, []string{
 		"Requested date range exceeds recommended range of 45 days. In the future, this may be capped.",
 		"Connection to TD Canada Trust may need attention. Auth required",
 	}, now)
@@ -44,7 +44,7 @@ func TestStaleConnectionAlertNamesAccountAndReason(t *testing.T) {
 // the reader to ignore the alert.
 func TestStaleConnectionAlertLeadsWithTheAccountNotTheAdvisory(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
-	msg := StaleConnectionAlert(tdStale(now), []string{
+	msg := SyncHealthAlert(tdStale(now), nil, []string{
 		"Requested date range exceeds recommended range of 45 days. In the future, this may be capped.",
 	}, now)
 
@@ -61,7 +61,7 @@ func TestStaleConnectionAlertLeadsWithTheAccountNotTheAdvisory(t *testing.T) {
 // notify, so a healthy fortnight stays silent.
 func TestStaleConnectionAlertEmptyWhenNothingIsStale(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
-	if msg := StaleConnectionAlert(nil, []string{"some advisory"}, now); msg != "" {
+	if msg := SyncHealthAlert(nil, nil, []string{"some advisory"}, now); msg != "" {
 		t.Errorf("no stale connection means no alert; got:\n%s", msg)
 	}
 }
@@ -70,16 +70,55 @@ func TestStaleConnectionAlertEmptyWhenNothingIsStale(t *testing.T) {
 // print a 1970 date.
 func TestStaleConnectionAlertHandlesAccountWithNoTransactions(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
-	msg := StaleConnectionAlert([]models.StaleConnection{{
+	msg := SyncHealthAlert([]models.StaleConnection{{
 		Name:        "Tangerine Chequing Account (2106)",
 		OrgName:     "Tangerine Bank (CA)",
 		BalanceDate: now.AddDate(0, -9, 0).Unix(),
-	}}, nil, now)
+	}}, nil, nil, now)
 
 	if strings.Contains(msg, "1970") {
 		t.Errorf("a missing transaction date must not render as an epoch date; got:\n%s", msg)
 	}
 	if !strings.Contains(msg, "no transactions") {
 		t.Errorf("alert should say the account has no transactions; got:\n%s", msg)
+	}
+}
+
+// The failure that survived the staleness fix: the connection refreshes
+// balances on schedule, so nothing is stale, while transactions stop arriving
+// and spending quietly disappears from the reports.
+func TestSyncHealthAlertReportsUnexplainedBalanceMovement(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	msg := SyncHealthAlert(nil, []models.UnreconciledAccount{{
+		Name:        "TD AEROPLAN VISA INFINITE (4520)",
+		OrgName:     "TD Canada Trust",
+		Balance:     -12124.34,
+		BalanceDate: now.Unix(),
+		Unexplained: -1876.50,
+	}}, nil, now)
+
+	if msg == "" {
+		t.Fatal("an unexplained balance move must produce an alert even with nothing stale")
+	}
+	for _, want := range []string{"TD AEROPLAN VISA INFINITE (4520)", "1876.50"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("alert must mention %q; got:\n%s", want, msg)
+		}
+	}
+}
+
+// Both faults at once should read as one message, not two competing headlines.
+func TestSyncHealthAlertCombinesBothFaults(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	msg := SyncHealthAlert(tdStale(now), []models.UnreconciledAccount{{
+		Name: "Money-Back World Mastercard", OrgName: "Tangerine Bank (CA)",
+		Balance: -500, BalanceDate: now.Unix(), Unexplained: -500,
+	}}, nil, now)
+
+	if !strings.Contains(msg, "stopped syncing") {
+		t.Errorf("stale accounts should still be reported; got:\n%s", msg)
+	}
+	if !strings.Contains(msg, "Money-Back World Mastercard") {
+		t.Errorf("drifted accounts should also be reported; got:\n%s", msg)
 	}
 }

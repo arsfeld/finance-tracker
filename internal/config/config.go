@@ -39,6 +39,13 @@ type Config struct {
 	// Billing
 	BillingDay int // Day of month (1-28) for billing cycle start
 
+	// BalanceDriftThreshold is how many dollars an account's balance may move
+	// beyond what its transactions explain before it is reported. Small gaps are
+	// the normal lag between a charge hitting the balance and posting, and they
+	// close on their own; the default is set well above that and well below the
+	// kind of gap that means transactions have stopped arriving.
+	BalanceDriftThreshold float64
+
 	// Scheduler
 	SyncSchedule string
 
@@ -80,8 +87,10 @@ func Load(envFile string) (*Config, error) {
 		NtfyTopic:         os.Getenv("NTFY_TOPIC"),
 		NtfyWarningSuffix: getEnvOr("NTFY_WARNING_SUFFIX", "-warning"),
 
-		BillingDay:   getEnvInt("BILLING_DAY", 15),
-		SyncSchedule: getEnvOr("SYNC_SCHEDULE", "0 0 */6 * * *"),
+		BillingDay: getEnvInt("BILLING_DAY", 15),
+
+		BalanceDriftThreshold: getEnvFloat("BALANCE_DRIFT_THRESHOLD", 250),
+		SyncSchedule:          getEnvOr("SYNC_SCHEDULE", "0 0 */6 * * *"),
 	}
 
 	return cfg, nil
@@ -98,6 +107,15 @@ func getEnvInt(key string, fallback int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return fallback
+}
+
+func getEnvFloat(key string, fallback float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
 		}
 	}
 	return fallback

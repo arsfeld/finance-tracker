@@ -119,9 +119,13 @@ func (h *AnalysisRunHandler) runAnalysis(ctx context.Context) {
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to check for stale connections")
 	}
+	drifted, err := h.acctStore.UnreconciledAccounts(ctx, h.cfg.BalanceDriftThreshold)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to reconcile account balances")
+	}
 
 	// Build prompt.
-	prompt := llmclient.GeneratePrompt(txns, accounts, stale, startDate, endDate, now, billingDay, true, budgets...)
+	prompt := llmclient.GeneratePrompt(txns, accounts, stale, drifted, startDate, endDate, now, billingDay, true, budgets...)
 
 	if h.cfg.OpenRouterURL == "" || h.cfg.OpenRouterAPIKey == "" || h.cfg.OpenRouterModel == "" {
 		log.Error().Msg("OpenRouter not configured")

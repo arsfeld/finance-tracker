@@ -90,6 +90,38 @@ func TestGeneratePromptMarksPartlyCoveredBalancePeriods(t *testing.T) {
 	}
 }
 
+// August's Total covers only 14 of its 31 days. Compared by Total, the first
+// fully covered cycle after it reads as spending more than doubling.
+func TestGeneratePromptComparesCyclesByBurnWhenCoverageDiffers(t *testing.T) {
+	fullSep := models.BillingPeriod{Label: "Sep 15 - Oct 14", Start: date(time.September, 15), End: date(time.October, 14), IsComplete: true, IsFocus: true}
+	periods := []ledger.PeriodSpend{
+		{Period: augCycle, Source: ledger.SourceBalance, Total: 3047.15, CoveredDays: 14.1, DailyBurn: 216.80},
+		{Period: fullSep, Source: ledger.SourceBalance, Total: 6774.30, CoveredDays: 30, DailyBurn: 225.81},
+	}
+
+	p := prompt(periods, nil)
+
+	if !strings.Contains(p, "| +4.2% daily burn |") {
+		t.Errorf("expected the change to compare daily burn; prompt was:\n%s", p)
+	}
+	if strings.Contains(p, "+122.3%") {
+		t.Errorf("a partial total must not be compared with a full one; prompt was:\n%s", p)
+	}
+}
+
+func TestGeneratePromptComparesFullyCoveredCyclesByTotal(t *testing.T) {
+	fullSep := models.BillingPeriod{Label: "Sep 15 - Oct 14", Start: date(time.September, 15), End: date(time.October, 14), IsComplete: true}
+	fullOct := models.BillingPeriod{Label: "Oct 15 - Nov 14", Start: date(time.October, 15), End: date(time.November, 14), IsComplete: true}
+	periods := []ledger.PeriodSpend{
+		{Period: fullSep, Source: ledger.SourceBalance, Total: 6000, CoveredDays: 30, DailyBurn: 200},
+		{Period: fullOct, Source: ledger.SourceBalance, Total: 6600, CoveredDays: 31, DailyBurn: 212.90},
+	}
+
+	if p := prompt(periods, nil); !strings.Contains(p, "| +10.0% |") {
+		t.Errorf("fully covered cycles compare totals; prompt was:\n%s", p)
+	}
+}
+
 func TestGeneratePromptDatesTheItemizedCharges(t *testing.T) {
 	charges := []models.DBTransaction{
 		txn("t1", "METRO", -100, "Groceries", date(time.September, 16)),

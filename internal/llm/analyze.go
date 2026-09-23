@@ -108,18 +108,28 @@ func buildPeriodTable(periods []ledger.PeriodSpend) string {
 		source, covered := "balance", fmt.Sprintf("%.1f", p.CoveredDays)
 		if p.Source == ledger.SourceItemizedOnly {
 			source, covered = "itemized only", "—"
-		} else if days := periodDays(p.Period); p.CoveredDays < days-0.5 {
+		} else if !fullyCovered(p) {
+			days := periodDays(p.Period)
 			// A cycle the balance history only partly covers has a partial
 			// Total that otherwise reads as the whole cycle.
 			source = fmt.Sprintf("balance (%.1f of %g days)", p.CoveredDays, math.Round(days*10)/10)
 		}
 		// A cycle in progress has a partial total, so only completed balance
-		// cycles are compared; the burn trend covers the current one.
+		// cycles are compared; the burn trend covers the current one. When
+		// either cycle is only partly covered its Total is a lower bound, so
+		// the comparison switches to daily burn: comparing August's 14 covered
+		// days with a full September would read as spending doubling.
 		change := "—"
 		if i > 0 {
 			prev := periods[i-1]
-			if p.Period.IsComplete && p.Source == ledger.SourceBalance && prev.Source == ledger.SourceBalance && prev.Total > 0 {
-				change = fmt.Sprintf("%+.1f%%", (p.Total-prev.Total)/prev.Total*100)
+			if p.Period.IsComplete && p.Source == ledger.SourceBalance && prev.Source == ledger.SourceBalance {
+				if fullyCovered(p) && fullyCovered(prev) {
+					if prev.Total > 0 {
+						change = fmt.Sprintf("%+.1f%%", (p.Total-prev.Total)/prev.Total*100)
+					}
+				} else if prev.DailyBurn > 0 {
+					change = fmt.Sprintf("%+.1f%% daily burn", (p.DailyBurn-prev.DailyBurn)/prev.DailyBurn*100)
+				}
 			}
 		}
 		notItemized := "—"
@@ -158,6 +168,13 @@ func buildBurnTrend(periods []ledger.PeriodSpend) string {
 func periodDays(p models.BillingPeriod) float64 {
 	from, to := ledger.PeriodBounds(p)
 	return float64(to-from) / 86400
+}
+
+// fullyCovered reports whether the balance history spans the whole period. Half
+// a day of slack absorbs the gap between midnight boundaries and the time of
+// day a balance was read.
+func fullyCovered(p ledger.PeriodSpend) bool {
+	return p.CoveredDays >= periodDays(p.Period)-0.5
 }
 
 // buildCoverageLine says how much of the balance-measured spending the

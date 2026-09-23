@@ -33,32 +33,38 @@ type Interval struct {
 // two, one interval gets the payment added without the drop and a neighbour
 // gets the drop without the payment. Clamping each interval on its own would
 // keep the inflated one and zero the other, counting the whole payment as
-// spending. So a negative interval is first netted against the positive
-// intervals within PaymentMatchWindow of it, nearest first, before anything is
-// clamped.
+// spending. So a negative interval is first netted against the intervals
+// within PaymentMatchWindow of it, nearest first, before anything is clamped.
 //
-// Whatever a drop cannot net against is itself a payment the feeds missed, and
-// is dropped: spending never goes negative. The card is paid in full monthly,
-// and the feeds do miss payments.
+// A neighbour gives up at most the payments that were added to it, never its
+// debt growth. Netting exists only to move a payment back to the interval
+// whose drop it explains; the growth is real charges. A drop with no detected
+// payment nearby is a payment the feeds missed, and payments never change
+// spending, so the rest of the drop is discarded: spending never goes
+// negative. The card is paid in full monthly, and the feeds do miss payments.
 func Intervals(snaps []models.BalanceSnapshot, payments []Payment) []Interval {
 	var out []Interval
+	var paid []float64 // payments added to each interval that netting may still undo
 	for i := 1; i < len(snaps); i++ {
 		s0, s1 := snaps[i-1], snaps[i]
-		spend := -s1.Balance - -s0.Balance
+		var inflation float64
 		for _, p := range payments {
 			if p.At > s0.BalanceDate && p.At <= s1.BalanceDate {
-				spend += p.Amount
+				inflation += p.Amount
 			}
 		}
-		out = append(out, Interval{From: s0.BalanceDate, To: s1.BalanceDate, Spend: spend})
+		out = append(out, Interval{From: s0.BalanceDate, To: s1.BalanceDate, Spend: -s1.Balance - -s0.Balance + inflation})
+		paid = append(paid, inflation)
 	}
 
 	window := int64(PaymentMatchWindow / time.Second)
-	// absorb moves as much of the drop at i as neighbour j can take. Only
-	// positive neighbours give anything, so a drop never feeds another drop.
+	// absorb moves as much of the drop at i as neighbour j can give: no more
+	// than the payments still attributed to it, and never below zero, so a drop
+	// neither eats real charges nor feeds another drop.
 	absorb := func(i, j int) {
-		if take := min(-out[i].Spend, out[j].Spend); take > 0 {
+		if take := min(-out[i].Spend, out[j].Spend, paid[j]); take > 0 {
 			out[j].Spend -= take
+			paid[j] -= take
 			out[i].Spend += take
 		}
 	}

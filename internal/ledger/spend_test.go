@@ -126,21 +126,40 @@ func TestIntervalsNetTwoDropsAgainstSharedNeighbour(t *testing.T) {
 	}
 }
 
-// A drop larger than every neighbour within the window absorbs what it can;
-// the rest is a payment the feeds missed and never becomes negative spending.
-func TestIntervalsDropLargerThanNeighboursLeavesNoNegative(t *testing.T) {
+// A drop larger than the misplaced payments around it undoes only those
+// payments; the rest is a payment the feeds missed, and the real charges on
+// either side stay.
+func TestIntervalsDropLargerThanMisplacedPaymentsLeavesChargesIntact(t *testing.T) {
 	snaps := []models.BalanceSnapshot{
 		snap(-1000, day(time.September, 1)),
-		snap(-1200, day(time.September, 3)),
-		snap(-100, day(time.September, 4)),
-		snap(-150, day(time.September, 5)),
+		snap(-1200, day(time.September, 3)), // 200 of charges; the Sep 2 debit is not credited yet
+		snap(-100, day(time.September, 4)),  // 1100 credited: the 300 plus 800 nobody saw leave
+		snap(-150, day(time.September, 5)),  // 50 of charges
+	}
+	payments := []Payment{{Amount: 300, At: day(time.September, 2).Unix()}}
+
+	got := Intervals(snaps, payments)
+
+	assertNoNegative(t, got)
+	if total := totalSpend(got); !near(total, 250) {
+		t.Errorf("expected the 200 + 50 of charges, got %.2f in %+v", total, got)
+	}
+}
+
+// Netting only moves a payment back to the interval it belongs to. A drop no
+// detected payment explains is a missed payment, and payments never change
+// spending, so the charges before it stay.
+func TestIntervalsUndetectedPaymentLeavesNeighbourSpendingIntact(t *testing.T) {
+	snaps := []models.BalanceSnapshot{
+		snap(-1000, day(time.September, 1)),
+		snap(-1500, day(time.September, 2)),
+		snap(0, day(time.September, 3)),
 	}
 
 	got := Intervals(snaps, nil)
 
-	assertNoNegative(t, got)
-	if total := totalSpend(got); !near(total, 0) {
-		t.Errorf("the 1100 drop outweighs the 200 + 50 around it, expected 0, got %.2f in %+v", total, got)
+	if len(got) != 2 || !near(got[0].Spend, 500) || got[1].Spend != 0 {
+		t.Errorf("expected spends of 500 and 0, got %+v", got)
 	}
 }
 

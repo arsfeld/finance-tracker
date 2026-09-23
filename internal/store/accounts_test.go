@@ -368,3 +368,134 @@ func TestListMarksTheNewestAccountOfEachIdentityCurrent(t *testing.T) {
 		}
 	}
 }
+
+func inclusionByID(t *testing.T, accts *AccountStore) map[string]bool {
+	t.Helper()
+	list, err := accts.List(context.Background())
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	got := make(map[string]bool)
+	for _, a := range list {
+		got[a.ID] = a.IsIncluded
+	}
+	return got
+}
+
+// Excluding an account must also exclude the duplicates a re-auth left behind,
+// or their history would keep showing up in spending.
+func TestSetIncludedAppliesToEveryRowOfTheIdentity(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	accts := NewAccountStore(db.Read, db.Write)
+	for _, id := range []string{"ACT-old", "ACT-new"} {
+		seedAccountFull(t, accts, models.DBAccount{
+			ID: id, Name: "Tangerine Chequing Account (2106)", OrgName: "Tangerine Bank (CA)", IsIncluded: true,
+		})
+	}
+	seedAccountFull(t, accts, models.DBAccount{
+		ID: "ACT-td", Name: "TD AEROPLAN VISA INFINITE (4520)", OrgName: "TD Canada Trust", IsIncluded: true,
+	})
+
+	if err := accts.SetIncluded(ctx, "ACT-new", false); err != nil {
+		t.Fatalf("set included: %v", err)
+	}
+
+	got := inclusionByID(t, accts)
+	if got["ACT-old"] || got["ACT-new"] {
+		t.Errorf("both Tangerine rows must be excluded, got %v", got)
+	}
+	if !got["ACT-td"] {
+		t.Errorf("another identity must be left alone, got %v", got)
+	}
+}
+
+// Regression: the 2026-09-19 Tangerine re-auth issued new IDs, which arrived
+// included although the old ones were excluded.
+func TestNewAccountInheritsInclusionFromItsIdentity(t *testing.T) {
+	db := newTestDB(t)
+	accts := NewAccountStore(db.Read, db.Write)
+	seedAccountFull(t, accts, models.DBAccount{
+		ID: "ACT-old", Name: "Tangerine Chequing Account (2106)", OrgName: "Tangerine Bank (CA)", IsIncluded: false,
+	})
+	setFirstSeen(t, db, "ACT-old", "2026-03-17 02:27:47")
+
+	// Sync always upserts with IsIncluded true.
+	seedAccountFull(t, accts, models.DBAccount{
+		ID: "ACT-new", Name: "Tangerine Chequing Account (2106)", OrgName: "Tangerine Bank (CA)", IsIncluded: true,
+	})
+	seedAccountFull(t, accts, models.DBAccount{
+		ID: "ACT-other", Name: "TD EVERY DAY SAVINGS ACCOUNT (2625)", OrgName: "TD Canada Trust", IsIncluded: true,
+	})
+	// A later sync of an existing row must not undo a hand exclusion.
+	seedAccountFull(t, accts, models.DBAccount{
+		ID: "ACT-old", Name: "Tangerine Chequing Account (2106)", OrgName: "Tangerine Bank (CA)", IsIncluded: true,
+	})
+	got := inclusionByID(t, accts)
+	if got["ACT-new"] {
+		t.Errorf("a re-auth's new row must inherit the exclusion, got %v", got)
+	}
+	if got["ACT-old"] {
+		t.Errorf("a sync must not re-include an excluded row, got %v", got)
+	}
+	if !got["ACT-other"] {
+		t.Errorf("a never-seen identity arrives included, got %v", got)
+	}
+}
+
+// Rows written before inclusion followed the identity can disagree. The newest
+// row is what the user last saw in the UI, so it wins.
+func TestNormalizeInclusionFollowsTheNewestRow(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	accts := NewAccountStore(db.Read, db.Write)
+	for _, id := range []string{"ACT-old", "ACT-new"} {
+		seedAccountFull(t, accts, models.DBAccount{
+			ID: id, Name: "LINE OF CREDIT UNSECURED (3871)", OrgName: "TD Canada Trust", IsIncluded: true,
+		})
+	}
+	setFirstSeen(t, db, "ACT-old", "2026-07-25 10:00:00")
+	setFirstSeen(t, db, "ACT-new", "2026-09-11 23:41:21")
+	if _, err := db.Write.Exec(`UPDATE accounts SET is_included = 0 WHERE id = 'ACT-old'`); err != nil {
+		t.Fatal(err)
+	}
+
+	changed, err := accts.NormalizeInclusion(ctx)
+	if err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	if changed != 1 {
+		t.Errorf("expected 1 row changed, got %d", changed)
+	}
+	if got := inclusionByID(t, accts); !got["ACT-old"] || !got["ACT-new"] {
+		t.Errorf("both rows must follow the newest one (included), got %v", got)
+	}
+
+	again, err := accts.NormalizeInclusion(ctx)
+	if err != nil {
+		t.Fatalf("normalize again: %v", err)
+	}
+	if again != 0 {
+		t.Errorf("a second run must be a no-op, changed %d", again)
+	}
+}
+
+// PATCH /api/accounts/{id} goes through Update, so it must propagate too.
+func TestUpdateIncludedAppliesToTheIdentity(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	accts := NewAccountStore(db.Read, db.Write)
+	for _, id := range []string{"ACT-old", "ACT-new"} {
+		seedAccountFull(t, accts, models.DBAccount{
+			ID: id, Name: "Tangerine Savings Account (1673)", OrgName: "Tangerine Bank (CA)", IsIncluded: true,
+		})
+	}
+
+	off := false
+	if err := accts.Update(ctx, "ACT-new", AccountPatch{IsIncluded: &off}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if got := inclusionByID(t, accts); got["ACT-old"] || got["ACT-new"] {
+		t.Errorf("both rows must be excluded, got %v", got)
+	}
+}

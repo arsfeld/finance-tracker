@@ -23,7 +23,9 @@ func NewAccountStore(read, write *sql.DB) *AccountStore {
 
 func (s *AccountStore) Upsert(ctx context.Context, acct models.DBAccount) error {
 	// Card fields are set on insert only: they are a guess from the name, and a
-	// hand correction must survive every later sync.
+	// hand correction must survive every later sync. Inclusion is likewise set
+	// on insert only, and a new row takes it from its identity so a re-auth's
+	// fresh IDs keep the user's choice.
 	isCard := ledger.IsCreditCardName(acct.Name)
 	cardKey, ok := ledger.CardKey(acct.OrgName, acct.Name, acct.ID)
 	if isCard && !ok {
@@ -34,7 +36,10 @@ func (s *AccountStore) Upsert(ctx context.Context, acct models.DBAccount) error 
 	_, err := s.write.ExecContext(ctx, `
 		INSERT INTO accounts (id, name, balance, balance_date, currency, org_name, org_domain, is_included,
 			anchor_balance, anchor_balance_date, is_credit_card, card_key, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+		VALUES (?, ?, ?, ?, ?, ?, ?,
+			COALESCE((SELECT is_included FROM accounts WHERE card_key = ?
+				ORDER BY first_seen_at DESC, id DESC LIMIT 1), ?),
+			?, ?, ?, ?, datetime('now'))
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			balance = excluded.balance,
@@ -43,7 +48,8 @@ func (s *AccountStore) Upsert(ctx context.Context, acct models.DBAccount) error 
 			org_name = excluded.org_name,
 			org_domain = excluded.org_domain,
 			updated_at = datetime('now')`,
-		acct.ID, acct.Name, acct.Balance, acct.BalanceDate, acct.Currency, acct.OrgName, acct.OrgDomain, acct.IsIncluded,
+		acct.ID, acct.Name, acct.Balance, acct.BalanceDate, acct.Currency, acct.OrgName, acct.OrgDomain,
+		cardKey, acct.IsIncluded,
 		acct.Balance, acct.BalanceDate, isCard, cardKey,
 	)
 	return err
@@ -92,6 +98,16 @@ func (s *AccountStore) GetByID(ctx context.Context, id string) (*models.DBAccoun
 	return &a, err
 }
 
+// SetIncluded includes or excludes an account together with every other row of
+// its identity, so the choice covers the duplicates a re-auth leaves behind.
+func (s *AccountStore) SetIncluded(ctx context.Context, id string, included bool) error {
+	_, err := s.write.ExecContext(ctx, `
+		UPDATE accounts SET is_included = ?, updated_at = datetime('now')
+		WHERE id = ? OR card_key = (SELECT card_key FROM accounts WHERE id = ? AND card_key != '')`,
+		included, id, id)
+	return err
+}
+
 // AccountPatch changes the hand-editable fields of an account. Nil fields are
 // left as they are.
 type AccountPatch struct {
@@ -101,11 +117,14 @@ type AccountPatch struct {
 }
 
 func (s *AccountStore) Update(ctx context.Context, id string, p AccountPatch) error {
+	if p.IsIncluded != nil {
+		if err := s.SetIncluded(ctx, id, *p.IsIncluded); err != nil {
+			return err
+		}
+	}
+
 	var sets []string
 	var args []any
-	if p.IsIncluded != nil {
-		sets, args = append(sets, "is_included = ?"), append(args, *p.IsIncluded)
-	}
 	if p.IsCreditCard != nil {
 		sets, args = append(sets, "is_credit_card = ?"), append(args, *p.IsCreditCard)
 	}
@@ -155,6 +174,22 @@ func (s *AccountStore) BackfillCardIdentity(ctx context.Context) (int, error) {
 		}
 	}
 	return len(pending), nil
+}
+
+// NormalizeInclusion makes every row of an identity agree with its newest row,
+// and returns how many rows it changed. Rows written before inclusion followed
+// the identity can disagree: a re-auth inserted its new IDs included whatever
+// the old ones said.
+func (s *AccountStore) NormalizeInclusion(ctx context.Context) (int64, error) {
+	const newest = `(SELECT b.is_included FROM accounts b WHERE b.card_key = accounts.card_key
+		ORDER BY b.first_seen_at DESC, b.id DESC LIMIT 1)`
+	res, err := s.write.ExecContext(ctx, `
+		UPDATE accounts SET is_included = `+newest+`
+		WHERE card_key IS NOT NULL AND card_key != '' AND is_included != `+newest)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // StaleConnections returns included accounts whose balance has not been

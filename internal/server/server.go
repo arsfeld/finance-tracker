@@ -68,7 +68,7 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	// Accounts
 	acctHandler := api.NewAccountHandler(accountStore)
 	s.mux.HandleFunc("GET /api/accounts", acctHandler.List)
-	s.mux.HandleFunc("PATCH /api/accounts/{id}", acctHandler.UpdateInclusion)
+	s.mux.HandleFunc("PATCH /api/accounts/{id}", acctHandler.Update)
 
 	// Categories
 	catHandler := api.NewCategoryHandler(catStore, txnStore, events, cfg)

@@ -260,3 +260,75 @@ func TestUnreconciledAccountsIgnoresExcludedAccounts(t *testing.T) {
 		t.Errorf("excluded accounts must stay quiet; got %+v", drifted)
 	}
 }
+
+func TestUpsertClassifiesNewAccounts(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	accts := NewAccountStore(db.Read, db.Write)
+
+	seedAccountFull(t, accts, models.DBAccount{
+		ID: "ACT-td", Name: "TD AEROPLAN VISA INFINITE (4520)", OrgName: "TD Canada Trust", IsIncluded: true,
+	})
+	seedAccountFull(t, accts, models.DBAccount{
+		ID: "ACT-loc", Name: "LINE OF CREDIT UNSECURED (3871)", OrgName: "TD Canada Trust", IsIncluded: true,
+	})
+
+	td, _ := accts.GetByID(ctx, "ACT-td")
+	loc, _ := accts.GetByID(ctx, "ACT-loc")
+
+	if !td.IsCreditCard || td.CardKey != "TD Canada Trust|4520" {
+		t.Errorf("TD Visa should be a card keyed TD Canada Trust|4520, got %+v", td)
+	}
+	if loc.IsCreditCard {
+		t.Errorf("a line of credit is not a card, got %+v", loc)
+	}
+}
+
+// Classification is a guess from the name, so a hand correction has to survive
+// the next sync rather than being re-guessed away.
+func TestUpsertKeepsHandEditedCardFields(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	accts := NewAccountStore(db.Read, db.Write)
+	acct := models.DBAccount{
+		ID: "ACT-td", Name: "TD AEROPLAN VISA INFINITE (4520)", OrgName: "TD Canada Trust", IsIncluded: true,
+	}
+	seedAccountFull(t, accts, acct)
+
+	notCard, key := false, "manual-key"
+	if err := accts.Update(ctx, "ACT-td", AccountPatch{IsCreditCard: &notCard, CardKey: &key}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	seedAccountFull(t, accts, acct)
+
+	got, _ := accts.GetByID(ctx, "ACT-td")
+	if got.IsCreditCard || got.CardKey != "manual-key" {
+		t.Errorf("hand-edited fields were overwritten by the sync: %+v", got)
+	}
+}
+
+func TestBackfillCardIdentityClassifiesLegacyRows(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	accts := NewAccountStore(db.Read, db.Write)
+	seedAccountFull(t, accts, models.DBAccount{
+		ID: "ACT-td", Name: "TD AEROPLAN VISA INFINITE (4520)", OrgName: "TD Canada Trust", IsIncluded: true,
+	})
+	if _, err := db.Write.Exec(`UPDATE accounts SET card_key = NULL, is_credit_card = 0`); err != nil {
+		t.Fatalf("simulate legacy row: %v", err)
+	}
+
+	n, err := accts.BackfillCardIdentity(ctx)
+	if err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	again, _ := accts.BackfillCardIdentity(ctx)
+
+	got, _ := accts.GetByID(ctx, "ACT-td")
+	if n != 1 || again != 0 {
+		t.Errorf("expected 1 row backfilled then 0, got %d then %d", n, again)
+	}
+	if !got.IsCreditCard || got.CardKey != "TD Canada Trust|4520" {
+		t.Errorf("legacy row not classified: %+v", got)
+	}
+}

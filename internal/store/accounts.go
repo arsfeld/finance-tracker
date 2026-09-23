@@ -3,8 +3,12 @@ package store
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 
+	"github.com/rs/zerolog/log"
+
+	"finance_tracker/internal/ledger"
 	"finance_tracker/internal/models"
 )
 
@@ -18,10 +22,19 @@ func NewAccountStore(read, write *sql.DB) *AccountStore {
 }
 
 func (s *AccountStore) Upsert(ctx context.Context, acct models.DBAccount) error {
+	// Card fields are set on insert only: they are a guess from the name, and a
+	// hand correction must survive every later sync.
+	isCard := ledger.IsCreditCardName(acct.Name)
+	cardKey, ok := ledger.CardKey(acct.OrgName, acct.Name, acct.ID)
+	if isCard && !ok {
+		log.Warn().Str("account", acct.Name).Str("id", acct.ID).
+			Msg("Card name has no last-4; its balance history will not follow it across re-authorizations")
+	}
+
 	_, err := s.write.ExecContext(ctx, `
 		INSERT INTO accounts (id, name, balance, balance_date, currency, org_name, org_domain, is_included,
-			anchor_balance, anchor_balance_date, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+			anchor_balance, anchor_balance_date, is_credit_card, card_key, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			balance = excluded.balance,
@@ -31,14 +44,15 @@ func (s *AccountStore) Upsert(ctx context.Context, acct models.DBAccount) error 
 			org_domain = excluded.org_domain,
 			updated_at = datetime('now')`,
 		acct.ID, acct.Name, acct.Balance, acct.BalanceDate, acct.Currency, acct.OrgName, acct.OrgDomain, acct.IsIncluded,
-		acct.Balance, acct.BalanceDate,
+		acct.Balance, acct.BalanceDate, isCard, cardKey,
 	)
 	return err
 }
 
 func (s *AccountStore) List(ctx context.Context) ([]models.DBAccount, error) {
 	rows, err := s.read.QueryContext(ctx, `
-		SELECT id, name, balance, balance_date, currency, org_name, org_domain, is_included, first_seen_at, updated_at
+		SELECT id, name, balance, balance_date, currency, org_name, org_domain, is_included,
+			is_credit_card, COALESCE(card_key, ''), first_seen_at, updated_at
 		FROM accounts ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -48,7 +62,8 @@ func (s *AccountStore) List(ctx context.Context) ([]models.DBAccount, error) {
 	var accounts []models.DBAccount
 	for rows.Next() {
 		var a models.DBAccount
-		if err := rows.Scan(&a.ID, &a.Name, &a.Balance, &a.BalanceDate, &a.Currency, &a.OrgName, &a.OrgDomain, &a.IsIncluded, &a.FirstSeenAt, &a.UpdatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.Name, &a.Balance, &a.BalanceDate, &a.Currency, &a.OrgName, &a.OrgDomain, &a.IsIncluded,
+			&a.IsCreditCard, &a.CardKey, &a.FirstSeenAt, &a.UpdatedAt); err != nil {
 			return nil, err
 		}
 		accounts = append(accounts, a)
@@ -59,18 +74,80 @@ func (s *AccountStore) List(ctx context.Context) ([]models.DBAccount, error) {
 func (s *AccountStore) GetByID(ctx context.Context, id string) (*models.DBAccount, error) {
 	var a models.DBAccount
 	err := s.read.QueryRowContext(ctx, `
-		SELECT id, name, balance, balance_date, currency, org_name, org_domain, is_included, first_seen_at, updated_at
+		SELECT id, name, balance, balance_date, currency, org_name, org_domain, is_included,
+			is_credit_card, COALESCE(card_key, ''), first_seen_at, updated_at
 		FROM accounts WHERE id = ?`, id).
-		Scan(&a.ID, &a.Name, &a.Balance, &a.BalanceDate, &a.Currency, &a.OrgName, &a.OrgDomain, &a.IsIncluded, &a.FirstSeenAt, &a.UpdatedAt)
+		Scan(&a.ID, &a.Name, &a.Balance, &a.BalanceDate, &a.Currency, &a.OrgName, &a.OrgDomain, &a.IsIncluded,
+			&a.IsCreditCard, &a.CardKey, &a.FirstSeenAt, &a.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	return &a, err
 }
 
-func (s *AccountStore) UpdateInclusion(ctx context.Context, id string, included bool) error {
-	_, err := s.write.ExecContext(ctx, `UPDATE accounts SET is_included = ?, updated_at = datetime('now') WHERE id = ?`, included, id)
+// AccountPatch changes the hand-editable fields of an account. Nil fields are
+// left as they are.
+type AccountPatch struct {
+	IsIncluded   *bool   `json:"is_included"`
+	IsCreditCard *bool   `json:"is_credit_card"`
+	CardKey      *string `json:"card_key"`
+}
+
+func (s *AccountStore) Update(ctx context.Context, id string, p AccountPatch) error {
+	var sets []string
+	var args []any
+	if p.IsIncluded != nil {
+		sets, args = append(sets, "is_included = ?"), append(args, *p.IsIncluded)
+	}
+	if p.IsCreditCard != nil {
+		sets, args = append(sets, "is_credit_card = ?"), append(args, *p.IsCreditCard)
+	}
+	if p.CardKey != nil {
+		sets, args = append(sets, "card_key = ?"), append(args, *p.CardKey)
+	}
+	if len(sets) == 0 {
+		return nil
+	}
+	sets = append(sets, "updated_at = datetime('now')")
+	args = append(args, id)
+	_, err := s.write.ExecContext(ctx, `UPDATE accounts SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...)
 	return err
+}
+
+// BackfillCardIdentity classifies accounts stored before cards were tracked.
+// Rows that already have a card key are left alone, so hand edits survive
+// restarts.
+func (s *AccountStore) BackfillCardIdentity(ctx context.Context) (int, error) {
+	type row struct{ id, name, org string }
+	rows, err := s.write.QueryContext(ctx, `SELECT id, name, org_name FROM accounts WHERE card_key IS NULL`)
+	if err != nil {
+		return 0, err
+	}
+	var pending []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.id, &r.name, &r.org); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		pending = append(pending, r)
+	}
+	// The write pool has a single connection, so the cursor must be closed
+	// before the updates can run.
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	for _, r := range pending {
+		key, _ := ledger.CardKey(r.org, r.name, r.id)
+		if _, err := s.write.ExecContext(ctx,
+			`UPDATE accounts SET is_credit_card = ?, card_key = ? WHERE id = ? AND card_key IS NULL`,
+			ledger.IsCreditCardName(r.name), key, r.id); err != nil {
+			return 0, err
+		}
+	}
+	return len(pending), nil
 }
 
 // StaleConnections returns included accounts whose balance has not been

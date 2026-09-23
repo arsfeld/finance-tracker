@@ -24,17 +24,19 @@ func (h *AccountHandler) List(w http.ResponseWriter, r *http.Request) {
 	WriteData(w, accounts)
 }
 
-func (h *AccountHandler) UpdateInclusion(w http.ResponseWriter, r *http.Request) {
+func (h *AccountHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	var body struct {
-		IsIncluded bool `json:"is_included"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	var patch store.AccountPatch
+	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		WriteError(w, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON body")
 		return
 	}
+	if patch.CardKey != nil && *patch.CardKey == "" {
+		WriteError(w, http.StatusBadRequest, "BAD_REQUEST", "card_key cannot be empty")
+		return
+	}
 
-	if err := h.store.UpdateInclusion(r.Context(), id, body.IsIncluded); err != nil {
+	if err := h.store.Update(r.Context(), id, patch); err != nil {
 		WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error())
 		return
 	}

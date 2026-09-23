@@ -161,6 +161,7 @@ Models are tried in order (R1 for reasoning, V3.1 as fallback).
 - Cards are keyed by `org_name|last4` (`accounts.card_key`) so history survives SimpleFin issuing new account IDs on re-auth; the account first seen most recently is current, the others are superseded.
 - Payment patterns per card live in the `settings` table (`card_payment_patterns`), editable via `GET/PUT /api/card-payment-patterns`.
 - Tune prompts against production without calling the LLM: copy the DB from galactica (`/var/data/finance-tracker/finance_tracker.db*`) and run `DB_PATH=<copy> ENV_FILE=/dev/null go run ./cmd/promptdump`.
+- **Account inclusion** (`accounts.is_included`) belongs to an account's identity (`card_key`, falling back to its ID): `PATCH /api/accounts/{id}` sets it on every row of the key, a re-auth's new rows inherit it, and startup reconciles disagreeing rows toward the newest one. Settings → Accounts edits it per account or per institution. Excluded accounts are hidden from spending (the Transactions page sends `included_only=true` unless `show_excluded=true`), analysis and alerts, but non-card accounts are still scanned for card payments.
 
 ### Environment Variables
 

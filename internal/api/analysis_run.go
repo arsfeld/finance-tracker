@@ -114,15 +114,12 @@ func (h *AnalysisRunHandler) BuildPrompt(ctx context.Context, now time.Time) (*A
 
 	report := ledger.Build(periods, accounts, txns, snapshots, patterns, excluded)
 
-	// Only the cards being analyzed matter to the model, and a superseded ID is
-	// dead by definition. Without this the old TD account would be reported
-	// stale forever.
-	superseded := ledger.SupersededAccounts(accounts)
+	// Only the cards being analyzed matter to the model, and only through their
+	// current account: a superseded ID is dead by definition. Without this the
+	// old TD account would be reported stale forever.
 	analyzed := make(map[string]bool)
-	for _, a := range accounts {
-		if a.IsIncluded && a.IsCreditCard && !superseded[a.ID] {
-			analyzed[a.ID] = true
-		}
+	for _, a := range ledger.AnalyzedCards(accounts) {
+		analyzed[a.ID] = true
 	}
 	stale, err := h.acctStore.StaleConnections(ctx, now, StaleConnectionThreshold)
 	if err != nil {

@@ -11,16 +11,32 @@ import (
 type Report struct {
 	Periods []PeriodSpend
 	Charges []models.DBTransaction // itemized card charges in range, excluded categories removed, newest first
+	Cards   []string               // keys of the analyzed cards, sorted
+}
+
+// AnalyzedCards maps each card key to be analyzed to its current account. The
+// card is analyzed when that account is included: after a re-auth the old ID
+// is dead, so its own inclusion flag says nothing about the card.
+func AnalyzedCards(accounts []models.DBAccount) map[string]models.DBAccount {
+	analyzed := make(map[string]models.DBAccount)
+	for key, a := range CurrentAccounts(accounts) {
+		if a.IsIncluded {
+			analyzed[key] = a
+		}
+	}
+	return analyzed
 }
 
 // Build groups accounts into cards and measures each card's spending.
 //
-// Only included credit card accounts are analyzed. Every non-card account,
-// included or not, is scanned for payments toward the cards, because that is
-// where a payment shows up when the card's own feed drops it. Charges in
-// excluded categories stay out of the itemized figures, but the balance still
-// counts them. Card fees and interest are real costs, and the balance is the
-// authority.
+// A card is analyzed when its current account is included, and then every
+// account that ever reported for it contributes charges and card-side
+// payments: excluding the dead duplicate a re-auth left behind must not drop
+// the card's history. Every non-card account, included or not, is scanned for
+// payments toward the cards, because that is where a payment shows up when the
+// card's own feed drops it. Charges in excluded categories stay out of the
+// itemized figures, but the balance still counts them. Card fees and interest
+// are real costs, and the balance is the authority.
 func Build(periods []models.BillingPeriod, accounts []models.DBAccount, txns []models.DBTransaction,
 	snapshots map[string][]models.BalanceSnapshot, patterns map[string][]string, excluded []string) Report {
 	isExcluded := make(map[string]bool, len(excluded))
@@ -30,16 +46,15 @@ func Build(periods []models.BillingPeriod, accounts []models.DBAccount, txns []m
 		}
 	}
 
-	cardOf := make(map[string]string)     // included card account ID -> card key
-	isCard := make(map[string]bool)       // any card account, included or not
-	coverageEnd := make(map[string]int64) // card key -> latest balance_date
+	analyzed := AnalyzedCards(accounts)
+	cardOf := make(map[string]string) // account ID of an analyzed card -> card key
+	isCard := make(map[string]bool)   // any card account, analyzed or not
 	for _, a := range accounts {
 		if !a.IsCreditCard || a.CardKey == "" {
 			continue
 		}
 		isCard[a.ID] = true
-		coverageEnd[a.CardKey] = max(coverageEnd[a.CardKey], a.BalanceDate)
-		if a.IsIncluded {
+		if _, ok := analyzed[a.CardKey]; ok {
 			cardOf[a.ID] = a.CardKey
 		}
 	}
@@ -54,14 +69,13 @@ func Build(periods []models.BillingPeriod, accounts []models.DBAccount, txns []m
 		}
 	}
 
-	keys := make([]string, 0, len(coverageEnd))
-	for _, key := range cardOf {
+	keys := make([]string, 0, len(analyzed))
+	for key := range analyzed {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	keys = dedupSorted(keys)
 
-	var report Report
+	report := Report{Cards: keys}
 	if len(periods) == 0 {
 		return report
 	}
@@ -81,7 +95,11 @@ func Build(periods []models.BillingPeriod, accounts []models.DBAccount, txns []m
 			}
 		}
 		payments := DetectPayments(cardTxns, paying, patterns[key])
-		perCard = append(perCard, CardPeriods(periods, snapshots[key], payments, coverageEnd[key], charges))
+		// Coverage ends where the current account last reported. A superseded
+		// ID can carry a fresh balance_date over a frozen balance, which would
+		// stretch coverage over days nobody measured.
+		coverageEnd := analyzed[key].BalanceDate
+		perCard = append(perCard, CardPeriods(periods, snapshots[key], payments, coverageEnd, charges))
 	}
 
 	report.Periods = Combine(perCard)
@@ -94,16 +112,6 @@ func Build(periods []models.BillingPeriod, accounts []models.DBAccount, txns []m
 		return EffectiveDate(report.Charges[i]) > EffectiveDate(report.Charges[j])
 	})
 	return report
-}
-
-func dedupSorted(s []string) []string {
-	out := s[:0]
-	for i, v := range s {
-		if i == 0 || v != s[i-1] {
-			out = append(out, v)
-		}
-	}
-	return out
 }
 
 // FetchFrom returns how far back transactions must be loaded to measure the

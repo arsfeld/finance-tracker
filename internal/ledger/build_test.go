@@ -72,6 +72,55 @@ func TestBuildItemizesOnlyIncludedCardChargesOutsideExcludedCategories(t *testin
 	}
 }
 
+// After a re-auth SimpleFin can keep returning the dead ID with a fresh
+// balance_date and a frozen balance. Its date must not stretch the card's
+// coverage over days the current account has not reported, or the burn rate
+// decays toward zero.
+func TestBuildTakesCoverageFromTheCurrentAccountOnly(t *testing.T) {
+	accounts := productionAccounts()
+	accounts[0].BalanceDate = day(time.September, 23).Unix() // ACT-old, superseded
+	accounts[1].BalanceDate = day(time.September, 11).Unix() // ACT-new, current
+	snaps := map[string][]models.BalanceSnapshot{tdKey: {
+		snap(-12124.34, day(time.August, 31)),
+		snap(-7129.23, day(time.September, 11)),
+	}}
+
+	report := Build(productionPeriods(), accounts, nil, snaps, DefaultPaymentPatterns, nil)
+
+	if cur := report.Periods[1]; cur.Source != SourceItemizedOnly || cur.CoveredDays != 0 {
+		t.Errorf("the current account last reported Sep 11, so Sep 15 on is not covered, got %+v", cur)
+	}
+}
+
+// Whether a card is analyzed is decided by its current account. Excluding the
+// dead duplicate a re-auth left behind must not drop the card's history.
+func TestBuildKeepsSupersededHistoryOfAnIncludedCard(t *testing.T) {
+	accounts := productionAccounts()
+	accounts[0].IsIncluded = false // ACT-old
+	txns := []models.DBTransaction{on("ACT-old", tx("METRO", -100, "Groceries", day(time.August, 20)))}
+
+	report := Build(productionPeriods(), accounts, txns, nil, DefaultPaymentPatterns, nil)
+
+	if len(report.Cards) != 1 || report.Cards[0] != tdKey {
+		t.Errorf("expected the TD card to be analyzed, got %v", report.Cards)
+	}
+	if len(report.Charges) != 1 || report.Charges[0].Description != "METRO" {
+		t.Errorf("expected the old account's charge to be itemized, got %+v", report.Charges)
+	}
+}
+
+func TestBuildSkipsACardWhoseCurrentAccountIsExcluded(t *testing.T) {
+	accounts := productionAccounts()
+	accounts[1].IsIncluded = false // ACT-new
+	txns := []models.DBTransaction{on("ACT-old", tx("METRO", -100, "Groceries", day(time.August, 20)))}
+
+	report := Build(productionPeriods(), accounts, txns, nil, DefaultPaymentPatterns, nil)
+
+	if len(report.Cards) != 0 || len(report.Charges) != 0 {
+		t.Errorf("an excluded card is not analyzed, got cards %v and charges %+v", report.Cards, report.Charges)
+	}
+}
+
 // The interval that straddles the start of the range begins at the last
 // snapshot before it, and its payments can post up to the match window earlier.
 func TestFetchFromReachesBackToTheStraddlingSnapshot(t *testing.T) {

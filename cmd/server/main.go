@@ -40,8 +40,12 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to run migrations")
 	}
 
-	// Seeding failure is not fatal: without a balance history the analysis
-	// falls back to itemized totals, clearly labeled as such.
+	// Failure is not fatal, and every step is idempotent, so the next start
+	// retries it. Until then: accounts stored before card tracking stay
+	// unclassified, so the analysis finds no cards and reports an error rather
+	// than a $0 report; without the seeded snapshots the balance history starts
+	// at the next sync, and earlier periods fall back to itemized totals,
+	// labeled as such; missing payment patterns fall back to the defaults.
 	if err := store.InitCardLedger(context.Background(),
 		store.NewAccountStore(db.Read, db.Write),
 		store.NewSnapshotStore(db.Read, db.Write),

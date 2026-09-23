@@ -33,10 +33,13 @@ func (h *PaymentPatternsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	WriteData(w, patterns)
 }
 
-// Put replaces the whole map, keyed by card key.
+// Put replaces the whole map, keyed by card key. JSON null decodes into a nil
+// map without error, and storing it would silently wipe every card's patterns,
+// so it is rejected with the malformed bodies. An empty object still clears
+// them on purpose.
 func (h *PaymentPatternsHandler) Put(w http.ResponseWriter, r *http.Request) {
 	var patterns map[string][]string
-	if err := json.NewDecoder(r.Body).Decode(&patterns); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&patterns); err != nil || patterns == nil {
 		WriteError(w, http.StatusBadRequest, "BAD_REQUEST", "Expected a JSON object of card key to pattern list")
 		return
 	}

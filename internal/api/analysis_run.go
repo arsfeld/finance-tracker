@@ -113,6 +113,11 @@ func (h *AnalysisRunHandler) BuildPrompt(ctx context.Context, now time.Time) (*A
 	excluded, _ := h.catStore.ExcludedCategoryNames(ctx)
 
 	report := ledger.Build(periods, accounts, txns, snapshots, patterns, excluded)
+	// With no card to analyze every figure is zero, and a $0 report reads as
+	// a frugal month. Failing surfaces it as an analysis error instead.
+	if len(report.Cards) == 0 {
+		return nil, fmt.Errorf("no included credit card accounts to analyze")
+	}
 
 	// Only the cards being analyzed matter to the model, and only through their
 	// current account: a superseded ID is dead by definition. Without this the
@@ -223,16 +228,3 @@ func (h *AnalysisRunHandler) RunAnalysis() {
 	defer h.scheduler.Release()
 	h.runAnalysis(context.Background())
 }
-
-func parseInt(s string) int {
-	var n int
-	for _, c := range s {
-		if c >= '0' && c <= '9' {
-			n = n*10 + int(c-'0')
-		}
-	}
-	return n
-}
-
-// Suppress unused import.
-var _ = time.Now

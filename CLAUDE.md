@@ -155,6 +155,13 @@ Models are tried in order (R1 for reasoning, V3.1 as fallback).
   - If no config is specified or file is missing, no merchant filtering is applied
 - Only analyzes negative transactions (expenses)
 
+#### Balance-Trusted Card Spending (web server)
+- The web server's AI analysis covers **included credit card accounts only** (`accounts.is_credit_card`). Chequing, savings and lines of credit are used only to detect card payments.
+- Card spending comes from **balance snapshots** (`balance_snapshots`, one per card per sync when the balance changes): spend = debt growth + payments in between; an unexplained drop is treated as a payment. Transactions only supply categories ("itemized"); the rest is reported as "not itemized".
+- Cards are keyed by `org_name|last4` (`accounts.card_key`) so history survives SimpleFin issuing new account IDs on re-auth; the account first seen most recently is current, the others are superseded.
+- Payment patterns per card live in the `settings` table (`card_payment_patterns`), editable via `GET/PUT /api/card-payment-patterns`.
+- Tune prompts against production without calling the LLM: copy the DB from galactica (`/var/data/finance-tracker/finance_tracker.db*`) and run `DB_PATH=<copy> ENV_FILE=/dev/null go run ./cmd/promptdump`.
+
 ### Environment Variables
 
 Required:

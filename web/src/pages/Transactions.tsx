@@ -5,6 +5,7 @@ import { CategoryPicker } from "@/components/CategoryPicker";
 import { SimilarMerchantsDialog, useSimilarMerchants } from "@/components/SimilarMerchantsDialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -36,7 +37,9 @@ export default function Transactions() {
   const urlStart = searchParams.get("start") || "";
   const urlEnd = searchParams.get("end") || "";
   const urlPage = parseInt(searchParams.get("page") || "1", 10) || 1;
-  const urlIncludedOnly = searchParams.get("included_only") === "true";
+  // Excluded accounts are hidden unless asked for. Old links carrying
+  // included_only=true land on the same default.
+  const urlShowExcluded = searchParams.get("show_excluded") === "true";
 
   // Local state for sort (not URL-driven) and search input
   const [sortBy, setSortBy] = useState<SortField>("posted");
@@ -101,7 +104,7 @@ export default function Transactions() {
   else if (activePeriod) apiParams.end = String(activePeriod.end);
   if (urlCategory) apiParams.category = urlCategory;
   if (urlSearch) apiParams.search = urlSearch;
-  if (urlIncludedOnly) apiParams.included_only = "true";
+  if (!urlShowExcluded) apiParams.included_only = "true";
 
   const { data, isLoading } = useTransactions(apiParams);
   const transactions = data?.data || [];
@@ -161,7 +164,7 @@ export default function Transactions() {
 
   const { triggerSimilarityCheck, currentSuggestions, currentCategory: similarCategory, dismiss: dismissSimilar } = useSimilarMerchants();
 
-  const hasActiveFilters = urlCategory || urlSearch || hasCustomRange;
+  const hasActiveFilters = urlCategory || urlSearch || hasCustomRange || urlShowExcluded;
 
   // Custom range label
   const customRangeLabel = hasCustomRange
@@ -219,6 +222,13 @@ export default function Transactions() {
             </option>
           ))}
         </select>
+        <label className="flex items-center gap-2 text-sm text-muted-foreground whitespace-nowrap cursor-pointer">
+          <Checkbox
+            checked={urlShowExcluded}
+            onCheckedChange={(v) => updateParams({ show_excluded: v === true ? "true" : null, page: "1" })}
+          />
+          Show excluded accounts
+        </label>
         {hasActiveFilters && (
           <Button variant="ghost" size="sm" onClick={handleClearFilters}>
             Clear filters

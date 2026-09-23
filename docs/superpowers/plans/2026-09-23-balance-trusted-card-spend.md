@@ -1265,8 +1265,8 @@ func TestIntervalsReproduceProductionTDSpending(t *testing.T) {
 
 	got := Intervals(snaps, payments)
 
-	if len(got) != 2 || !near(got[0].Spend, 2345.11) || !near(got[1].Spend, 2694.81) {
-		t.Errorf("expected spends of 2345.11 and 2694.81, got %+v", got)
+	if len(got) != 2 || !near(got[0].Spend, 2344.89) || !near(got[1].Spend, 2694.81) {
+		t.Errorf("expected spends of 2344.89 and 2694.81, got %+v", got)
 	}
 }
 
@@ -1360,8 +1360,8 @@ func TestCardPeriodsPartialCoverageAddsItemizedOutsideWindow(t *testing.T) {
 
 	got := CardPeriods(periods, snaps, payments, day(time.September, 11).Unix(), charges)[0]
 
-	if !near(got.Total, 2445.11) || !near(got.CoveredDays, 11) {
-		t.Errorf("expected total 2345.11 + 100 over 11 covered days, got %+v", got)
+	if !near(got.Total, 2444.89) || !near(got.CoveredDays, 11) {
+		t.Errorf("expected total 2344.89 + 100 over 11 covered days, got %+v", got)
 	}
 }
 
@@ -1648,8 +1648,8 @@ func TestBuildMeasuresSpendingWithoutCardTransactions(t *testing.T) {
 	report := Build(productionPeriods(), productionAccounts(), txns, snaps, DefaultPaymentPatterns, []string{"Payment"})
 
 	total := report.Periods[0].BalanceSpend + report.Periods[1].BalanceSpend
-	if !near(total, 2345.11+2694.81) {
-		t.Errorf("expected 5039.92 of balance spending across the periods, got %.2f", total)
+	if !near(total, 2344.89+2694.81) {
+		t.Errorf("expected 5039.70 of balance spending across the periods, got %.2f", total)
 	}
 	if len(report.Charges) != 0 {
 		t.Errorf("chequing charges are out of scope, got %+v", report.Charges)

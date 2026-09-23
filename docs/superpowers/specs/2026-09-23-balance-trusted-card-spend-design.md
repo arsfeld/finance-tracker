@@ -204,8 +204,8 @@ A partially covered period (Aug 15–Sep 14 has balance data only from Aug 31)
 uses balance data for the covered days and itemized charges for the rest, and
 `CoveredDays` shows how much is covered.
 
-**Regression expectations (TD, current data):** Aug 31→Sep 11 ≈ $2,345.11
-((12,124.34 − 7,129.23) is a $4,995.11 drop, plus the $7,340 payment on Sep 1).
+**Regression expectations (TD, current data):** Aug 31→Sep 11 ≈ $2,344.89
+((12,124.34 − 7,129.23) is a $4,995.11 drop, offset by the $7,340 payment on Sep 1).
 Sep 11→Sep 23 ≈ $2,694.81 ($894.81 growth plus the $1,800 payment on Sep 22).
 
 ### 5. Prompt
@@ -298,4 +298,4 @@ Table-driven Go tests, following the existing `*_test.go` style.
   labeled as partial; itemized-only periods are labeled; payment and chequing
   transactions never appear.
 - **Regression fixture:** today's three TD readings plus the $7,340 (Sep 1) and
-  $1,800 (Sep 22) payments give $2,345.11 and $2,694.81.
+  $1,800 (Sep 22) payments give $2,344.89 and $2,694.81.

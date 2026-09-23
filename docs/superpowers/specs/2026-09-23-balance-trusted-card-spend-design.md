@@ -43,6 +43,7 @@ Production data on galactica (snapshot 2026-09-23):
 
 ## Non-Goals
 
+- Web UI for card flags or payment patterns (API only).
 - Analyzing chequing, savings or line-of-credit spending.
 - Estimating spending for periods before the first balance reading (no
   payment-based proxy).
@@ -62,8 +63,9 @@ Migration `006_balance_snapshots.sql` adds to `accounts`:
 **Classification.** When an account is first inserted, `is_credit_card` is set
 from its name using the legacy CLI's keyword list (`src/main.go`: visa,
 mastercard, amex, card, …). Names containing "line of credit" are never cards.
-Later upserts do not overwrite the flag. You can toggle it in the accounts
-settings, the same place as `is_included`.
+Later upserts do not overwrite the flag. There is no accounts UI in the web
+app (even `is_included` is API-only), so `PATCH /api/accounts/{id}` gains
+optional `is_credit_card` and `card_key` fields next to `is_included`.
 
 **Card key.** `card_key = org_name + "|" + last4`, where `last4` is the trailing
 `(NNNN)` in the account name. Example: `TD AEROPLAN VISA INFINITE (4520)` →
@@ -101,8 +103,13 @@ CREATE TABLE balance_snapshots (
 **Recording.** After the account upserts on each sync, for every account with
 `is_credit_card = 1`:
 
-1. If the account's `balance_date` is older than the card's newest snapshot,
-   skip it. This covers a superseded account (the old ID after re-auth).
+1. Only the card's **current account** is read: the account with the newest
+   `first_seen_at` for that `card_key` (ties broken by ID). A re-auth creates a
+   new ID and the old one is dead from then on, even if SimpleFin keeps
+   reporting it with a fresh `balance_date`. Every other account with the same
+   key is **superseded**.
+   A reading whose `balance_date` is not newer than the card's newest snapshot
+   is skipped.
 2. If `balance` equals the balance of the card's previous snapshot, skip it. An
    unchanged balance carries no information, and TD has reported a frozen
    balance with an advancing `balance_date` (the old account showed −$12,124.34
@@ -117,8 +124,10 @@ balance still counts as covered.
 **Seed.** The same startup step inserts, with `INSERT OR IGNORE`:
 
 - each card account's `anchor_balance` / `anchor_balance_date` (`seed_anchor`);
-- the current `balance` / `balance_date` of the newest account per `card_key`
-  (`seed_current`), subject to the unchanged-balance rule above.
+- the current `balance` / `balance_date` of each card's current account
+  (`seed_current`).
+
+Readings are applied in date order through the same rules as sync.
 
 For current data this gives three TD readings: −$12,124.34 (Aug 31),
 −$7,129.23 (Sep 11) and −$8,024.04 (Sep 23). The old account's transactions are
@@ -141,8 +150,9 @@ keyed by `card_key`:
 {"TD Canada Trust|4520": ["Bill Payment - TD VISA", "TFR-TO C/C", "TFR-A C/C"]}
 ```
 
-This default is written on first startup if the key is missing. It can be edited
-through the existing settings API.
+This default is written on first startup if the key is missing. The existing
+settings API only reflects `.env`, so a new `GET`/`PUT
+/api/card-payment-patterns` endpoint reads and replaces the map.
 
 Matching is a case-insensitive substring match after collapsing runs of
 whitespace on both sides. The real description is `WW591 TFR-A  C/C` (two
@@ -179,15 +189,20 @@ interval that crosses a period boundary is split pro-rata by seconds.
 | Field | Definition |
 |---|---|
 | `BalanceSpend` | sum of the interval spend assigned to the period |
-| `CoveredDays` | calendar days of the period between the card's first snapshot and its coverage end |
-| `DailyBurn` | `BalanceSpend / CoveredDays` |
+| `CoveredDays` | calendar days of the period between the card's first snapshot and its coverage end (a card needs at least two snapshots to have coverage) |
 | `Itemized` | sum of the absolute values of the card's negative transactions in the period, excluding excluded categories |
-| `NotItemized` | `max(0, BalanceSpend − Itemized)`; reported only when above $50 |
+| `Total` | the headline: `BalanceSpend` plus the itemized charges that fall outside the covered window |
+| `DailyBurn` | `BalanceSpend / CoveredDays`; for `itemized_only`, `Itemized / elapsed days` |
+| `NotItemized` | `max(0, BalanceSpend − itemized charges inside the covered window)`; reported only when above $50 |
 | `Source` | `balance` if `CoveredDays > 0`, otherwise `itemized_only` |
 
-A period with partial coverage uses balance data for the covered days only, and
-its `CoveredDays` shows how much that is. For `itemized_only` periods, the
-headline total is `Itemized`, and the period is labeled as such.
+Across cards, `Total`, `BalanceSpend`, `Itemized`, `NotItemized` and `DailyBurn`
+add up; `CoveredDays` is the maximum; `Source` is `balance` if any card has
+coverage.
+
+A partially covered period (Aug 15–Sep 14 has balance data only from Aug 31)
+uses balance data for the covered days and itemized charges for the rest, and
+`CoveredDays` shows how much is covered.
 
 **Regression expectations (TD, current data):** Aug 31→Sep 11 ≈ $2,345.11
 ((12,124.34 − 7,129.23) is a $4,995.11 drop, plus the $7,340 payment on Sep 1).
@@ -245,6 +260,9 @@ burn rate, and the "consider only outgoing expenses / ignore income" note.
   the settings map. Patterns are never matched against unmapped cards.
 - **Drift detector:** `UnreconciledAccounts` and its sync alert stay unchanged,
   apart from the prompt wording above.
+- **Superseded accounts** are dropped from the stale and drift lists, both in the
+  prompt and in the sync alert. Otherwise the dead old TD ID would alert on every
+  sync forever.
 
 ## Components Touched
 
@@ -259,7 +277,9 @@ burn rate, and the "consider only outgoing expenses / ignore income" note.
 | `internal/api/analysis_run.go` | build the ledger, pass it to the prompt |
 | `internal/llm/analyze.go` | prompt restructure, instructions, lag wording |
 | `internal/server` / startup | seed step, default payment patterns |
-| web accounts settings | `is_credit_card` toggle, `card_key` edit |
+| `internal/api/accounts.go` | PATCH gains `is_credit_card`, `card_key` |
+| `internal/api/payment_patterns.go` (new) | GET/PUT payment patterns |
+| `cmd/promptdump` (new) | print the analysis prompt for a DB without calling the LLM, for tuning against a copy of production |
 
 ## Testing
 

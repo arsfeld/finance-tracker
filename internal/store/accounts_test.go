@@ -499,3 +499,33 @@ func TestUpdateIncludedAppliesToTheIdentity(t *testing.T) {
 		t.Errorf("both rows must be excluded, got %v", got)
 	}
 }
+
+// A patch that changes inclusion and hand-corrects the card key in one call
+// must apply both: the identity-wide exclusion, and the new key on just the
+// patched row.
+func TestUpdateAppliesInclusionAndCardKeyTogether(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	accts := NewAccountStore(db.Read, db.Write)
+	for _, id := range []string{"ACT-old", "ACT-new"} {
+		seedAccountFull(t, accts, models.DBAccount{
+			ID: id, Name: "Tangerine Chequing Account (2106)", OrgName: "Tangerine Bank (CA)", IsIncluded: true,
+		})
+	}
+
+	off, key := false, "manual-key"
+	if err := accts.Update(ctx, "ACT-new", AccountPatch{IsIncluded: &off, CardKey: &key}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	if got := inclusionByID(t, accts); got["ACT-old"] || got["ACT-new"] {
+		t.Errorf("both rows of the original identity must be excluded, got %v", got)
+	}
+	updated, err := accts.GetByID(ctx, "ACT-new")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if updated.CardKey != "manual-key" {
+		t.Errorf("the patched row should carry the new card key, got %q", updated.CardKey)
+	}
+}

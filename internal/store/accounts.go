@@ -98,14 +98,27 @@ func (s *AccountStore) GetByID(ctx context.Context, id string) (*models.DBAccoun
 	return &a, err
 }
 
-// SetIncluded includes or excludes an account together with every other row of
-// its identity, so the choice covers the duplicates a re-auth leaves behind.
-func (s *AccountStore) SetIncluded(ctx context.Context, id string, included bool) error {
-	_, err := s.write.ExecContext(ctx, `
+// execer is the subset of *sql.DB and *sql.Tx that setIncluded needs, so it
+// can run against the pool directly or inside another call's transaction.
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// setIncluded is SetIncluded's statement, taking an executor so Update can run
+// it inside the same transaction as the rest of its patch instead of against
+// the pool directly.
+func setIncluded(ctx context.Context, db execer, id string, included bool) error {
+	_, err := db.ExecContext(ctx, `
 		UPDATE accounts SET is_included = ?, updated_at = datetime('now')
 		WHERE id = ? OR card_key = (SELECT card_key FROM accounts WHERE id = ? AND card_key != '')`,
 		included, id, id)
 	return err
+}
+
+// SetIncluded includes or excludes an account together with every other row of
+// its identity, so the choice covers the duplicates a re-auth leaves behind.
+func (s *AccountStore) SetIncluded(ctx context.Context, id string, included bool) error {
+	return setIncluded(ctx, s.write, id, included)
 }
 
 // AccountPatch changes the hand-editable fields of an account. Nil fields are
@@ -116,9 +129,20 @@ type AccountPatch struct {
 	CardKey      *string `json:"card_key"`
 }
 
+// Update applies every set field of p in one transaction, so a patch touching
+// both is_included (identity-wide) and a per-row field like card_key either
+// takes fully or not at all. The write pool holds a single connection, so
+// setIncluded is run against the transaction here rather than through
+// SetIncluded, which would try to borrow that same connection and deadlock.
 func (s *AccountStore) Update(ctx context.Context, id string, p AccountPatch) error {
+	tx, err := s.write.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	if p.IsIncluded != nil {
-		if err := s.SetIncluded(ctx, id, *p.IsIncluded); err != nil {
+		if err := setIncluded(ctx, tx, id, *p.IsIncluded); err != nil {
 			return err
 		}
 	}
@@ -131,13 +155,15 @@ func (s *AccountStore) Update(ctx context.Context, id string, p AccountPatch) er
 	if p.CardKey != nil {
 		sets, args = append(sets, "card_key = ?"), append(args, *p.CardKey)
 	}
-	if len(sets) == 0 {
-		return nil
+	if len(sets) > 0 {
+		sets = append(sets, "updated_at = datetime('now')")
+		args = append(args, id)
+		if _, err := tx.ExecContext(ctx, `UPDATE accounts SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...); err != nil {
+			return err
+		}
 	}
-	sets = append(sets, "updated_at = datetime('now')")
-	args = append(args, id)
-	_, err := s.write.ExecContext(ctx, `UPDATE accounts SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...)
-	return err
+
+	return tx.Commit()
 }
 
 // BackfillCardIdentity classifies accounts stored before cards were tracked.

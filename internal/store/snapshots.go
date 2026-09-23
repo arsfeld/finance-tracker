@@ -32,9 +32,17 @@ func NewSnapshotStore(read, write *sql.DB) *SnapshotStore {
 // reported a frozen balance with an advancing date after a payment had posted;
 // storing it would book that payment as spending.
 func (s *SnapshotStore) Record(ctx context.Context, snap models.BalanceSnapshot) (bool, error) {
+	tx, err := s.write.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	// Wrap the SELECT and INSERT in a transaction so two concurrent recordings
+	// for the same card cannot both read the same latest snapshot.
 	var lastBalance float64
 	var lastDate int64
-	err := s.write.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 		SELECT balance, balance_date FROM balance_snapshots
 		WHERE card_key = ? ORDER BY balance_date DESC LIMIT 1`, snap.CardKey).Scan(&lastBalance, &lastDate)
 	switch {
@@ -45,7 +53,7 @@ func (s *SnapshotStore) Record(ctx context.Context, snap models.BalanceSnapshot)
 		return false, nil
 	}
 
-	res, err := s.write.ExecContext(ctx, `
+	res, err := tx.ExecContext(ctx, `
 		INSERT OR IGNORE INTO balance_snapshots (card_key, account_id, balance, balance_date, source)
 		VALUES (?, ?, ?, ?, ?)`,
 		snap.CardKey, snap.AccountID, snap.Balance, snap.BalanceDate, snap.Source)
@@ -53,7 +61,11 @@ func (s *SnapshotStore) Record(ctx context.Context, snap models.BalanceSnapshot)
 		return false, err
 	}
 	n, err := res.RowsAffected()
-	return n > 0, err
+	if err != nil {
+		return false, err
+	}
+
+	return n > 0, tx.Commit()
 }
 
 // RecordCurrent records each card's current balance. It runs after every sync.

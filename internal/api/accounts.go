@@ -36,6 +36,16 @@ func (h *AccountHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	existing, err := h.store.GetByID(r.Context(), id)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error())
+		return
+	}
+	if existing == nil {
+		WriteError(w, http.StatusNotFound, "NOT_FOUND", "Account not found")
+		return
+	}
+
 	if err := h.store.Update(r.Context(), id, patch); err != nil {
 		WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error())
 		return

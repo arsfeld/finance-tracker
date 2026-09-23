@@ -131,21 +131,20 @@ type AccountPatch struct {
 
 // Update applies every set field of p in one transaction, so a patch touching
 // both is_included (identity-wide) and a per-row field like card_key either
-// takes fully or not at all. The write pool holds a single connection, so
-// setIncluded is run against the transaction here rather than through
-// SetIncluded, which would try to borrow that same connection and deadlock.
+// takes fully or not at all. Per-row fields are applied first so that, when a
+// patch also moves the row to another card_key, setIncluded sees the row on
+// its new identity rather than the one it is leaving -- otherwise inclusion
+// would land on the old identity and disagree with the new one until the next
+// restart's NormalizeInclusion silently resolved it. The write pool holds a
+// single connection, so setIncluded is run against the transaction here
+// rather than through SetIncluded, which would try to borrow that same
+// connection and deadlock.
 func (s *AccountStore) Update(ctx context.Context, id string, p AccountPatch) error {
 	tx, err := s.write.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-
-	if p.IsIncluded != nil {
-		if err := setIncluded(ctx, tx, id, *p.IsIncluded); err != nil {
-			return err
-		}
-	}
 
 	var sets []string
 	var args []any
@@ -159,6 +158,12 @@ func (s *AccountStore) Update(ctx context.Context, id string, p AccountPatch) er
 		sets = append(sets, "updated_at = datetime('now')")
 		args = append(args, id)
 		if _, err := tx.ExecContext(ctx, `UPDATE accounts SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...); err != nil {
+			return err
+		}
+	}
+
+	if p.IsIncluded != nil {
+		if err := setIncluded(ctx, tx, id, *p.IsIncluded); err != nil {
 			return err
 		}
 	}

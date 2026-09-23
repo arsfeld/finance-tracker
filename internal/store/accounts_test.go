@@ -500,32 +500,46 @@ func TestUpdateIncludedAppliesToTheIdentity(t *testing.T) {
 	}
 }
 
-// A patch that changes inclusion and hand-corrects the card key in one call
-// must apply both: the identity-wide exclusion, and the new key on just the
-// patched row.
+// A patch that changes inclusion and moves the account to another identity's
+// card key in one call must apply the per-row card_key first, then exclude
+// the identity the row ends up on -- the existing identity B, not the one it
+// came from. The rows left behind on the old identity are untouched.
 func TestUpdateAppliesInclusionAndCardKeyTogether(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
 	accts := NewAccountStore(db.Read, db.Write)
-	for _, id := range []string{"ACT-old", "ACT-new"} {
+	for _, id := range []string{"ACT-A1", "ACT-A2"} {
 		seedAccountFull(t, accts, models.DBAccount{
 			ID: id, Name: "Tangerine Chequing Account (2106)", OrgName: "Tangerine Bank (CA)", IsIncluded: true,
 		})
 	}
+	for _, id := range []string{"ACT-B1", "ACT-B2"} {
+		seedAccountFull(t, accts, models.DBAccount{
+			ID: id, Name: "TD AEROPLAN VISA INFINITE (4520)", OrgName: "TD Canada Trust", IsIncluded: true,
+		})
+	}
 
-	off, key := false, "manual-key"
-	if err := accts.Update(ctx, "ACT-new", AccountPatch{IsIncluded: &off, CardKey: &key}); err != nil {
+	off, keyB := false, "TD Canada Trust|4520"
+	if err := accts.Update(ctx, "ACT-A2", AccountPatch{IsIncluded: &off, CardKey: &keyB}); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 
-	if got := inclusionByID(t, accts); got["ACT-old"] || got["ACT-new"] {
-		t.Errorf("both rows of the original identity must be excluded, got %v", got)
+	got := inclusionByID(t, accts)
+	if got["ACT-A2"] {
+		t.Errorf("the patched row must be excluded, got %v", got)
 	}
-	updated, err := accts.GetByID(ctx, "ACT-new")
+	if got["ACT-B1"] || got["ACT-B2"] {
+		t.Errorf("every row of the identity the patched row moved onto must be excluded, got %v", got)
+	}
+	if !got["ACT-A1"] {
+		t.Errorf("the row left behind on the old identity must be unaffected, got %v", got)
+	}
+
+	updated, err := accts.GetByID(ctx, "ACT-A2")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if updated.CardKey != "manual-key" {
+	if updated.CardKey != keyB {
 		t.Errorf("the patched row should carry the new card key, got %q", updated.CardKey)
 	}
 }

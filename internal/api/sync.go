@@ -10,7 +10,6 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"finance_tracker/internal/config"
-	"finance_tracker/internal/ledger"
 	llmclient "finance_tracker/internal/llm"
 	"finance_tracker/internal/notify"
 	"finance_tracker/internal/scheduler"
@@ -140,11 +139,16 @@ func (h *SyncHandler) alertOnStaleConnections(ctx context.Context, now time.Time
 		return
 	}
 
-	// A superseded card account is the ID a re-auth replaced. It stops
-	// refreshing by design, and alerting on it would never stop.
+	// A superseded account, of any type, is an ID a re-auth replaced. It stops
+	// refreshing by design, and alerting on it would never stop. List already
+	// computes IsCurrent identity-wide (ledger.CurrentByKey), so this covers
+	// non-card duplicates too, not just cards.
 	if accounts, err := h.accounts.List(ctx); err == nil {
-		superseded := ledger.SupersededAccounts(accounts)
-		stale, drifted = filterHealth(stale, drifted, func(id string) bool { return !superseded[id] })
+		current := make(map[string]bool, len(accounts))
+		for _, a := range accounts {
+			current[a.ID] = a.IsCurrent
+		}
+		stale, drifted = filterHealth(stale, drifted, func(id string) bool { return current[id] })
 	}
 
 	message := notify.SyncHealthAlert(stale, drifted, apiErrors, now)

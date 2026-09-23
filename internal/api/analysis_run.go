@@ -10,6 +10,7 @@ import (
 
 	"finance_tracker/internal/billing"
 	"finance_tracker/internal/config"
+	"finance_tracker/internal/ledger"
 	llmclient "finance_tracker/internal/llm"
 	"finance_tracker/internal/models"
 	"finance_tracker/internal/scheduler"
@@ -22,6 +23,8 @@ type AnalysisRunHandler struct {
 	txnStore      *store.TransactionStore
 	acctStore     *store.AccountStore
 	catStore      *store.CategoryStore
+	snapshotStore *store.SnapshotStore
+	settingsStore *store.SettingsStore
 	analysisStore *store.AnalysisStore
 	budgetStore   *store.BudgetStore
 	scheduler     *scheduler.Scheduler
@@ -33,6 +36,8 @@ func NewAnalysisRunHandler(
 	txns *store.TransactionStore,
 	accts *store.AccountStore,
 	cats *store.CategoryStore,
+	snapshots *store.SnapshotStore,
+	settings *store.SettingsStore,
 	analyses *store.AnalysisStore,
 	budgets *store.BudgetStore,
 	sched *scheduler.Scheduler,
@@ -43,6 +48,8 @@ func NewAnalysisRunHandler(
 		txnStore:      txns,
 		acctStore:     accts,
 		catStore:      cats,
+		snapshotStore: snapshots,
+		settingsStore: settings,
 		analysisStore: analyses,
 		budgetStore:   budgets,
 		scheduler:     sched,
@@ -65,56 +72,58 @@ func (h *AnalysisRunHandler) TriggerAnalysis(w http.ResponseWriter, r *http.Requ
 	WriteJSON(w, http.StatusAccepted, Response{Data: map[string]string{"status": "started"}})
 }
 
-func (h *AnalysisRunHandler) runAnalysis(ctx context.Context) {
-	h.events.Broadcast("analysis_started", `{"status":"running"}`)
+// AnalysisPrompt is an assembled analysis prompt and what it was built from.
+type AnalysisPrompt struct {
+	Text       string
+	Start, End time.Time
+	Charges    []models.DBTransaction
+}
 
+// BuildPrompt assembles the analysis prompt from the database without calling
+// the LLM. cmd/promptdump uses it to tune the prompt against a copy of
+// production.
+func (h *AnalysisRunHandler) BuildPrompt(ctx context.Context, now time.Time) (*AnalysisPrompt, error) {
 	billingDay := h.cfg.BillingDay
-
-	// Determine analysis type: use multi-period (5 cycles) by default.
-	dateRangeType := models.DateRangeTypeCurrentAndLastMonth
-	startDate, endDate, err := billing.CalculateDateRange(dateRangeType, nil, nil, billingDay)
+	start, end, err := billing.CalculateDateRange(models.DateRangeTypeCurrentAndLastMonth, nil, nil, billingDay)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to calculate date range for analysis")
-		h.events.Broadcast("analysis_error", fmt.Sprintf(`{"error":"%s"}`, err.Error()))
-		return
+		return nil, fmt.Errorf("date range: %w", err)
 	}
+	periods := llmclient.CyclePeriods(start, end, billingDay)
 
-	// Fetch transactions for the period.
-	txns, err := h.txnStore.GetForPeriod(ctx, startDate.Unix(), endDate.Unix())
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to fetch transactions for analysis")
-		h.events.Broadcast("analysis_error", fmt.Sprintf(`{"error":"%s"}`, err.Error()))
-		return
-	}
-
-	if len(txns) == 0 {
-		log.Warn().Msg("No transactions found for analysis period")
-		h.events.Broadcast("analysis_error", `{"error":"No transactions found for the analysis period"}`)
-		return
-	}
-
-	// Get accounts.
 	accounts, err := h.acctStore.List(ctx)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to fetch accounts for analysis")
-		h.events.Broadcast("analysis_error", fmt.Sprintf(`{"error":"%s"}`, err.Error()))
-		return
+		return nil, fmt.Errorf("accounts: %w", err)
 	}
-
-	// Filter out transactions in excluded categories.
-	excludedCats, _ := h.catStore.ExcludedCategoryNames(ctx)
-	if len(excludedCats) > 0 {
-		filtered := llmclient.FilterExcludedCategories(txns, excludedCats)
-		log.Info().Int("before", len(txns)).Int("after", len(filtered)).Int("excluded_categories", len(excludedCats)).Msg("Filtered excluded categories from analysis")
-		txns = filtered
+	snapshots, err := h.snapshotStore.ListByCard(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("balance snapshots: %w", err)
 	}
+	txns, err := h.txnStore.GetForPeriodAllAccounts(ctx, ledger.FetchFrom(snapshots, start).Unix(), end.Unix())
+	if err != nil {
+		return nil, fmt.Errorf("transactions: %w", err)
+	}
+	rawPatterns, err := h.settingsStore.Get(ctx, ledger.PaymentPatternsSettingKey)
+	if err != nil {
+		return nil, fmt.Errorf("payment patterns: %w", err)
+	}
+	patterns, err := ledger.ParsePaymentPatterns(rawPatterns)
+	if err != nil {
+		return nil, fmt.Errorf("payment patterns: %w", err)
+	}
+	excluded, _ := h.catStore.ExcludedCategoryNames(ctx)
 
-	// Load budgets for prompt context.
-	budgets, _ := h.budgetStore.GetAll(ctx)
+	report := ledger.Build(periods, accounts, txns, snapshots, patterns, excluded)
 
-	// A report built on a dead connection reads as a spending drop, so the model
-	// is told which accounts stopped syncing before it interprets the numbers.
-	now := time.Now().UTC()
+	// Only the cards being analyzed matter to the model, and a superseded ID is
+	// dead by definition. Without this the old TD account would be reported
+	// stale forever.
+	superseded := ledger.SupersededAccounts(accounts)
+	analyzed := make(map[string]bool)
+	for _, a := range accounts {
+		if a.IsIncluded && a.IsCreditCard && !superseded[a.ID] {
+			analyzed[a.ID] = true
+		}
+	}
 	stale, err := h.acctStore.StaleConnections(ctx, now, StaleConnectionThreshold)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to check for stale connections")
@@ -123,9 +132,31 @@ func (h *AnalysisRunHandler) runAnalysis(ctx context.Context) {
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to reconcile account balances")
 	}
+	stale, drifted = filterHealth(stale, drifted, func(id string) bool { return analyzed[id] })
 
-	// Build prompt.
-	prompt := llmclient.GeneratePrompt(txns, accounts, stale, drifted, startDate, endDate, now, billingDay, true, budgets...)
+	budgets, _ := h.budgetStore.GetAll(ctx)
+
+	text := llmclient.GeneratePrompt(llmclient.PromptInput{
+		Periods: report.Periods, Charges: report.Charges,
+		Stale: stale, Drifted: drifted, Budgets: budgets,
+		BillingDay: billingDay, Now: now,
+	})
+	return &AnalysisPrompt{Text: text, Start: start, End: end, Charges: report.Charges}, nil
+}
+
+func (h *AnalysisRunHandler) runAnalysis(ctx context.Context) {
+	h.events.Broadcast("analysis_started", `{"status":"running"}`)
+
+	billingDay := h.cfg.BillingDay
+	dateRangeType := models.DateRangeTypeCurrentAndLastMonth
+
+	built, err := h.BuildPrompt(ctx, time.Now().UTC())
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to build analysis prompt")
+		h.events.Broadcast("analysis_error", fmt.Sprintf(`{"error":"%s"}`, err.Error()))
+		return
+	}
+	prompt, startDate, endDate, txns := built.Text, built.Start, built.End, built.Charges
 
 	if h.cfg.OpenRouterURL == "" || h.cfg.OpenRouterAPIKey == "" || h.cfg.OpenRouterModel == "" {
 		log.Error().Msg("OpenRouter not configured")

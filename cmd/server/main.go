@@ -15,6 +15,7 @@ import (
 	"finance_tracker/internal/database"
 	"finance_tracker/internal/scheduler"
 	"finance_tracker/internal/server"
+	"finance_tracker/internal/store"
 )
 
 func main() {
@@ -37,6 +38,15 @@ func main() {
 
 	if err := database.Migrate(db.Write); err != nil {
 		log.Fatal().Err(err).Msg("Failed to run migrations")
+	}
+
+	// Seeding failure is not fatal: without a balance history the analysis
+	// falls back to itemized totals, clearly labeled as such.
+	if err := store.InitCardLedger(context.Background(),
+		store.NewAccountStore(db.Read, db.Write),
+		store.NewSnapshotStore(db.Read, db.Write),
+		store.NewSettingsStore(db.Read, db.Write)); err != nil {
+		log.Error().Err(err).Msg("Failed to prepare card ledger")
 	}
 
 	sched := scheduler.New()

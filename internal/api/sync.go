@@ -10,6 +10,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"finance_tracker/internal/config"
+	"finance_tracker/internal/ledger"
 	llmclient "finance_tracker/internal/llm"
 	"finance_tracker/internal/notify"
 	"finance_tracker/internal/scheduler"
@@ -22,6 +23,7 @@ type SyncHandler struct {
 	accounts  *store.AccountStore
 	txns      *store.TransactionStore
 	cats      *store.CategoryStore
+	snapshots *store.SnapshotStore
 	syncLog   *store.SyncLogStore
 	scheduler *scheduler.Scheduler
 	events    *EventHub
@@ -32,6 +34,7 @@ func NewSyncHandler(
 	accounts *store.AccountStore,
 	txns *store.TransactionStore,
 	cats *store.CategoryStore,
+	snapshots *store.SnapshotStore,
 	syncLog *store.SyncLogStore,
 	sched *scheduler.Scheduler,
 	events *EventHub,
@@ -41,6 +44,7 @@ func NewSyncHandler(
 		accounts:  accounts,
 		txns:      txns,
 		cats:      cats,
+		snapshots: snapshots,
 		syncLog:   syncLog,
 		scheduler: sched,
 		events:    events,
@@ -81,6 +85,14 @@ func (h *SyncHandler) runSync(ctx context.Context) {
 		h.syncLog.Complete(ctx, logID, "error", 0, 0, err.Error(), string(apiErrJSON))
 		h.events.Broadcast("sync_error", `{"error":"`+err.Error()+`"}`)
 		return
+	}
+
+	// Balances are the record of card spending, so they are captured right
+	// after the accounts are refreshed, before anything else can fail.
+	if n, err := h.snapshots.RecordCurrent(ctx); err != nil {
+		log.Error().Err(err).Msg("Failed to record card balances")
+	} else if n > 0 {
+		log.Info().Int("snapshots", n).Msg("Recorded card balances")
 	}
 
 	status := "success"
@@ -126,6 +138,13 @@ func (h *SyncHandler) alertOnStaleConnections(ctx context.Context, now time.Time
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to reconcile account balances")
 		return
+	}
+
+	// A superseded card account is the ID a re-auth replaced. It stops
+	// refreshing by design, and alerting on it would never stop.
+	if accounts, err := h.accounts.List(ctx); err == nil {
+		superseded := ledger.SupersededAccounts(accounts)
+		stale, drifted = filterHealth(stale, drifted, func(id string) bool { return !superseded[id] })
 	}
 
 	message := notify.SyncHealthAlert(stale, drifted, apiErrors, now)

@@ -30,9 +30,11 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	analysisStore := store.NewAnalysisStore(db.Read, db.Write)
 	syncLogStore := store.NewSyncLogStore(db.Read, db.Write)
 	budgetStore := store.NewBudgetStore(db.Read, db.Write)
+	snapshotStore := store.NewSnapshotStore(db.Read, db.Write)
+	settingsStore := store.NewSettingsStore(db.Read, db.Write)
 
-	syncHandler := api.NewSyncHandler(cfg, accountStore, txnStore, catStore, syncLogStore, sched, events)
-	analysisRunHandler := api.NewAnalysisRunHandler(cfg, txnStore, accountStore, catStore, analysisStore, budgetStore, sched, events)
+	syncHandler := api.NewSyncHandler(cfg, accountStore, txnStore, catStore, snapshotStore, syncLogStore, sched, events)
+	analysisRunHandler := api.NewAnalysisRunHandler(cfg, txnStore, accountStore, catStore, snapshotStore, settingsStore, analysisStore, budgetStore, sched, events)
 
 	s := &Server{
 		db:        db,
@@ -69,6 +71,11 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	acctHandler := api.NewAccountHandler(accountStore)
 	s.mux.HandleFunc("GET /api/accounts", acctHandler.List)
 	s.mux.HandleFunc("PATCH /api/accounts/{id}", acctHandler.Update)
+
+	// Card payment patterns
+	patternsHandler := api.NewPaymentPatternsHandler(settingsStore)
+	s.mux.HandleFunc("GET /api/card-payment-patterns", patternsHandler.Get)
+	s.mux.HandleFunc("PUT /api/card-payment-patterns", patternsHandler.Put)
 
 	// Categories
 	catHandler := api.NewCategoryHandler(catStore, txnStore, events, cfg)

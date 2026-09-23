@@ -8,221 +8,166 @@ import (
 	"time"
 
 	"finance_tracker/internal/billing"
+	"finance_tracker/internal/ledger"
 	"finance_tracker/internal/models"
 )
 
 // SystemPrompt is the default LLM system prompt for spending analysis.
 const SystemPrompt = `You are an expert financial analyst specializing in personal finance and spending pattern analysis for families.
-You are analyzing spending for a Canadian family of 4: 2 adults, 2 daughters (born 2021 and 2024, currently ~4 and ~1 years old).
-Your role is to provide clear, actionable insights from transaction data. Focus on identifying trends,
-highlighting what's improving and what needs attention, and providing family-relevant suggestions.
+You are analyzing credit card spending for a Canadian family of 4: 2 adults, 2 daughters (born 2021 and 2024, currently ~4 and ~1 years old).
+The family pays the card in full every month, so card spending is what the household spends day to day.
+Spending totals and daily burn rates come from card balances and are authoritative, even when individual transactions are missing.
+Categories and individual charges describe only the itemized part of that spending.
 Be concise, specific, and use the pre-calculated data provided — do not recalculate totals or percentages.`
 
-// GeneratePrompt builds an analysis prompt from database transactions.
-func GeneratePrompt(
-	transactions []models.DBTransaction,
-	accounts []models.DBAccount,
-	stale []models.StaleConnection,
-	drifted []models.UnreconciledAccount,
-	startDate, endDate time.Time,
-	now time.Time,
-	billingDay int,
-	isMultiPeriod bool,
-	budgets ...models.Budget,
-) string {
-	dataLagWarning := buildDataLagWarning(stale, drifted, now)
-	// Filter to expenses only.
-	var expenses []models.DBTransaction
-	for _, t := range transactions {
-		if t.Amount < 0 {
-			expenses = append(expenses, t)
-		}
-	}
-
-	txnTable := formatDBTransactions(expenses)
-	acctTable := formatDBAccounts(accounts)
-	totalExpenses := calcTotalExpenses(expenses)
-
-	var prompt string
-	if isMultiPeriod {
-		prompt = generateMultiPeriodPrompt(expenses, accounts, startDate, endDate, now, billingDay, acctTable, txnTable, totalExpenses, dataLagWarning)
-	} else {
-		prompt = generateSinglePeriodPrompt(expenses, startDate, endDate, now, acctTable, txnTable, totalExpenses, dataLagWarning)
-	}
-
-	// Append budget status if budgets are configured.
-	if len(budgets) > 0 {
-		prompt += "\n\n" + buildBudgetSection(budgets, expenses, billingDay)
-	}
-
-	return prompt
+// PromptInput is everything the analysis prompt is built from.
+type PromptInput struct {
+	Periods    []ledger.PeriodSpend   // one per billing cycle, oldest first
+	Charges    []models.DBTransaction // itemized card charges, excluded categories removed
+	Stale      []models.StaleConnection
+	Drifted    []models.UnreconciledAccount
+	Budgets    []models.Budget
+	BillingDay int
+	Now        time.Time
 }
 
-func generateSinglePeriodPrompt(
-	expenses []models.DBTransaction,
-	startDate, endDate time.Time,
-	now time.Time,
-	acctTable, txnTable string,
-	totalExpenses float64,
-	dataLagWarning string,
-) string {
-	calDays := int(endDate.Sub(startDate).Hours()/24) + 1
-	txnDays := countTxnDays(expenses, startDate, endDate)
+const readingGuide = `How to read these numbers:
+- "Total" and "Daily burn" come from the card balance: debt going up is spending, debt going down is a payment. They are authoritative even when transactions are missing.
+- "Itemized" is the part of that spending with individual transactions. Categories and top expenses describe only this part.
+- "Not itemized" is spending the balance shows but the transaction feed did not deliver. It is real spending with an unknown category — never treat it as savings.
+- Card payments and transfers are not expenses and are not shown.
+- Periods marked "itemized only" have no balance history; their totals are a lower bound. Do not compare them with balance periods or read a trend across that boundary.
+`
 
-	burnRate := 0.0
-	if txnDays > 0 {
-		burnRate = totalExpenses / float64(txnDays)
-	}
-	monthlyProjection := burnRate * 30
+const reportInstructions = `### Instructions
 
-	topExpenses := formatTopExpenses(expenses, 10)
+Analyze this family's credit card spending. Write a concise report (~250 words) with:
 
-	catBreakdown := buildCategoryBreakdown(expenses)
-
-	return fmt.Sprintf(`## Financial Transaction Analysis — Family of 4
-
-Household: 2 adults, 2 children (born 2021 and 2024, currently ~4 and ~1 years old).
-
-Billing Period: %s to %s (%d calendar days, %d transaction days)
-Total Expenses: $%.2f
-Daily Burn Rate: $%.2f/day (based on transaction days)
-Monthly Projection: $%.2f (at current rate)
-
-%s
-%s
-
-Please create a concise report (~250 words) with:
-
-### Summary
-Provide a human-friendly overview of spending patterns during this period.
-
-### Analysis Breakdown
-1. **Total Expenses**: $%.2f
-2. **Major Categories**: Use the pre-calculated category totals above
-3. **Top 10 Largest Expenses**:
-%s4. **Key Insights**: 1-2 actionable insights referencing the burn rate and projection above.
-
-Notes:
-- Consider only outgoing expenses (ignore income/credits/refunds)
-- Format all monetary values consistently (e.g., $1,234.56)
-- Use CAD ($) for all amounts
-
-Accounts Information:
-%s
-
-All Transactions:
-%s`,
-		startDate.Format("2006-01-02"), endDate.Format("2006-01-02"),
-		calDays, txnDays, totalExpenses, burnRate, monthlyProjection,
-		catBreakdown, dataLagWarning,
-		totalExpenses, topExpenses, acctTable, txnTable)
-}
-
-func generateMultiPeriodPrompt(
-	expenses []models.DBTransaction,
-	accounts []models.DBAccount,
-	startDate, endDate time.Time,
-	now time.Time,
-	billingDay int,
-	acctTable, txnTable string,
-	totalExpenses float64,
-	dataLagWarning string,
-) string {
-	periods := calcBillingPeriods(startDate, endDate, billingDay)
-	periodTotals := calcPeriodTotals(expenses, periods)
-
-	var summary strings.Builder
-	summary.WriteString(fmt.Sprintf("Multi-Cycle Analysis (%d Billing Periods):\n", len(periods)))
-
-	var completedBurnRates []float64
-	for i, p := range periods {
-		calDays := int(p.End.Sub(p.Start).Hours()/24) + 1
-		txnDays := countTxnDays(expenses, p.Start, p.End)
-		burnRate := 0.0
-		if txnDays > 0 {
-			burnRate = periodTotals[i] / float64(txnDays)
-		}
-		status := "completed"
-		if !p.IsComplete {
-			status = "in progress"
-		}
-		focus := ""
-		if p.IsFocus {
-			focus = " [FOCUS]"
-		}
-		change := ""
-		if i > 0 && periodTotals[i-1] > 0 {
-			pct := ((periodTotals[i] - periodTotals[i-1]) / periodTotals[i-1]) * 100
-			dir := "no change"
-			if pct > 0 {
-				dir = "increase"
-			} else if pct < 0 {
-				dir = "decrease"
-			}
-			change = fmt.Sprintf(" - Change: %+.1f%% (%s)", pct, dir)
-		}
-		summary.WriteString(fmt.Sprintf("- Period %d: %s (%d cal/%d txn days) - $%.2f [%s] - Burn: $%.2f/day%s%s\n",
-			i+1, p.Label, calDays, txnDays, periodTotals[i], status, burnRate, change, focus))
-		if p.IsComplete {
-			completedBurnRates = append(completedBurnRates, burnRate)
-		}
-	}
-
-	avg := 0.0
-	if len(periodTotals) > 0 {
-		s := 0.0
-		for _, t := range periodTotals {
-			s += t
-		}
-		avg = s / float64(len(periodTotals))
-	}
-	avgBurn := 0.0
-	if len(completedBurnRates) > 0 {
-		s := 0.0
-		for _, r := range completedBurnRates {
-			s += r
-		}
-		avgBurn = s / float64(len(completedBurnRates))
-	}
-
-	summary.WriteString(fmt.Sprintf("- Grand Total: $%.2f\n", totalExpenses))
-	summary.WriteString(fmt.Sprintf("- %d-Period Average: $%.2f\n", len(periods), avg))
-	summary.WriteString(fmt.Sprintf("- Average Burn Rate (completed): $%.2f/day\n", avgBurn))
-	summary.WriteString(fmt.Sprintf("- Monthly Projection: $%.2f\n", avgBurn*30))
-
-	catBreakdown := buildCategoryBreakdown(expenses)
-	topExpenses := formatTopExpenses(expenses, 10)
-
-	return fmt.Sprintf(`## Financial Transaction Analysis — Family of 4
-
-Household: 2 adults, 2 children (born 2021 and 2024, currently ~4 and ~1 years old).
-
-%s
-%s
-%s
-
-### Instructions
-
-Analyze this family's spending. Write a concise report (~250 words) with:
-
-1. **Summary**: Overview of the last 3 billing cycles. What's the overall trajectory?
-2. **What's Improving**: Categories or habits trending positively.
-3. **What Needs Attention**: Categories growing faster than average, unusual spikes.
-4. **Top Expenses**: The 10 largest individual charges:
-%s5. **Family-Specific Insights**: Note anything relevant to a family with young children.
+1. **Summary**: The last 3 billing cycles by total and daily burn. What's the trajectory?
+2. **Burn Rate**: Is the current cycle's daily burn higher or lower than the last completed cycle? Say so even when the reason can't be itemized.
+3. **What's Improving / What Needs Attention**: From the itemized categories, framed as a share of what is itemized.
+4. **Top Expenses**: The 10 largest itemized charges:
+%s5. **Family-Specific Insights**: Anything relevant to a family with young children.
 6. **Actionable Suggestions**: 2-3 concrete things to try next billing cycle.
 
 Notes:
 - All calculations are pre-computed. Use them directly.
-- Focus narrative on FOCUS periods.
+- Focus the narrative on FOCUS periods.
 - Use CAD ($) for all amounts.
-- Consider only outgoing expenses.
+- When a period has "Not itemized" spending, say how much could not be broken down instead of guessing what it was.
+`
 
-Accounts Information:
-%s
+// GeneratePrompt builds the analysis prompt from balance-derived card spending.
+func GeneratePrompt(in PromptInput) string {
+	// Only charges are itemized spending; a credit reaching this point would be
+	// a payment or refund and has no place in the prompt.
+	var charges []models.DBTransaction
+	for _, t := range in.Charges {
+		if t.Amount < 0 {
+			charges = append(charges, t)
+		}
+	}
 
-All Transactions:
-%s`, summary.String(), catBreakdown, dataLagWarning, topExpenses, acctTable, txnTable)
+	var b strings.Builder
+	b.WriteString("## Credit Card Spending Analysis — Family of 4\n\n")
+	b.WriteString("Household: 2 adults, 2 children (born 2021 and 2024, currently ~4 and ~1 years old).\n\n")
+	b.WriteString(readingGuide)
+	b.WriteString("\n")
+	b.WriteString(buildPeriodTable(in.Periods))
+	b.WriteString(buildBurnTrend(in.Periods))
+	b.WriteString(buildDataLagWarning(in.Stale, in.Drifted, in.Now))
+	b.WriteString("\n")
+	b.WriteString(buildCoverageLine(in.Periods))
+	b.WriteString(buildCategoryBreakdown(charges))
+	b.WriteString("\n")
+	fmt.Fprintf(&b, reportInstructions, formatTopExpenses(charges, 10))
+	if len(in.Budgets) > 0 {
+		b.WriteString("\n" + buildBudgetSection(in.Budgets, charges, in.BillingDay, currentPeriod(in.Periods)) + "\n")
+	}
+	b.WriteString("\nCard Charges:\n")
+	b.WriteString(formatDBTransactions(charges))
+	return b.String()
+}
+
+func money(v float64) string { return fmt.Sprintf("$%.2f", v) }
+
+func buildPeriodTable(periods []ledger.PeriodSpend) string {
+	var b strings.Builder
+	b.WriteString("Billing Periods:\n\n")
+	b.WriteString("| Period | Status | Source | Covered days | Total | Daily burn | Change | Itemized | Not itemized |\n")
+	b.WriteString("|--------|--------|--------|--------------|-------|------------|--------|----------|--------------|\n")
+	for i, p := range periods {
+		status := "completed"
+		if !p.Period.IsComplete {
+			status = "in progress"
+		}
+		if p.Period.IsFocus {
+			status += " [FOCUS]"
+		}
+		source, covered := "balance", fmt.Sprintf("%.1f", p.CoveredDays)
+		if p.Source == ledger.SourceItemizedOnly {
+			source, covered = "itemized only", "—"
+		}
+		// A cycle in progress has a partial total, so only completed balance
+		// cycles are compared; the burn trend covers the current one.
+		change := "—"
+		if i > 0 {
+			prev := periods[i-1]
+			if p.Period.IsComplete && p.Source == ledger.SourceBalance && prev.Source == ledger.SourceBalance && prev.Total > 0 {
+				change = fmt.Sprintf("%+.1f%%", (p.Total-prev.Total)/prev.Total*100)
+			}
+		}
+		notItemized := "—"
+		if p.NotItemized > 0 {
+			notItemized = money(p.NotItemized)
+		}
+		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s/day | %s | %s | %s |\n",
+			p.Period.Label, status, source, covered, money(p.Total), money(p.DailyBurn), change, money(p.Itemized), notItemized)
+	}
+	return b.String()
+}
+
+// buildBurnTrend compares the current cycle's daily burn with the last
+// completed cycle that has balance data. It answers "is spending going up?"
+// even when nothing can be itemized.
+func buildBurnTrend(periods []ledger.PeriodSpend) string {
+	if len(periods) == 0 {
+		return ""
+	}
+	cur := periods[len(periods)-1]
+	if cur.Period.IsComplete || cur.Source != ledger.SourceBalance {
+		return ""
+	}
+	for i := len(periods) - 2; i >= 0; i-- {
+		prev := periods[i]
+		if prev.Period.IsComplete && prev.Source == ledger.SourceBalance && prev.DailyBurn > 0 {
+			return fmt.Sprintf("\nCurrent cycle burn: %s/day over %.1f days vs %s/day in %s (%+.1f%%).\n",
+				money(cur.DailyBurn), cur.CoveredDays, money(prev.DailyBurn), prev.Period.Label,
+				(cur.DailyBurn-prev.DailyBurn)/prev.DailyBurn*100)
+		}
+	}
+	return fmt.Sprintf("\nCurrent cycle burn: %s/day over %.1f days. No completed cycle has balance data yet, so there is no balance-based comparison.\n",
+		money(cur.DailyBurn), cur.CoveredDays)
+}
+
+func buildCoverageLine(periods []ledger.PeriodSpend) string {
+	var total, itemized float64
+	for _, p := range periods {
+		total += p.Total
+		itemized += p.Itemized
+	}
+	if total <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("Categories cover %s of %s (%.0f%%) of card spending across these periods.\n",
+		money(itemized), money(total), math.Min(100, itemized/total*100))
+}
+
+func currentPeriod(periods []ledger.PeriodSpend) *ledger.PeriodSpend {
+	if len(periods) == 0 {
+		return nil
+	}
+	return &periods[len(periods)-1]
 }
 
 // Helper functions operating on DB types.
@@ -241,16 +186,6 @@ func formatDBTransactions(txns []models.DBTransaction) string {
 			cat = "Uncategorized"
 		}
 		b.WriteString(fmt.Sprintf("| %s | %.2f | %s | %s |\n", t.Description, t.Amount, time.Unix(ts, 0).Format("2006-01-02"), cat))
-	}
-	return b.String()
-}
-
-func formatDBAccounts(accounts []models.DBAccount) string {
-	var b strings.Builder
-	b.WriteString("| Account | Balance | Last Synced |\n")
-	b.WriteString("|---------|---------|-------------|\n")
-	for _, a := range accounts {
-		b.WriteString(fmt.Sprintf("| %s | %.2f | %s |\n", a.Name, a.Balance, time.Unix(a.BalanceDate, 0).Format("2006-01-02")))
 	}
 	return b.String()
 }
@@ -314,7 +249,7 @@ func buildCategoryBreakdown(txns []models.DBTransaction) string {
 	return b.String()
 }
 
-func buildBudgetSection(budgets []models.Budget, expenses []models.DBTransaction, billingDay int) string {
+func buildBudgetSection(budgets []models.Budget, expenses []models.DBTransaction, billingDay int, current *ledger.PeriodSpend) string {
 	// Budgets are monthly, so compare against spending in the current billing period only.
 	// The analysis range often spans several billing periods; including all of it would make
 	// every category look massively over budget.
@@ -358,26 +293,18 @@ func buildBudgetSection(budgets []models.Budget, expenses []models.DBTransaction
 		b.WriteString(fmt.Sprintf("- %s: $%.2f spent / $%.2f budget (%.0f%%)%s\n",
 			budget.Category, spent, budget.Amount, pct, status))
 	}
+	// Budgets can only be checked against itemized charges. When most of the
+	// cycle is unitemized, "under budget" means nothing, and the model has to know.
+	if current != nil && current.Source == ledger.SourceBalance && current.Total > 0 && current.Itemized/current.Total < 0.8 {
+		fmt.Fprintf(&b, "\nOnly %.0f%% of this cycle's card spending is itemized, so these budget figures are lower bounds.",
+			current.Itemized/current.Total*100)
+	}
 	b.WriteString("\nComment on budget adherence where budgets are set. Note any categories that are significantly over budget.")
 	return b.String()
 }
 
-func countTxnDays(txns []models.DBTransaction, start, end time.Time) int {
-	days := make(map[string]bool)
-	for _, t := range txns {
-		ts := t.Posted
-		if t.TransactedAt != nil {
-			ts = *t.TransactedAt
-		}
-		d := time.Unix(ts, 0)
-		if !d.Before(start) && !d.After(end) {
-			days[d.Format("2006-01-02")] = true
-		}
-	}
-	return len(days)
-}
-
-func calcBillingPeriods(start, end time.Time, billingDay int) []models.BillingPeriod {
+// CyclePeriods splits [start, end] into billing cycles, oldest first; the last three are marked as focus.
+func CyclePeriods(start, end time.Time, billingDay int) []models.BillingPeriod {
 	if billingDay < 1 {
 		billingDay = 1
 	} else if billingDay > 28 {
@@ -425,89 +352,40 @@ func calcBillingPeriods(start, end time.Time, billingDay int) []models.BillingPe
 	return periods
 }
 
-func calcPeriodTotals(txns []models.DBTransaction, periods []models.BillingPeriod) []float64 {
-	totals := make([]float64, len(periods))
-	for _, t := range txns {
-		ts := t.Posted
-		if t.TransactedAt != nil {
-			ts = *t.TransactedAt
-		}
-		d := time.Unix(ts, 0)
-		for i, p := range periods {
-			if !d.Before(p.Start) && !d.After(p.End) {
-				totals[i] += math.Abs(t.Amount)
-				break
-			}
-		}
-	}
-	return totals
-}
-
-// FilterExcludedCategories removes transactions belonging to categories the user
-// has excluded from analysis. Exclusion is independent of the sign of the amount:
-// both legs of an excluded transfer must disappear, otherwise the negative leg
-// would be counted as spending while the positive leg is silently dropped.
-func FilterExcludedCategories(txns []models.DBTransaction, excluded []string) []models.DBTransaction {
-	if len(excluded) == 0 {
-		return txns
-	}
-
-	set := make(map[string]bool, len(excluded))
-	for _, c := range excluded {
-		if c != "" {
-			set[c] = true
-		}
-	}
-	if len(set) == 0 {
-		return txns
-	}
-
-	filtered := make([]models.DBTransaction, 0, len(txns))
-	for _, t := range txns {
-		if !set[t.Category] {
-			filtered = append(filtered, t)
-		}
-	}
-	return filtered
-}
-
-// buildDataLagWarning describes the accounts whose bank connection has stopped
-// refreshing, so the model can tell missing data from a genuinely quiet month.
+// buildDataLagWarning tells the model which cards are not reporting in full.
 //
-// The trigger is the connection, not the transaction feed. A gap since the last
-// charge means nothing on its own — a card can go a fortnight without a
-// purchase — and a global "newest transaction" check stays silent as long as
-// any one account is still live, which is exactly how five dead accounts went
-// unnoticed for months.
+// A stale card has stopped refreshing, so its balance, and with it the totals,
+// are out of date. A drifted card's balance is current, so the totals already
+// include its spending; only the itemization is short. Calling that "incomplete
+// data" would contradict the totals the model was just told to trust.
 func buildDataLagWarning(stale []models.StaleConnection, drifted []models.UnreconciledAccount, now time.Time) string {
-	if len(stale) == 0 && len(drifted) == 0 {
-		return ""
-	}
-
 	var b strings.Builder
-	b.WriteString("\n> [!WARNING]\n> **DATA LAG DETECTED**: ")
-	b.WriteString(fmt.Sprintf("%d account(s) are not reporting in full, so this analysis is based on INCOMPLETE data. ", len(stale)+len(drifted)))
-	b.WriteString("Do not congratulate the user on low spending, and do not read a downward trend into it.\n")
-
-	for _, c := range stale {
-		lastSync := time.Unix(c.BalanceDate, 0).UTC()
-		line := fmt.Sprintf("> - **%s** (%s): last refreshed %s (%d days ago)",
-			c.Name, c.OrgName, lastSync.Format("Jan 2, 2006"), daysBetween(lastSync, now))
-		if c.LastTransaction > 0 {
-			lastTxn := time.Unix(c.LastTransaction, 0).UTC()
-			line += fmt.Sprintf("; newest transaction %s (%d days ago)",
-				lastTxn.Format("Jan 2, 2006"), daysBetween(lastTxn, now))
-		} else {
-			line += "; no transactions on record"
+	if len(stale) > 0 {
+		b.WriteString("\n> [!WARNING]\n> **DATA LAG DETECTED**: ")
+		fmt.Fprintf(&b, "%d card(s) stopped refreshing, so their balances — and this analysis — are out of date. ", len(stale))
+		b.WriteString("Do not congratulate the user on low spending, and do not read a downward trend into it.\n")
+		for _, c := range stale {
+			lastSync := time.Unix(c.BalanceDate, 0).UTC()
+			line := fmt.Sprintf("> - **%s** (%s): last refreshed %s (%d days ago)",
+				c.Name, c.OrgName, lastSync.Format("Jan 2, 2006"), daysBetween(lastSync, now))
+			if c.LastTransaction > 0 {
+				lastTxn := time.Unix(c.LastTransaction, 0).UTC()
+				line += fmt.Sprintf("; newest transaction %s (%d days ago)",
+					lastTxn.Format("Jan 2, 2006"), daysBetween(lastTxn, now))
+			} else {
+				line += "; no transactions on record"
+			}
+			b.WriteString(line + "\n")
 		}
-		b.WriteString(line + "\n")
 	}
-
-	for _, u := range drifted {
-		fmt.Fprintf(&b, "> - **%s** (%s): still syncing, but its balance has moved $%.2f more than its transactions account for, so that spending is missing from this report\n",
-			u.Name, u.OrgName, math.Abs(u.Unexplained))
+	if len(drifted) > 0 {
+		b.WriteString("\n> [!NOTE]\n> **ITEMIZATION GAP**: these cards' balances are current, so the totals above include all their spending, ")
+		b.WriteString("but some of it arrived without transactions. Categories and top expenses under-count by these amounts.\n")
+		for _, u := range drifted {
+			fmt.Fprintf(&b, "> - **%s** (%s): balance tracked; itemization missing for $%.2f\n",
+				u.Name, u.OrgName, math.Abs(u.Unexplained))
+		}
 	}
-
 	return b.String()
 }
 

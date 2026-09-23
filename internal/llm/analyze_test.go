@@ -5,229 +5,148 @@ import (
 	"testing"
 	"time"
 
+	"finance_tracker/internal/ledger"
 	"finance_tracker/internal/models"
 )
 
 func txn(id, desc string, amount float64, category string, posted time.Time) models.DBTransaction {
 	return models.DBTransaction{
-		ID:          id,
-		AccountID:   "ACT-test",
-		Description: desc,
-		Amount:      amount,
-		Posted:      posted.Unix(),
-		Category:    category,
+		ID: id, AccountID: "ACT-test", Description: desc, Amount: amount, Posted: posted.Unix(), Category: category,
 	}
 }
 
-// Paying the credit card is not spending: the purchases it settles are already
-// counted on the card itself. Regression test for a $4,000 transfer that was
-// reported as the single largest expense of the billing cycle.
-func TestFilterExcludedCategoriesDropsTransferLegs(t *testing.T) {
-	day := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
-	txns := []models.DBTransaction{
-		txn("t1", "METRO BLANCHARD ST ALP", -67.05, "Groceries", day),
-		txn("t2", "JT231 TFR-TO C/C", -4000.00, "Payment", day),
-		txn("t3", "PAYMENT - THANK YOU", 8830.00, "Payment", day),
-	}
+func date(month time.Month, d int) time.Time {
+	return time.Date(2026, month, d, 0, 0, 0, 0, time.UTC)
+}
 
-	got := FilterExcludedCategories(txns, []string{"Payment"})
+var (
+	julyCycle = models.BillingPeriod{Label: "Jul 15 - Aug 14", Start: date(time.July, 15), End: date(time.August, 14), IsComplete: true, IsFocus: true}
+	augCycle  = models.BillingPeriod{Label: "Aug 15 - Sep 14", Start: date(time.August, 15), End: date(time.September, 14), IsComplete: true, IsFocus: true}
+	sepCycle  = models.BillingPeriod{Label: "Sep 15 - Sep 23", Start: date(time.September, 15), End: date(time.September, 23), IsFocus: true}
+	now       = time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+)
 
-	if len(got) != 1 {
-		t.Fatalf("expected only the grocery transaction to survive, got %d: %+v", len(got), got)
-	}
-	if got[0].ID != "t1" {
-		t.Errorf("expected transaction t1 to survive, got %q", got[0].ID)
+// productionPeriods mirrors galactica on 2026-09-23: July has no balance
+// history, August is partly covered, September is covered and unitemized.
+func productionPeriods() []ledger.PeriodSpend {
+	return []ledger.PeriodSpend{
+		{Period: julyCycle, Source: ledger.SourceItemizedOnly, Total: 2522.38, Itemized: 2522.38, DailyBurn: 81.37},
+		{Period: augCycle, Source: ledger.SourceBalance, Total: 3131.30, BalanceSpend: 3131.30, CoveredDays: 14.5, DailyBurn: 215.95, NotItemized: 3131.30},
+		{Period: sepCycle, Source: ledger.SourceBalance, Total: 1908.62, BalanceSpend: 1908.62, CoveredDays: 8.5, DailyBurn: 224.54, Itemized: 100, NotItemized: 1808.62},
 	}
 }
 
-// Excluding a category must not depend on the sign of the amount. The negative
-// leg of a transfer inflates spending; the positive leg would understate it.
-func TestFilterExcludedCategoriesIgnoresSign(t *testing.T) {
-	day := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
-	txns := []models.DBTransaction{
-		txn("t1", "JT231 TFR-TO C/C", -4000.00, "Payment", day),
-		txn("t2", "PAYMENT - THANK YOU", 8830.00, "Payment", day),
-	}
+func prompt(periods []ledger.PeriodSpend, charges []models.DBTransaction) string {
+	return GeneratePrompt(PromptInput{Periods: periods, Charges: charges, BillingDay: 15, Now: now})
+}
 
-	got := FilterExcludedCategories(txns, []string{"Payment"})
+// The headline must be the balance figure. Summing transactions is how a dead
+// feed was reported as a $2,470 month.
+func TestGeneratePromptLeadsWithBalanceDerivedTotals(t *testing.T) {
+	p := prompt(productionPeriods(), nil)
 
-	if len(got) != 0 {
-		t.Errorf("both legs of the transfer should be dropped, got %+v", got)
+	for _, want := range []string{"| Sep 15 - Sep 23 |", "$1908.62", "$224.54/day", "$1808.62"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("expected %q in the period table; prompt was:\n%s", want, p)
+		}
 	}
 }
 
-func TestFilterExcludedCategoriesKeepsEverythingWhenNoneExcluded(t *testing.T) {
-	day := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
-	txns := []models.DBTransaction{
-		txn("t1", "METRO BLANCHARD ST ALP", -67.05, "Groceries", day),
-		txn("t2", "CINEPLEX ODEON", -24.50, "Entertainment", day),
-	}
+func TestGeneratePromptLabelsCategoriesAsPartial(t *testing.T) {
+	charges := []models.DBTransaction{txn("t1", "METRO", -100, "Groceries", date(time.September, 16))}
 
-	got := FilterExcludedCategories(txns, nil)
+	p := prompt(productionPeriods(), charges)
 
-	if len(got) != 2 {
-		t.Errorf("expected all transactions to survive, got %d", len(got))
+	if !strings.Contains(p, "Categories cover $2622.38 of $7562.30 (35%)") {
+		t.Errorf("the category breakdown must state its coverage; prompt was:\n%s", p)
 	}
 }
 
-// Uncategorized transactions have an empty category and must not be swept up by
-// an empty string sneaking into the excluded list.
-func TestFilterExcludedCategoriesKeepsUncategorized(t *testing.T) {
-	day := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
-	txns := []models.DBTransaction{
-		txn("t1", "SOME NEW MERCHANT", -12.00, "", day),
-	}
+func TestGeneratePromptLabelsItemizedOnlyPeriods(t *testing.T) {
+	p := prompt(productionPeriods(), nil)
 
-	got := FilterExcludedCategories(txns, []string{""})
-
-	if len(got) != 1 {
-		t.Errorf("uncategorized transaction should survive, got %+v", got)
+	if !strings.Contains(p, "| Jul 15 - Aug 14 | completed [FOCUS] | itemized only |") {
+		t.Errorf("July has no balance history and must say so; prompt was:\n%s", p)
 	}
 }
 
-// The headline figure the LLM is told must not include transfers.
-func TestGeneratePromptTotalExcludesTransfers(t *testing.T) {
-	start := time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)
-	end := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
-	day := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
-
-	txns := []models.DBTransaction{
-		txn("t1", "METRO BLANCHARD ST ALP", -100.00, "Groceries", day),
-		txn("t2", "SUSHI BEAUMONT", -50.00, "Dining", day),
-		txn("t3", "JT231 TFR-TO C/C", -4000.00, "Payment", day),
+// Card payments settle spending already counted; they are never expenses.
+func TestGeneratePromptNeverShowsPayments(t *testing.T) {
+	charges := []models.DBTransaction{
+		txn("t1", "METRO", -100, "Groceries", date(time.September, 16)),
+		txn("t2", "PAYMENT - THANK YOU", 7340, "Payment", date(time.September, 16)),
 	}
 
-	kept := FilterExcludedCategories(txns, []string{"Payment"})
-	prompt := GeneratePrompt(kept, nil, nil, nil, start, end, day, 15, false)
-
-	if !strings.Contains(prompt, "Total Expenses: $150.00") {
-		t.Errorf("expected total of $150.00 with the transfer excluded; prompt said:\n%s",
-			firstLines(prompt, 12))
-	}
-	if strings.Contains(prompt, "JT231 TFR-TO C/C") {
-		t.Error("the transfer should not appear in the transaction table sent to the LLM")
+	if p := prompt(productionPeriods(), charges); strings.Contains(p, "PAYMENT - THANK YOU") {
+		t.Error("a payment reached the prompt")
 	}
 }
 
-// Charges in categories that are not excluded must keep counting as expenses.
-func TestGeneratePromptCountsNonExcludedCharges(t *testing.T) {
-	start := time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)
-	end := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
-	day := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
+func TestGeneratePromptComparesBurnWithLastCompletedCycle(t *testing.T) {
+	p := prompt(productionPeriods(), nil)
 
-	txns := []models.DBTransaction{
-		txn("t1", "METRO BLANCHARD ST ALP", -100.00, "Groceries", day),
-		txn("t2", "HYDRO QUEBEC", -139.00, "Utilities", day),
-	}
-
-	kept := FilterExcludedCategories(txns, []string{"Payment"})
-	prompt := GeneratePrompt(kept, nil, nil, nil, start, end, day, 15, false)
-
-	if !strings.Contains(prompt, "Total Expenses: $239.00") {
-		t.Errorf("non-excluded charges should count as expenses; prompt said:\n%s", firstLines(prompt, 12))
+	if !strings.Contains(p, "Current cycle burn: $224.54/day over 8.5 days vs $215.95/day in Aug 15 - Sep 14 (+4.0%)") {
+		t.Errorf("expected the burn comparison; prompt was:\n%s", p)
 	}
 }
 
-// Excluding Payment wholesale also drops card fees and interest, which are real
-// costs. This is a deliberate tradeoff: the alternative is splitting transfers
-// and fees into separate categories. Documented here so the loss is visible if
-// the fee total ever grows enough to matter.
-func TestGeneratePromptDropsFeesBundledWithPaymentCategory(t *testing.T) {
-	start := time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)
-	end := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
-	day := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
+func TestGeneratePromptSaysWhenNoCompletedCycleHasBalanceData(t *testing.T) {
+	periods := productionPeriods()
+	periods[1].Source = ledger.SourceItemizedOnly
 
-	txns := []models.DBTransaction{
-		txn("t1", "METRO BLANCHARD ST ALP", -100.00, "Groceries", day),
-		txn("t2", "ANNUAL FEE", -139.00, "Payment", day),
-	}
-
-	kept := FilterExcludedCategories(txns, []string{"Payment"})
-	prompt := GeneratePrompt(kept, nil, nil, nil, start, end, day, 15, false)
-
-	if !strings.Contains(prompt, "Total Expenses: $100.00") {
-		t.Errorf("expected fees to be dropped with the Payment category; prompt said:\n%s",
-			firstLines(prompt, 12))
+	if p := prompt(periods, nil); !strings.Contains(p, "No completed cycle has balance data yet") {
+		t.Errorf("expected the missing-comparison note; prompt was:\n%s", p)
 	}
 }
 
-func firstLines(s string, n int) string {
-	lines := strings.Split(s, "\n")
-	if len(lines) > n {
-		lines = lines[:n]
+func TestGeneratePromptMarksBudgetsAsLowerBoundsWhenMostlyUnitemized(t *testing.T) {
+	p := GeneratePrompt(PromptInput{
+		Periods: productionPeriods(), BillingDay: 15, Now: now,
+		Budgets: []models.Budget{{Category: "Groceries", Amount: 990}},
+	})
+
+	if !strings.Contains(p, "these budget figures are lower bounds") {
+		t.Errorf("5%% itemized must mark budgets as lower bounds; prompt was:\n%s", p)
 	}
-	return strings.Join(lines, "\n")
 }
 
-// A quiet card and a de-authorized bank connection look identical if you only
-// check the newest transaction across all accounts. Regression test: the TD
-// connection broke on Aug 21, the analysis kept reporting falling spend, and
-// the only hint was a generic lag line that named no account.
-func TestGeneratePromptNamesAccountsThatStoppedRefreshing(t *testing.T) {
-	start := time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)
-	end := time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC)
-	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
-
-	txns := []models.DBTransaction{
-		txn("t1", "METRO BLANCHARD ST ALP", -100.00, "Groceries", time.Date(2026, 7, 22, 9, 0, 0, 0, time.UTC)),
-	}
+// A quiet card and a de-authorized connection look identical from the
+// transactions alone. Regression test: TD broke on Aug 21 and every report
+// showed falling spend.
+func TestGeneratePromptNamesCardsThatStoppedRefreshing(t *testing.T) {
 	stale := []models.StaleConnection{{
-		Name:            "TD AEROPLAN VISA INFINITE (4520)",
-		OrgName:         "TD Canada Trust",
-		BalanceDate:     time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC).Unix(),
-		LastTransaction: time.Date(2026, 7, 22, 9, 0, 0, 0, time.UTC).Unix(),
-	}}
-
-	prompt := GeneratePrompt(txns, nil, stale, nil, start, end, now, 15, false)
-
-	if !strings.Contains(prompt, "DATA LAG") {
-		t.Errorf("a stale connection must raise the data lag warning; prompt said:\n%s", firstLines(prompt, 14))
-	}
-	if !strings.Contains(prompt, "TD AEROPLAN VISA INFINITE (4520)") {
-		t.Errorf("the warning must name the account that stopped refreshing; prompt said:\n%s", firstLines(prompt, 14))
-	}
-}
-
-// Spending really can be low. With every connection refreshing, a gap since the
-// last charge is real data and must not be explained away as a lag.
-func TestGeneratePromptOmitsLagWarningWhenConnectionsAreHealthy(t *testing.T) {
-	start := time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)
-	end := time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC)
-	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
-
-	txns := []models.DBTransaction{
-		txn("t1", "METRO BLANCHARD ST ALP", -100.00, "Groceries", time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)),
-	}
-
-	prompt := GeneratePrompt(txns, nil, nil, nil, start, end, now, 15, false)
-
-	if strings.Contains(prompt, "DATA LAG") {
-		t.Errorf("no connection is stale, so there is no lag to warn about; prompt said:\n%s", firstLines(prompt, 14))
-	}
-}
-
-// The model must not read a healthy connection's missing transactions as a
-// spending drop. This is the case that survived the staleness fix: balance_date
-// current, transactions absent.
-func TestGeneratePromptWarnsOnUnexplainedBalanceMovement(t *testing.T) {
-	start := time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)
-	end := time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC)
-	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
-
-	txns := []models.DBTransaction{
-		txn("t1", "METRO BLANCHARD ST ALP", -100.00, "Groceries", time.Date(2026, 7, 22, 9, 0, 0, 0, time.UTC)),
-	}
-	drifted := []models.UnreconciledAccount{{
 		Name: "TD AEROPLAN VISA INFINITE (4520)", OrgName: "TD Canada Trust",
-		Balance: -12124.34, BalanceDate: now.Unix(), Unexplained: -1876.50,
+		BalanceDate: date(time.August, 21).Unix(), LastTransaction: date(time.July, 22).Unix(),
 	}}
 
-	prompt := GeneratePrompt(txns, nil, nil, drifted, start, end, now, 15, false)
+	p := GeneratePrompt(PromptInput{Periods: productionPeriods(), Stale: stale, Now: now})
 
-	if !strings.Contains(prompt, "DATA LAG") {
-		t.Errorf("unexplained balance movement must raise the warning; prompt said:\n%s", firstLines(prompt, 16))
+	if !strings.Contains(p, "DATA LAG") || !strings.Contains(p, "TD AEROPLAN VISA INFINITE (4520)") {
+		t.Errorf("a stale card must raise a named data lag warning; prompt was:\n%s", p)
 	}
-	if !strings.Contains(prompt, "TD AEROPLAN VISA INFINITE (4520)") {
-		t.Errorf("the warning must name the drifted account; prompt said:\n%s", firstLines(prompt, 16))
+}
+
+func TestGeneratePromptOmitsWarningsWhenConnectionsAreHealthy(t *testing.T) {
+	p := prompt(productionPeriods(), nil)
+
+	if strings.Contains(p, "DATA LAG") || strings.Contains(p, "ITEMIZATION GAP") {
+		t.Errorf("nothing is wrong, so nothing should be flagged; prompt was:\n%s", p)
+	}
+}
+
+// With a live balance the totals are right; only the categories are short.
+// Calling that "incomplete data" would contradict the totals.
+func TestGeneratePromptDescribesDriftAsItemizationGap(t *testing.T) {
+	drifted := []models.UnreconciledAccount{{
+		Name: "TD AEROPLAN VISA INFINITE (4520)", OrgName: "TD Canada Trust", Unexplained: -894.81,
+	}}
+
+	p := GeneratePrompt(PromptInput{Periods: productionPeriods(), Drifted: drifted, Now: now})
+
+	if !strings.Contains(p, "ITEMIZATION GAP") || !strings.Contains(p, "itemization missing for $894.81") {
+		t.Errorf("expected an itemization gap note; prompt was:\n%s", p)
+	}
+	if strings.Contains(p, "DATA LAG") {
+		t.Error("a live balance is not a data lag")
 	}
 }

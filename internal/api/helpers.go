@@ -7,6 +7,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"finance_tracker/internal/config"
+	"finance_tracker/internal/models"
 	"finance_tracker/internal/notify"
 )
 
@@ -72,4 +73,22 @@ func newDispatcher(cfg *config.Config) *notify.Dispatcher {
 		MailerFrom:        cfg.MailerFrom,
 		MailerTo:          cfg.MailerTo,
 	})
+}
+
+// filterHealth keeps the stale and drifted entries whose account passes keep.
+func filterHealth(stale []models.StaleConnection, drifted []models.UnreconciledAccount, keep func(id string) bool) (
+	[]models.StaleConnection, []models.UnreconciledAccount) {
+	var s []models.StaleConnection
+	for _, c := range stale {
+		if keep(c.ID) {
+			s = append(s, c)
+		}
+	}
+	var d []models.UnreconciledAccount
+	for _, u := range drifted {
+		if keep(u.ID) {
+			d = append(d, u)
+		}
+	}
+	return s, d
 }

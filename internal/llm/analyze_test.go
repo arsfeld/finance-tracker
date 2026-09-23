@@ -57,8 +57,62 @@ func TestGeneratePromptLabelsCategoriesAsPartial(t *testing.T) {
 
 	p := prompt(productionPeriods(), charges)
 
-	if !strings.Contains(p, "Categories cover $2622.38 of $7562.30 (35%)") {
-		t.Errorf("the category breakdown must state its coverage; prompt was:\n%s", p)
+	// July is itemized only: counting it would make categories look like they
+	// cover most of the spending the balance measured.
+	if !strings.Contains(p, "Categories cover $100.00 of $5039.92 (2%) of balance-tracked card spending.") {
+		t.Errorf("the category breakdown must state its coverage of balance periods; prompt was:\n%s", p)
+	}
+}
+
+func TestGeneratePromptOmitsCoverageWithoutBalancePeriods(t *testing.T) {
+	periods := productionPeriods()[:1]
+	charges := []models.DBTransaction{txn("t1", "METRO", -100, "Groceries", date(time.August, 1))}
+
+	if p := prompt(periods, charges); strings.Contains(p, "Categories cover") {
+		t.Errorf("no balance period, no coverage line; prompt was:\n%s", p)
+	}
+}
+
+// August's balance history starts on Aug 31, so its total is only part of the
+// cycle. Read as a whole cycle it looks like spending fell.
+func TestGeneratePromptMarksPartlyCoveredBalancePeriods(t *testing.T) {
+	p := prompt(productionPeriods(), nil)
+
+	for _, want := range []string{
+		"| Aug 15 - Sep 14 | completed [FOCUS] | balance (14.5 of 31 days) | 14.5 |",
+		"| Sep 15 - Sep 23 | in progress [FOCUS] | balance | 8.5 |",
+		"compare cycles by Daily burn, not Total",
+		"by daily burn (and total where fully covered)",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("expected %q; prompt was:\n%s", want, p)
+		}
+	}
+}
+
+func TestGeneratePromptDatesTheItemizedCharges(t *testing.T) {
+	charges := []models.DBTransaction{
+		txn("t1", "METRO", -100, "Groceries", date(time.September, 16)),
+		txn("t2", "IGA", -50, "Groceries", date(time.August, 20)),
+	}
+
+	p := prompt(productionPeriods(), charges)
+
+	if !strings.Contains(p, "Itemized charges span Aug 20, 2026 – Sep 16, 2026 (by transaction date).") {
+		t.Errorf("expected the charge span; prompt was:\n%s", p)
+	}
+}
+
+// A feed that died in August still fills the categories. The model must know
+// they describe August, not this cycle.
+func TestGeneratePromptSaysWhenNoChargesArrivedThisCycle(t *testing.T) {
+	charges := []models.DBTransaction{txn("t1", "IGA", -50, "Groceries", date(time.August, 20))}
+
+	p := prompt(productionPeriods(), charges)
+
+	want := "Itemized charges span Aug 20, 2026 – Aug 20, 2026 (by transaction date); none have arrived since, so categories describe that window, not current habits."
+	if !strings.Contains(p, want) {
+		t.Errorf("expected %q; prompt was:\n%s", want, p)
 	}
 }
 
@@ -100,13 +154,35 @@ func TestGeneratePromptSaysWhenNoCompletedCycleHasBalanceData(t *testing.T) {
 }
 
 func TestGeneratePromptMarksBudgetsAsLowerBoundsWhenMostlyUnitemized(t *testing.T) {
+	periods := productionPeriods()
+	periods[2].Itemized, periods[2].NotItemized = 954.31, 954.31
+
+	p := GeneratePrompt(PromptInput{
+		Periods: periods, BillingDay: 15, Now: now,
+		Budgets: []models.Budget{{Category: "Groceries", Amount: 990}},
+	})
+
+	if !strings.Contains(p, "these budget figures are lower bounds") {
+		t.Errorf("50%% itemized must mark budgets as lower bounds; prompt was:\n%s", p)
+	}
+	if strings.Contains(p, "Budgets cannot be assessed") {
+		t.Errorf("50%% itemized can still be assessed as a lower bound; prompt was:\n%s", p)
+	}
+}
+
+// At 5% itemized every category is trivially under budget. Listing them
+// invites the model to praise it.
+func TestGeneratePromptWithholdsBudgetsWhenBarelyItemized(t *testing.T) {
 	p := GeneratePrompt(PromptInput{
 		Periods: productionPeriods(), BillingDay: 15, Now: now,
 		Budgets: []models.Budget{{Category: "Groceries", Amount: 990}},
 	})
 
-	if !strings.Contains(p, "these budget figures are lower bounds") {
-		t.Errorf("5%% itemized must mark budgets as lower bounds; prompt was:\n%s", p)
+	if !strings.Contains(p, "Budgets cannot be assessed this cycle: only 5% of card spending is itemized.") {
+		t.Errorf("expected budgets to be withheld; prompt was:\n%s", p)
+	}
+	if strings.Contains(p, "- Groceries: $") {
+		t.Errorf("no per-category budget lines at 5%% itemized; prompt was:\n%s", p)
 	}
 }
 
@@ -124,6 +200,11 @@ func TestGeneratePromptNamesCardsThatStoppedRefreshing(t *testing.T) {
 	if !strings.Contains(p, "DATA LAG") || !strings.Contains(p, "TD AEROPLAN VISA INFINITE (4520)") {
 		t.Errorf("a stale card must raise a named data lag warning; prompt was:\n%s", p)
 	}
+	// Only the stale card's figures are out of date; the rest of the analysis
+	// still stands.
+	if !strings.Contains(p, "1 card(s) stopped refreshing, so their figures are out of date.") {
+		t.Errorf("the warning must be scoped to the stale card; prompt was:\n%s", p)
+	}
 }
 
 func TestGeneratePromptOmitsWarningsWhenConnectionsAreHealthy(t *testing.T) {
@@ -131,22 +212,5 @@ func TestGeneratePromptOmitsWarningsWhenConnectionsAreHealthy(t *testing.T) {
 
 	if strings.Contains(p, "DATA LAG") || strings.Contains(p, "ITEMIZATION GAP") {
 		t.Errorf("nothing is wrong, so nothing should be flagged; prompt was:\n%s", p)
-	}
-}
-
-// With a live balance the totals are right; only the categories are short.
-// Calling that "incomplete data" would contradict the totals.
-func TestGeneratePromptDescribesDriftAsItemizationGap(t *testing.T) {
-	drifted := []models.UnreconciledAccount{{
-		Name: "TD AEROPLAN VISA INFINITE (4520)", OrgName: "TD Canada Trust", Unexplained: -894.81,
-	}}
-
-	p := GeneratePrompt(PromptInput{Periods: productionPeriods(), Drifted: drifted, Now: now})
-
-	if !strings.Contains(p, "ITEMIZATION GAP") || !strings.Contains(p, "itemization missing for $894.81") {
-		t.Errorf("expected an itemization gap note; prompt was:\n%s", p)
-	}
-	if strings.Contains(p, "DATA LAG") {
-		t.Error("a live balance is not a data lag")
 	}
 }

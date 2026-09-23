@@ -25,7 +25,6 @@ type PromptInput struct {
 	Periods    []ledger.PeriodSpend   // one per billing cycle, oldest first
 	Charges    []models.DBTransaction // itemized card charges, excluded categories removed
 	Stale      []models.StaleConnection
-	Drifted    []models.UnreconciledAccount
 	Budgets    []models.Budget
 	BillingDay int
 	Now        time.Time
@@ -37,13 +36,14 @@ const readingGuide = `How to read these numbers:
 - "Not itemized" is spending the balance shows but the transaction feed did not deliver. It is real spending with an unknown category — never treat it as savings.
 - Card payments and transfers are not expenses and are not shown.
 - Periods marked "itemized only" have no balance history; their totals are a lower bound. Do not compare them with balance periods or read a trend across that boundary.
+- A balance period marked "balance (X of Y days)" is covered for only part of its days, so its Total is a lower bound. When coverage differs, compare cycles by Daily burn, not Total.
 `
 
 const reportInstructions = `### Instructions
 
 Analyze this family's credit card spending. Write a concise report (~250 words) with:
 
-1. **Summary**: The last 3 billing cycles by total and daily burn. What's the trajectory?
+1. **Summary**: The last 3 billing cycles by daily burn (and total where fully covered). What's the trajectory?
 2. **Burn Rate**: Is the current cycle's daily burn higher or lower than the last completed cycle? Say so even when the reason can't be itemized.
 3. **What's Improving / What Needs Attention**: From the itemized categories, framed as a share of what is itemized.
 4. **Top Expenses**: The 10 largest itemized charges:
@@ -75,9 +75,10 @@ func GeneratePrompt(in PromptInput) string {
 	b.WriteString("\n")
 	b.WriteString(buildPeriodTable(in.Periods))
 	b.WriteString(buildBurnTrend(in.Periods))
-	b.WriteString(buildDataLagWarning(in.Stale, in.Drifted, in.Now))
+	b.WriteString(buildDataLagWarning(in.Stale, in.Now))
 	b.WriteString("\n")
 	b.WriteString(buildCoverageLine(in.Periods))
+	b.WriteString(buildChargeSpan(charges, currentPeriod(in.Periods)))
 	b.WriteString(buildCategoryBreakdown(charges))
 	b.WriteString("\n")
 	fmt.Fprintf(&b, reportInstructions, formatTopExpenses(charges, 10))
@@ -107,6 +108,10 @@ func buildPeriodTable(periods []ledger.PeriodSpend) string {
 		source, covered := "balance", fmt.Sprintf("%.1f", p.CoveredDays)
 		if p.Source == ledger.SourceItemizedOnly {
 			source, covered = "itemized only", "—"
+		} else if days := periodDays(p.Period); p.CoveredDays < days-0.5 {
+			// A cycle the balance history only partly covers has a partial
+			// Total that otherwise reads as the whole cycle.
+			source = fmt.Sprintf("balance (%.1f of %g days)", p.CoveredDays, math.Round(days*10)/10)
 		}
 		// A cycle in progress has a partial total, so only completed balance
 		// cycles are compared; the burn trend covers the current one.
@@ -150,17 +155,48 @@ func buildBurnTrend(periods []ledger.PeriodSpend) string {
 		money(cur.DailyBurn), cur.CoveredDays)
 }
 
+func periodDays(p models.BillingPeriod) float64 {
+	from, to := ledger.PeriodBounds(p)
+	return float64(to-from) / 86400
+}
+
+// buildCoverageLine says how much of the balance-measured spending the
+// categories explain. Itemized-only periods are left out: there the itemized
+// charges are the whole total by construction, which would inflate the share.
 func buildCoverageLine(periods []ledger.PeriodSpend) string {
 	var total, itemized float64
 	for _, p := range periods {
-		total += p.Total
-		itemized += p.Itemized
+		if p.Source == ledger.SourceBalance {
+			total += p.Total
+			itemized += p.Itemized
+		}
 	}
 	if total <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("Categories cover %s of %s (%.0f%%) of card spending across these periods.\n",
+	return fmt.Sprintf("Categories cover %s of %s (%.0f%%) of balance-tracked card spending.\n",
 		money(itemized), money(total), math.Min(100, itemized/total*100))
+}
+
+// buildChargeSpan dates the itemized charges. A feed can stop while the
+// balance keeps refreshing, and then the categories describe the weeks before
+// it stopped, not how the family spends now.
+func buildChargeSpan(charges []models.DBTransaction, current *ledger.PeriodSpend) string {
+	if len(charges) == 0 {
+		return ""
+	}
+	earliest, latest := ledger.EffectiveDate(charges[0]), ledger.EffectiveDate(charges[0])
+	for _, t := range charges[1:] {
+		d := ledger.EffectiveDate(t)
+		earliest, latest = min(earliest, d), max(latest, d)
+	}
+	const layout = "Jan 2, 2006"
+	line := fmt.Sprintf("Itemized charges span %s – %s (by transaction date)",
+		time.Unix(earliest, 0).UTC().Format(layout), time.Unix(latest, 0).UTC().Format(layout))
+	if current != nil && latest < current.Period.Start.Unix() {
+		line += "; none have arrived since, so categories describe that window, not current habits"
+	}
+	return line + ".\n"
 }
 
 func currentPeriod(periods []ledger.PeriodSpend) *ledger.PeriodSpend {
@@ -271,6 +307,20 @@ func buildBudgetSection(budgets []models.Budget, expenses []models.DBTransaction
 	var b strings.Builder
 	fmt.Fprintf(&b, "Budget Status (current billing period: %s to %s):\n",
 		periodStart.Format("2006-01-02"), periodEnd.Format("2006-01-02"))
+
+	// Budgets can only be checked against itemized charges. When most of the
+	// cycle is unitemized, "under budget" means nothing, and the model has to
+	// know. Below a fifth, every category is trivially under budget, so the
+	// figures are withheld rather than hedged.
+	itemizedShare := 1.0
+	if current != nil && current.Source == ledger.SourceBalance && current.Total > 0 {
+		itemizedShare = current.Itemized / current.Total
+	}
+	if itemizedShare < 0.2 {
+		fmt.Fprintf(&b, "Budgets cannot be assessed this cycle: only %.0f%% of card spending is itemized.", itemizedShare*100)
+		return b.String()
+	}
+
 	for _, budget := range budgets {
 		spent := spending[budget.Category]
 		// Case-insensitive fallback.
@@ -293,11 +343,9 @@ func buildBudgetSection(budgets []models.Budget, expenses []models.DBTransaction
 		b.WriteString(fmt.Sprintf("- %s: $%.2f spent / $%.2f budget (%.0f%%)%s\n",
 			budget.Category, spent, budget.Amount, pct, status))
 	}
-	// Budgets can only be checked against itemized charges. When most of the
-	// cycle is unitemized, "under budget" means nothing, and the model has to know.
-	if current != nil && current.Source == ledger.SourceBalance && current.Total > 0 && current.Itemized/current.Total < 0.8 {
+	if itemizedShare < 0.8 {
 		fmt.Fprintf(&b, "\nOnly %.0f%% of this cycle's card spending is itemized, so these budget figures are lower bounds.",
-			current.Itemized/current.Total*100)
+			itemizedShare*100)
 	}
 	b.WriteString("\nComment on budget adherence where budgets are set. Note any categories that are significantly over budget.")
 	return b.String()
@@ -352,17 +400,16 @@ func CyclePeriods(start, end time.Time, billingDay int) []models.BillingPeriod {
 	return periods
 }
 
-// buildDataLagWarning tells the model which cards are not reporting in full.
-//
-// A stale card has stopped refreshing, so its balance, and with it the totals,
-// are out of date. A drifted card's balance is current, so the totals already
-// include its spending; only the itemization is short. Calling that "incomplete
-// data" would contradict the totals the model was just told to trust.
-func buildDataLagWarning(stale []models.StaleConnection, drifted []models.UnreconciledAccount, now time.Time) string {
+// buildDataLagWarning tells the model which cards stopped refreshing. Their
+// balances, and so their share of the totals, are out of date. A card whose
+// balance is current but whose transactions fall short needs no warning: the
+// table's Not itemized column already carries it, and a second figure from
+// the drift detector, which cannot see paying-side payments, contradicted it.
+func buildDataLagWarning(stale []models.StaleConnection, now time.Time) string {
 	var b strings.Builder
 	if len(stale) > 0 {
 		b.WriteString("\n> [!WARNING]\n> **DATA LAG DETECTED**: ")
-		fmt.Fprintf(&b, "%d card(s) stopped refreshing, so their balances — and this analysis — are out of date. ", len(stale))
+		fmt.Fprintf(&b, "%d card(s) stopped refreshing, so their figures are out of date. ", len(stale))
 		b.WriteString("Do not congratulate the user on low spending, and do not read a downward trend into it.\n")
 		for _, c := range stale {
 			lastSync := time.Unix(c.BalanceDate, 0).UTC()
@@ -376,14 +423,6 @@ func buildDataLagWarning(stale []models.StaleConnection, drifted []models.Unreco
 				line += "; no transactions on record"
 			}
 			b.WriteString(line + "\n")
-		}
-	}
-	if len(drifted) > 0 {
-		b.WriteString("\n> [!NOTE]\n> **ITEMIZATION GAP**: these cards' balances are current, so the totals above include all their spending, ")
-		b.WriteString("but some of it arrived without transactions. Categories and top expenses under-count by these amounts.\n")
-		for _, u := range drifted {
-			fmt.Fprintf(&b, "> - **%s** (%s): balance tracked; itemization missing for $%.2f\n",
-				u.Name, u.OrgName, math.Abs(u.Unexplained))
 		}
 	}
 	return b.String()

@@ -125,17 +125,16 @@ func (h *AnalysisRunHandler) BuildPrompt(ctx context.Context, now time.Time) (*A
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to check for stale connections")
 	}
-	drifted, err := h.acctStore.UnreconciledAccounts(ctx, h.cfg.BalanceDriftThreshold)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to reconcile account balances")
-	}
-	stale, drifted = filterHealth(stale, drifted, func(id string) bool { return analyzed[id] })
+	// Drift is left to the sync alert. It cannot see paying-side payments, so
+	// for an analyzed card it disagrees with the table's Not itemized column,
+	// which already reports the same gap correctly.
+	stale, _ = filterHealth(stale, nil, func(id string) bool { return analyzed[id] })
 
 	budgets, _ := h.budgetStore.GetAll(ctx)
 
 	text := llmclient.GeneratePrompt(llmclient.PromptInput{
 		Periods: report.Periods, Charges: report.Charges,
-		Stale: stale, Drifted: drifted, Budgets: budgets,
+		Stale: stale, Budgets: budgets,
 		BillingDay: billingDay, Now: now,
 	})
 	return &AnalysisPrompt{Text: text, Start: start, End: end, Charges: report.Charges}, nil

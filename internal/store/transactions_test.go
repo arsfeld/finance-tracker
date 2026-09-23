@@ -125,4 +125,7 @@ func TestGetForPeriodAllAccountsIncludesExcludedAccounts(t *testing.T) {
 	if err != nil || len(got) != 1 {
 		t.Errorf("expected the excluded account's transaction, got %+v (err %v)", got, err)
 	}
+	if len(got) > 0 && got[0].AccountID != "ACT-sav" {
+		t.Errorf("expected AccountID 'ACT-sav', got %s", got[0].AccountID)
+	}
 }

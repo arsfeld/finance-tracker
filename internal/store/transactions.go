@@ -246,18 +246,31 @@ func (s *TransactionStore) GetByID(ctx context.Context, id string) (*models.DBTr
 	return &t, err
 }
 
-// GetForPeriod returns all transactions within a date range for included accounts.
-func (s *TransactionStore) GetForPeriod(ctx context.Context, start, end int64) ([]models.DBTransaction, error) {
-	rows, err := s.read.QueryContext(ctx, `
+// queryPeriod is an unexported helper that builds transaction queries with date range,
+// category resolution, and optional account-scoping.
+func (s *TransactionStore) queryPeriod(ctx context.Context, accountJoin, accountFilter string, start, end int64) ([]models.DBTransaction, error) {
+	query := `
 		SELECT t.id, t.account_id, t.description, t.amount, t.posted, t.transacted_at, t.pending,
 			COALESCE(co.category, c.category, '') as category,
 			t.cached_at, t.updated_at
-		FROM transactions t
-		JOIN accounts a ON t.account_id = a.id
+		FROM transactions t`
+
+	if accountJoin != "" {
+		query += "\n" + accountJoin
+	}
+
+	query += `
 		LEFT JOIN categories c ON t.description = c.merchant_description
 		LEFT JOIN category_overrides co ON t.id = co.transaction_id
-		WHERE t.posted >= ? AND t.posted <= ? AND a.is_included = 1
-		ORDER BY t.posted DESC`, start, end)
+		WHERE t.posted >= ? AND t.posted <= ?`
+
+	if accountFilter != "" {
+		query += " AND " + accountFilter
+	}
+
+	query += "\nORDER BY t.posted DESC"
+
+	rows, err := s.read.QueryContext(ctx, query, start, end)
 	if err != nil {
 		return nil, err
 	}
@@ -274,33 +287,16 @@ func (s *TransactionStore) GetForPeriod(ctx context.Context, start, end int64) (
 	return txns, rows.Err()
 }
 
+// GetForPeriod returns all transactions within a date range for included accounts.
+func (s *TransactionStore) GetForPeriod(ctx context.Context, start, end int64) ([]models.DBTransaction, error) {
+	return s.queryPeriod(ctx, "JOIN accounts a ON t.account_id = a.id", "a.is_included = 1", start, end)
+}
+
 // GetForPeriodAllAccounts returns transactions in a date range from every
 // account, included or not. Card payments are detected on the paying side, and
 // the paying account is often one the user has excluded from analysis.
 func (s *TransactionStore) GetForPeriodAllAccounts(ctx context.Context, start, end int64) ([]models.DBTransaction, error) {
-	rows, err := s.read.QueryContext(ctx, `
-		SELECT t.id, t.account_id, t.description, t.amount, t.posted, t.transacted_at, t.pending,
-			COALESCE(co.category, c.category, '') as category,
-			t.cached_at, t.updated_at
-		FROM transactions t
-		LEFT JOIN categories c ON t.description = c.merchant_description
-		LEFT JOIN category_overrides co ON t.id = co.transaction_id
-		WHERE t.posted >= ? AND t.posted <= ?
-		ORDER BY t.posted DESC`, start, end)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var txns []models.DBTransaction
-	for rows.Next() {
-		var t models.DBTransaction
-		if err := rows.Scan(&t.ID, &t.AccountID, &t.Description, &t.Amount, &t.Posted, &t.TransactedAt, &t.Pending, &t.Category, &t.CachedAt, &t.UpdatedAt); err != nil {
-			return nil, err
-		}
-		txns = append(txns, t)
-	}
-	return txns, rows.Err()
+	return s.queryPeriod(ctx, "", "", start, end)
 }
 
 // CountByCategory returns category totals for a date range.

@@ -1,11 +1,16 @@
 package simplefin
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 func fetchFrom(t *testing.T, body string) ([]byte, *Client, func()) {
@@ -59,5 +64,46 @@ func TestFetchReturnsAPIErrors(t *testing.T) {
 	}
 	if len(apiErrors) != 1 {
 		t.Fatalf("want the auth error surfaced, got %v", apiErrors)
+	}
+}
+
+// The bridge URL carries the SimpleFin access credentials. They were printed in
+// full to the debug log, where anyone reading the container logs could lift them
+// and read every account.
+func TestFetchKeepsCredentialsOutOfTheLog(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"accounts":[]}`)
+	}))
+	defer srv.Close()
+
+	var logged bytes.Buffer
+	prev := log.Logger
+	log.Logger = zerolog.New(&logged).Level(zerolog.DebugLevel)
+	defer func() { log.Logger = prev }()
+
+	bridge := strings.Replace(srv.URL, "http://", "http://ACCESSUSER:ACCESSSECRET@", 1)
+	if _, _, err := NewClient(bridge).fetch(time.Now().AddDate(0, 0, -30), time.Now()); err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+
+	if out := logged.String(); strings.Contains(out, "ACCESSSECRET") || strings.Contains(out, "ACCESSUSER") {
+		t.Errorf("credentials leaked into the log:\n%s", out)
+	}
+}
+
+// A failed request's error ends up in sync_log and the UI. net/http masks the
+// password there but not the username, which is half of the credential.
+func TestFetchKeepsCredentialsOutOfRequestErrors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	bridge := strings.Replace(srv.URL, "http://", "http://ACCESSUSER:ACCESSSECRET@", 1)
+	srv.Close() // connection refused
+
+	_, _, err := NewClient(bridge).fetch(time.Now().AddDate(0, 0, -30), time.Now())
+
+	if err == nil {
+		t.Fatal("expected a connection error")
+	}
+	if msg := err.Error(); strings.Contains(msg, "ACCESSUSER") || strings.Contains(msg, "ACCESSSECRET") {
+		t.Errorf("credentials leaked into the error: %s", msg)
 	}
 }

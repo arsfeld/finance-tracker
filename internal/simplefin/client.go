@@ -3,9 +3,11 @@ package simplefin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -91,18 +93,24 @@ func (c *Client) FetchAndStore(ctx context.Context, startDate, endDate time.Time
 }
 
 func (c *Client) fetch(startDate, endDate time.Time) ([]models.Account, []string, error) {
-	url := fmt.Sprintf("%s/accounts?start-date=%d&end-date=%d", c.bridgeURL, startDate.Unix(), endDate.Unix())
-	log.Debug().Str("url", url).Msg("Fetching transactions from SimpleFin bridge")
+	reqURL := fmt.Sprintf("%s/accounts?start-date=%d&end-date=%d", c.bridgeURL, startDate.Unix(), endDate.Unix())
+	log.Debug().Str("url", redactURL(reqURL)).Msg("Fetching transactions from SimpleFin bridge")
 
 	client := &http.Client{Timeout: 120 * time.Second}
 
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	req, err := http.NewRequest(http.MethodGet, reqURL, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating request: %w", err)
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
+		// net/http masks only the password in its errors; the username is half
+		// of the SimpleFin credential, and this error is stored in sync_log.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			urlErr.URL = redactURL(urlErr.URL)
+		}
 		return nil, nil, fmt.Errorf("error making request: %w", err)
 	}
 	defer resp.Body.Close()
@@ -130,6 +138,21 @@ func (c *Client) fetch(startDate, endDate time.Time) ([]models.Account, []string
 	// whole cycle of transactions with it; is_included is the supported way to
 	// leave an account out.
 	return accountsResp.Accounts, accountsResp.Errors, nil
+}
+
+// redactURL hides the access credentials the bridge URL carries in its userinfo.
+// Anyone holding them can read every connected account, so they must never
+// reach the logs. A URL that fails to parse is dropped entirely rather than
+// risk printing it.
+func redactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "<unparseable bridge URL>"
+	}
+	if u.User != nil {
+		u.User = url.User("REDACTED")
+	}
+	return u.String()
 }
 
 // ClampToAPILimit returns a start date that is at most 90 days before end.

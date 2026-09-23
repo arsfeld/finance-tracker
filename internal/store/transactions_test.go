@@ -105,3 +105,24 @@ func TestUpsertBatchCountsDuplicateIDsInOneBatchOnce(t *testing.T) {
 		t.Errorf("the same id twice in one batch is one new transaction, got added=%d", added)
 	}
 }
+
+// Card payments often come from accounts the user excluded from analysis. They
+// still have to be visible for payment detection.
+func TestGetForPeriodAllAccountsIncludesExcludedAccounts(t *testing.T) {
+	ctx := context.Background()
+	accts, txns := upsertStores(t)
+	if err := accts.Upsert(ctx, models.DBAccount{ID: "ACT-sav", Name: "ACT-sav", IsIncluded: false}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, _, err := txns.UpsertBatch(ctx, []models.DBTransaction{
+		{ID: "t1", AccountID: "ACT-sav", Description: "WW591 TFR-A  C/C", Amount: -1800, Posted: 1790000000},
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	got, err := txns.GetForPeriodAllAccounts(ctx, 1789999999, 1790000001)
+
+	if err != nil || len(got) != 1 {
+		t.Errorf("expected the excluded account's transaction, got %+v (err %v)", got, err)
+	}
+}

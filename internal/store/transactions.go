@@ -274,6 +274,35 @@ func (s *TransactionStore) GetForPeriod(ctx context.Context, start, end int64) (
 	return txns, rows.Err()
 }
 
+// GetForPeriodAllAccounts returns transactions in a date range from every
+// account, included or not. Card payments are detected on the paying side, and
+// the paying account is often one the user has excluded from analysis.
+func (s *TransactionStore) GetForPeriodAllAccounts(ctx context.Context, start, end int64) ([]models.DBTransaction, error) {
+	rows, err := s.read.QueryContext(ctx, `
+		SELECT t.id, t.account_id, t.description, t.amount, t.posted, t.transacted_at, t.pending,
+			COALESCE(co.category, c.category, '') as category,
+			t.cached_at, t.updated_at
+		FROM transactions t
+		LEFT JOIN categories c ON t.description = c.merchant_description
+		LEFT JOIN category_overrides co ON t.id = co.transaction_id
+		WHERE t.posted >= ? AND t.posted <= ?
+		ORDER BY t.posted DESC`, start, end)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var txns []models.DBTransaction
+	for rows.Next() {
+		var t models.DBTransaction
+		if err := rows.Scan(&t.ID, &t.AccountID, &t.Description, &t.Amount, &t.Posted, &t.TransactedAt, &t.Pending, &t.Category, &t.CachedAt, &t.UpdatedAt); err != nil {
+			return nil, err
+		}
+		txns = append(txns, t)
+	}
+	return txns, rows.Err()
+}
+
 // CountByCategory returns category totals for a date range.
 func (s *TransactionStore) CountByCategory(ctx context.Context, start, end int64) (map[string]float64, error) {
 	rows, err := s.read.QueryContext(ctx, `

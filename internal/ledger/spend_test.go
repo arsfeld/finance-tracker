@@ -49,6 +49,117 @@ func TestIntervalsTreatUnexplainedDropAsPayment(t *testing.T) {
 	}
 }
 
+func totalSpend(ivs []Interval) float64 {
+	var total float64
+	for _, iv := range ivs {
+		total += iv.Spend
+	}
+	return total
+}
+
+func assertNoNegative(t *testing.T, ivs []Interval) {
+	t.Helper()
+	for _, iv := range ivs {
+		if iv.Spend < 0 {
+			t.Errorf("negative interval: %+v", iv)
+		}
+	}
+}
+
+// The bank debits a payment a day or two before the card credits it. With a
+// snapshot in between, one interval sees the payment but not the drop and the
+// next sees the drop without the payment. Clamping each on its own counted the
+// $5,000 payment as spending.
+func TestIntervalsNetPaymentAgainstLaterCardCredit(t *testing.T) {
+	snaps := []models.BalanceSnapshot{
+		snap(-5000, day(time.September, 1)),
+		snap(-5080, day(time.September, 3)),
+		snap(-100, day(time.September, 5)),
+	}
+	payments := []Payment{{Amount: 5000, At: day(time.September, 2).Unix()}}
+
+	got := Intervals(snaps, payments)
+
+	assertNoNegative(t, got)
+	if total := totalSpend(got); !near(total, 100) {
+		t.Errorf("expected 100 of spending, got %.2f in %+v", total, got)
+	}
+}
+
+// The mirror case: the card credit lands in the interval before the day the
+// bank dates the debit.
+func TestIntervalsNetCardCreditAgainstLaterPayment(t *testing.T) {
+	snaps := []models.BalanceSnapshot{
+		snap(-5000, day(time.September, 1)),
+		snap(-50, day(time.September, 3)),
+		snap(-130, day(time.September, 5)),
+	}
+	payments := []Payment{{Amount: 5000, At: day(time.September, 4).Unix()}}
+
+	got := Intervals(snaps, payments)
+
+	assertNoNegative(t, got)
+	if total := totalSpend(got); !near(total, 130) {
+		t.Errorf("expected the 50 + 80 of real charges, got %.2f in %+v", total, got)
+	}
+}
+
+// Two lagged payments share the interval between them. Each takes only what
+// the other left, and nothing is absorbed twice.
+func TestIntervalsNetTwoDropsAgainstSharedNeighbour(t *testing.T) {
+	snaps := []models.BalanceSnapshot{
+		snap(-3000, day(time.September, 1)),
+		snap(-1000, day(time.September, 2)), // 2000 credited before its Sep 3 debit
+		snap(-1200, day(time.September, 4)), // 200 of charges
+		snap(-300, day(time.September, 5)),  // 1000 credited after its Sep 3 debit; 100 of charges
+	}
+	payments := []Payment{
+		{Amount: 2000, At: day(time.September, 3).Unix()},
+		{Amount: 1000, At: day(time.September, 3).Unix()},
+	}
+
+	got := Intervals(snaps, payments)
+
+	assertNoNegative(t, got)
+	if total := totalSpend(got); !near(total, 300) {
+		t.Errorf("expected the 200 + 100 of charges, got %.2f in %+v", total, got)
+	}
+}
+
+// A drop larger than every neighbour within the window absorbs what it can;
+// the rest is a payment the feeds missed and never becomes negative spending.
+func TestIntervalsDropLargerThanNeighboursLeavesNoNegative(t *testing.T) {
+	snaps := []models.BalanceSnapshot{
+		snap(-1000, day(time.September, 1)),
+		snap(-1200, day(time.September, 3)),
+		snap(-100, day(time.September, 4)),
+		snap(-150, day(time.September, 5)),
+	}
+
+	got := Intervals(snaps, nil)
+
+	assertNoNegative(t, got)
+	if total := totalSpend(got); !near(total, 0) {
+		t.Errorf("the 1100 drop outweighs the 200 + 50 around it, expected 0, got %.2f in %+v", total, got)
+	}
+}
+
+// Spending outside the window is not netted against a drop.
+func TestIntervalsLeaveDistantSpendingAlone(t *testing.T) {
+	snaps := []models.BalanceSnapshot{
+		snap(0, day(time.September, 1)),
+		snap(-500, day(time.September, 2)),
+		snap(-500, day(time.September, 10)),
+		snap(-100, day(time.September, 11)),
+	}
+
+	got := Intervals(snaps, nil)
+
+	if total := totalSpend(got); !near(total, 500) {
+		t.Errorf("the Sep 1-2 spending is 8 days before the drop, expected 500, got %.2f in %+v", total, got)
+	}
+}
+
 func periodsAroundSep15(now time.Time) []models.BillingPeriod {
 	return []models.BillingPeriod{
 		{Label: "Aug 15 - Sep 14", Start: midnight(time.August, 15), End: midnight(time.September, 14), IsComplete: true},

@@ -26,10 +26,20 @@ type Interval struct {
 }
 
 // Intervals turns a card's snapshots into spending. Between two readings,
-// spending is the growth in debt plus whatever was paid in between. A drop
-// that known payments don't explain is itself a payment, so spending never
-// goes negative. The card is paid in full monthly, and the feeds do miss
-// payments.
+// spending is the growth in debt plus whatever was paid in between.
+//
+// A payment seen from the paying side is dated by the bank debit, but the card
+// balance drops one to three days later. When a snapshot falls between the
+// two, one interval gets the payment added without the drop and a neighbour
+// gets the drop without the payment. Clamping each interval on its own would
+// keep the inflated one and zero the other, counting the whole payment as
+// spending. So a negative interval is first netted against the positive
+// intervals within PaymentMatchWindow of it, nearest first, before anything is
+// clamped.
+//
+// Whatever a drop cannot net against is itself a payment the feeds missed, and
+// is dropped: spending never goes negative. The card is paid in full monthly,
+// and the feeds do miss payments.
 func Intervals(snaps []models.BalanceSnapshot, payments []Payment) []Interval {
 	var out []Interval
 	for i := 1; i < len(snaps); i++ {
@@ -40,10 +50,32 @@ func Intervals(snaps []models.BalanceSnapshot, payments []Payment) []Interval {
 				spend += p.Amount
 			}
 		}
-		if spend < 0 {
-			spend = 0
-		}
 		out = append(out, Interval{From: s0.BalanceDate, To: s1.BalanceDate, Spend: spend})
+	}
+
+	window := int64(PaymentMatchWindow / time.Second)
+	// absorb moves as much of the drop at i as neighbour j can take. Only
+	// positive neighbours give anything, so a drop never feeds another drop.
+	absorb := func(i, j int) {
+		if take := min(-out[i].Spend, out[j].Spend); take > 0 {
+			out[j].Spend -= take
+			out[i].Spend += take
+		}
+	}
+	// Intervals are contiguous and in order, so each scan can stop at the first
+	// neighbour outside the window. Drops are handled oldest first; a neighbour
+	// shared by two drops gives the second only what the first left.
+	for i := range out {
+		if out[i].Spend >= 0 {
+			continue
+		}
+		for j := i - 1; j >= 0 && out[i].Spend < 0 && out[j].To >= out[i].From-window; j-- {
+			absorb(i, j)
+		}
+		for j := i + 1; j < len(out) && out[i].Spend < 0 && out[j].From <= out[i].To+window; j++ {
+			absorb(i, j)
+		}
+		out[i].Spend = 0
 	}
 	return out
 }

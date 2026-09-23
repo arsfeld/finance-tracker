@@ -123,16 +123,18 @@ type Analysis struct {
 
 // DBAccount represents an account row in the database.
 type DBAccount struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Balance     float64 `json:"balance"`
-	BalanceDate int64   `json:"balance_date"`
-	Currency    string  `json:"currency"`
-	OrgName     string  `json:"org_name"`
-	OrgDomain   string  `json:"org_domain"`
-	IsIncluded  bool    `json:"is_included"`
-	FirstSeenAt string  `json:"first_seen_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID           string  `json:"id"`
+	Name         string  `json:"name"`
+	Balance      float64 `json:"balance"`
+	BalanceDate  int64   `json:"balance_date"`
+	Currency     string  `json:"currency"`
+	OrgName      string  `json:"org_name"`
+	OrgDomain    string  `json:"org_domain"`
+	IsIncluded   bool    `json:"is_included"`
+	IsCreditCard bool    `json:"is_credit_card"`
+	CardKey      string  `json:"card_key"`
+	FirstSeenAt  string  `json:"first_seen_at"`
+	UpdatedAt    string  `json:"updated_at"`
 }
 
 // DBTransaction represents a transaction row in the database.
@@ -208,4 +210,15 @@ type UnreconciledAccount struct {
 	Balance     float64 `json:"balance"`
 	BalanceDate int64   `json:"balance_date"`
 	Unexplained float64 `json:"unexplained"` // balance minus what the transactions account for
+}
+
+// BalanceSnapshot is one reading of a card's balance. Card spending is measured
+// between consecutive snapshots, so the balance stays the source of truth even
+// when the transaction feed stops delivering.
+type BalanceSnapshot struct {
+	CardKey     string  `json:"card_key"`
+	AccountID   string  `json:"account_id"`
+	Balance     float64 `json:"balance"` // as reported by SimpleFin; negative = debt
+	BalanceDate int64   `json:"balance_date"`
+	Source      string  `json:"source"`
 }

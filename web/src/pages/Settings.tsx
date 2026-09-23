@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AccountsSettings } from "@/components/AccountsSettings";
 
 const CATEGORY_EMOJIS: Record<string, string> = {
   "Groceries": "🛒", "Dining": "🍽️", "Transportation": "🚗", "Gas": "⛽",
@@ -36,12 +37,13 @@ export default function Settings() {
     <div className="space-y-4">
       <h1 className="text-2xl font-semibold">Settings</h1>
       <p className="text-sm text-muted-foreground">
-        Configuration loaded from <code className="bg-muted px-1 py-0.5 rounded text-xs">.env</code>. Categories can be included/excluded from analysis below.
+        Configuration loaded from <code className="bg-muted px-1 py-0.5 rounded text-xs">.env</code>. Categories and accounts can be included/excluded from analysis below.
       </p>
 
       <Tabs defaultValue="categories">
         <TabsList>
           <TabsTrigger value="categories">Categories ({categories?.length || 0})</TabsTrigger>
+          <TabsTrigger value="accounts">Accounts</TabsTrigger>
           <TabsTrigger value="config">Configuration</TabsTrigger>
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
         </TabsList>
@@ -86,6 +88,10 @@ export default function Settings() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="accounts" className="space-y-4">
+          <AccountsSettings />
         </TabsContent>
 
         <TabsContent value="config" className="space-y-4">

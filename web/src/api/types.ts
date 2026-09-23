@@ -29,6 +29,9 @@ export interface DBAccount {
   org_name: string;
   org_domain: string;
   is_included: boolean;
+  is_credit_card: boolean;
+  card_key: string;
+  is_current: boolean;
   first_seen_at: string;
   updated_at: string;
 }

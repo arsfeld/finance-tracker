@@ -40,6 +40,20 @@ async function postApi<T>(url: string, body?: unknown): Promise<T> {
   return json.data;
 }
 
+async function patchApi<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
+    throw new Error(err.error?.message || res.statusText);
+  }
+  const json: ApiResponse<T> = await res.json();
+  return json.data;
+}
+
 async function deleteApi(url: string): Promise<void> {
   const res = await fetch(url, { method: "DELETE" });
   if (!res.ok) {
@@ -108,6 +122,30 @@ export function useAccounts() {
   return useQuery({
     queryKey: ["accounts"],
     queryFn: () => fetchApi<DBAccount[] | null>("/api/accounts"),
+  });
+}
+
+// Includes or excludes accounts. The server applies each change to every row of
+// the account's identity, so the duplicates a re-auth left behind follow along.
+export function useSetAccountsIncluded() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ ids, included }: { ids: string[]; included: boolean }) => {
+      const results = await Promise.allSettled(
+        ids.map((id) => patchApi(`/api/accounts/${encodeURIComponent(id)}`, { is_included: included })),
+      );
+      const failed = results.filter((r) => r.status === "rejected").length;
+      if (failed > 0) {
+        throw new Error(`${failed} of ${ids.length} accounts could not be updated`);
+      }
+    },
+    // Settled, not success: after a partial failure the list must still show
+    // what the server actually holds.
+    onSettled: () => {
+      for (const key of ["accounts", "transactions", "dashboard", "analytics", "budgets"]) {
+        qc.invalidateQueries({ queryKey: [key] });
+      }
+    },
   });
 }
 

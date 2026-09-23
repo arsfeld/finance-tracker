@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"finance_tracker/internal/database"
 	"finance_tracker/internal/models"
 )
 
@@ -330,5 +331,40 @@ func TestBackfillCardIdentityClassifiesLegacyRows(t *testing.T) {
 	}
 	if !got.IsCreditCard || got.CardKey != "TD Canada Trust|4520" {
 		t.Errorf("legacy row not classified: %+v", got)
+	}
+}
+
+// setFirstSeen pins first_seen_at, which the insert stamps with the current
+// second, so tests can order a re-auth's rows.
+func setFirstSeen(t *testing.T, db *database.DB, id, at string) {
+	t.Helper()
+	if _, err := db.Write.Exec(`UPDATE accounts SET first_seen_at = ? WHERE id = ?`, at, id); err != nil {
+		t.Fatalf("set first_seen_at for %s: %v", id, err)
+	}
+}
+
+// The Tangerine re-auth on 2026-09-19 left two rows per account. Settings shows
+// one entry per identity, so the list must say which row is the live one.
+func TestListMarksTheNewestAccountOfEachIdentityCurrent(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	accts := NewAccountStore(db.Read, db.Write)
+
+	for _, id := range []string{"ACT-old", "ACT-new"} {
+		seedAccountFull(t, accts, models.DBAccount{
+			ID: id, Name: "Tangerine Chequing Account (2106)", OrgName: "Tangerine Bank (CA)", IsIncluded: true,
+		})
+	}
+	setFirstSeen(t, db, "ACT-old", "2026-03-17 02:27:47")
+	setFirstSeen(t, db, "ACT-new", "2026-09-19 17:00:00")
+
+	list, err := accts.List(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, a := range list {
+		if want := a.ID == "ACT-new"; a.IsCurrent != want {
+			t.Errorf("%s: is_current = %v, want %v", a.ID, a.IsCurrent, want)
+		}
 	}
 }

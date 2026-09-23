@@ -84,3 +84,26 @@ func TestSupersededAccountsKeepsTheNewestFirstSeen(t *testing.T) {
 		t.Errorf("expected ACT-new to be current, got %q", got)
 	}
 }
+
+// Inclusion follows an account's identity whatever its type, so every account
+// needs a current row, not just cards. An account with no key is its own
+// identity.
+func TestCurrentByKeyCoversEveryAccount(t *testing.T) {
+	accounts := []models.DBAccount{
+		{ID: "ACT-loc-old", CardKey: "TD Canada Trust|3871", FirstSeenAt: "2026-07-25 10:00:00"},
+		{ID: "ACT-loc-new", CardKey: "TD Canada Trust|3871", FirstSeenAt: "2026-09-11 23:41:21"},
+		{ID: "ACT-nokey", FirstSeenAt: "2026-03-17 02:27:47"},
+	}
+
+	current := CurrentByKey(accounts)
+
+	if got := current["TD Canada Trust|3871"].ID; got != "ACT-loc-new" {
+		t.Errorf("expected the newer line of credit to be current, got %q", got)
+	}
+	if got := current["ACT-nokey"].ID; got != "ACT-nokey" {
+		t.Errorf("an account without a key is keyed by its ID, got %q", got)
+	}
+	if len(current) != 2 {
+		t.Errorf("expected 2 identities, got %d: %v", len(current), current)
+	}
+}

@@ -47,22 +47,41 @@ func CardKey(orgName, accountName, accountID string) (key string, ok bool) {
 	return orgName + "|" + m[1], true
 }
 
+// IdentityKey is what ties an account's rows together across re-auths and
+// renames: its card key, or its own ID when it has none.
+func IdentityKey(a models.DBAccount) string {
+	if a.CardKey != "" {
+		return a.CardKey
+	}
+	return a.ID
+}
+
+// CurrentByKey maps each identity to the account reporting for it now: the one
+// first seen most recently, ties going to the higher ID.
+func CurrentByKey(accounts []models.DBAccount) map[string]models.DBAccount {
+	current := make(map[string]models.DBAccount)
+	for _, a := range accounts {
+		key := IdentityKey(a)
+		cur, seen := current[key]
+		if !seen || a.FirstSeenAt > cur.FirstSeenAt || (a.FirstSeenAt == cur.FirstSeenAt && a.ID > cur.ID) {
+			current[key] = a
+		}
+	}
+	return current
+}
+
 // CurrentAccounts maps each card key to the account reporting for it now: the
 // one first seen most recently. After a re-auth the old ID is dead even when
 // SimpleFin keeps returning it with a fresh balance_date and a frozen balance,
 // so balance recency cannot be trusted to pick it.
 func CurrentAccounts(accounts []models.DBAccount) map[string]models.DBAccount {
-	current := make(map[string]models.DBAccount)
+	var cards []models.DBAccount
 	for _, a := range accounts {
-		if !a.IsCreditCard || a.CardKey == "" {
-			continue
-		}
-		cur, seen := current[a.CardKey]
-		if !seen || a.FirstSeenAt > cur.FirstSeenAt || (a.FirstSeenAt == cur.FirstSeenAt && a.ID > cur.ID) {
-			current[a.CardKey] = a
+		if a.IsCreditCard && a.CardKey != "" {
+			cards = append(cards, a)
 		}
 	}
-	return current
+	return CurrentByKey(cards)
 }
 
 // SupersededAccounts returns the IDs of card accounts that another account with

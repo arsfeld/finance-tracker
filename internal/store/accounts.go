@@ -68,7 +68,14 @@ func (s *AccountStore) List(ctx context.Context) ([]models.DBAccount, error) {
 		}
 		accounts = append(accounts, a)
 	}
-	return accounts, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	current := ledger.CurrentByKey(accounts)
+	for i := range accounts {
+		accounts[i].IsCurrent = current[ledger.IdentityKey(accounts[i])].ID == accounts[i].ID
+	}
+	return accounts, nil
 }
 
 func (s *AccountStore) GetByID(ctx context.Context, id string) (*models.DBAccount, error) {

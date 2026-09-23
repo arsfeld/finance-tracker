@@ -133,8 +133,10 @@ type DBAccount struct {
 	IsIncluded   bool    `json:"is_included"`
 	IsCreditCard bool    `json:"is_credit_card"`
 	CardKey      string  `json:"card_key"`
-	FirstSeenAt  string  `json:"first_seen_at"`
-	UpdatedAt    string  `json:"updated_at"`
+	// IsCurrent is computed, not stored: the row reporting for its identity now.
+	IsCurrent   bool   `json:"is_current"`
+	FirstSeenAt string `json:"first_seen_at"`
+	UpdatedAt   string `json:"updated_at"`
 }
 
 // DBTransaction represents a transaction row in the database.

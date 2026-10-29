@@ -37,7 +37,11 @@ export function useSSE() {
       let msg = "Sync complete";
       try {
         const d = JSON.parse(e.data);
-        if (d.status === "partial") msg = "Sync complete (some accounts had errors)";
+        if (d.source === "import") {
+          msg = `Import complete: ${d.transactions ?? 0} added`;
+        } else if (d.status === "partial") {
+          msg = "Sync complete (some accounts had errors)";
+        }
       } catch { /* ignore */ }
       set({ type: "sync", state: "success", message: msg, timestamp: Date.now() });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });

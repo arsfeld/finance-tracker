@@ -177,6 +177,7 @@ func (s *Service) Commit(ctx context.Context, accountID string, stmt *ofx.Statem
 		}
 	}
 
+	account := plan.Account
 	if stmt.LedgerBalance != nil {
 		date := statementBalanceDate(stmt)
 		if err := s.accounts.UpdateBalance(ctx, plan.Account.ID, *stmt.LedgerBalance, date.Unix()); err != nil {
@@ -193,10 +194,15 @@ func (s *Service) Commit(ctx context.Context, accountID string, stmt *ofx.Statem
 				return nil, fmt.Errorf("record card balance: %w", err)
 			}
 		}
+		// The result is shown immediately after import, so it must carry the
+		// balance the import just wrote, not the one read before the write.
+		if fresh, err := s.accounts.GetByID(ctx, plan.Account.ID); err == nil && fresh != nil {
+			account = *fresh
+		}
 	}
 
 	return &Result{
-		Account:    plan.Account,
+		Account:    account,
 		Added:      added,
 		Updated:    updated,
 		Duplicates: plan.DuplicateCount,

@@ -166,6 +166,9 @@ func TestCommitUpdatesBalanceAndSnapshot(t *testing.T) {
 	if result.Added != 2 {
 		t.Errorf("added = %d, want 2", result.Added)
 	}
+	if result.Account.Balance != -3187.08 {
+		t.Errorf("result account balance = %v, want the committed -3187.08", result.Account.Balance)
+	}
 
 	acct, err := accts.GetByID(ctx, "ACT-new")
 	if err != nil {

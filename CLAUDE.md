@@ -157,7 +157,8 @@ Models are tried in order (R1 for reasoning, V3.1 as fallback).
 
 #### Balance-Trusted Card Spending (web server)
 - The web server's AI analysis covers **included credit card accounts only** (`accounts.is_credit_card`). Chequing, savings and lines of credit are used only to detect card payments.
-- Card spending comes from **balance snapshots** (`balance_snapshots`, one per card per sync when the balance changes): spend = debt growth + payments in between; an unexplained drop is treated as a payment. Transactions only supply categories ("itemized"); the rest is reported as "not itemized".
+- Card spending comes from **balance snapshots** (`balance_snapshots`, one per card per sync when the balance changes) only where SimpleFin is healthy: between two SimpleFin readings at most 7 days apart (`ledger.MaxTrustedGap`), spend = debt growth + payments in between, and an unexplained drop is treated as a payment. Everywhere else (outages, statement imports) spending is the sum of itemized charges. Import snapshots (`source = 'import'`) are kept as a record but never measured. Periods are labelled `balance`, `transactions` or `mixed`.
+- A SimpleFin sync never moves an account's balance back to an older `balance_date`, so a failing connection cannot undo an import.
 - Cards are keyed by `org_name|last4` (`accounts.card_key`) so history survives SimpleFin issuing new account IDs on re-auth; the account first seen most recently is current, the others are superseded.
 - Payment patterns per card live in the `settings` table (`card_payment_patterns`), editable via `GET/PUT /api/card-payment-patterns`.
 - Tune prompts against production without calling the LLM: copy the DB from galactica (`/var/data/finance-tracker/finance_tracker.db*`) and run `DB_PATH=<copy> ENV_FILE=/dev/null go run ./cmd/promptdump`.
@@ -185,6 +186,10 @@ Optional (Transaction Filtering):
   - See `config.example.yaml` for configuration format
   - Supports filtering by merchant/description with substring, prefix, or suffix matching
   - Filtered transactions are excluded from analysis but shown in summary
+
+Optional (Scheduling):
+- `SYNC_SCHEDULE`: SimpleFin sync cron with seconds (default `0 0 */6 * * *`), only when `SIMPLEFIN_BRIDGE_URL` is set
+- `ANALYSIS_SCHEDULE`: analysis cron with seconds (default `0 0 8 * * 1`, Mondays 08:00), always active
 
 ### Important Patterns
 

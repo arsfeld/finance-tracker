@@ -57,16 +57,20 @@ func main() {
 
 	srv := server.New(db, cfg, sched)
 
-	// Schedule periodic sync + analysis if SimpleFin is configured.
+	// SimpleFin sync runs only while a bridge is configured. Analysis has its
+	// own schedule: statement imports keep the data current even when the
+	// SimpleFin connection is down.
 	if cfg.SimplefinBridgeURL != "" {
-		if err := sched.AddFunc(cfg.SyncSchedule, func() {
-			srv.Sync.RunSync()
-			srv.Analysis.RunAnalysis()
-		}); err != nil {
+		if err := sched.AddFunc(cfg.SyncSchedule, srv.Sync.RunSync); err != nil {
 			log.Error().Err(err).Str("schedule", cfg.SyncSchedule).Msg("Failed to add sync schedule")
 		} else {
-			log.Info().Str("schedule", cfg.SyncSchedule).Msg("Scheduled periodic sync + analysis")
+			log.Info().Str("schedule", cfg.SyncSchedule).Msg("Scheduled periodic sync")
 		}
+	}
+	if err := sched.AddFunc(cfg.AnalysisSchedule, srv.Analysis.RunAnalysis); err != nil {
+		log.Error().Err(err).Str("schedule", cfg.AnalysisSchedule).Msg("Failed to add analysis schedule")
+	} else {
+		log.Info().Str("schedule", cfg.AnalysisSchedule).Msg("Scheduled periodic analysis")
 	}
 
 	sched.Start()

@@ -47,7 +47,8 @@ type Config struct {
 	BalanceDriftThreshold float64
 
 	// Scheduler
-	SyncSchedule string
+	SyncSchedule     string
+	AnalysisSchedule string
 
 	// Env file path (for initial loading only)
 	EnvFile string
@@ -91,6 +92,7 @@ func Load(envFile string) (*Config, error) {
 
 		BalanceDriftThreshold: getEnvFloat("BALANCE_DRIFT_THRESHOLD", 250),
 		SyncSchedule:          getEnvOr("SYNC_SCHEDULE", "0 0 */6 * * *"),
+		AnalysisSchedule:      getEnvOr("ANALYSIS_SCHEDULE", "0 0 8 * * 1"),
 	}
 
 	return cfg, nil

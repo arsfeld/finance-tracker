@@ -133,6 +133,22 @@ func TestFetchFromReachesBackToTheStraddlingSnapshot(t *testing.T) {
 	}
 }
 
+// A statement balance is not a SimpleFin reading and starts no interval, so
+// it must not cut short the fetch for the interval straddling start.
+func TestFetchFromIgnoresImportSnapshots(t *testing.T) {
+	imported := snap(-250, day(time.August, 14))
+	imported.Source = ImportSnapshotSource
+	snaps := map[string][]models.BalanceSnapshot{tdKey: {
+		snap(-200, day(time.August, 10)), imported, snap(-300, day(time.August, 20)),
+	}}
+
+	got := FetchFrom(snaps, midnight(time.August, 15))
+
+	if want := day(time.August, 10).Add(-PaymentMatchWindow); !got.Equal(want) {
+		t.Errorf("expected %v, got %v", want, got)
+	}
+}
+
 // Galactica on 2026-10-29: SimpleFin's last TD readings are seeds 11 and 12
 // days apart, the Sep 23 one predating $8,450 of payments, and imports carry
 // everything since. Balance math booked the payments as September spending

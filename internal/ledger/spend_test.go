@@ -328,8 +328,37 @@ func TestCombineAddsCardsAndMixesSources(t *testing.T) {
 
 	got := Combine([][]PeriodSpend{td, mc})
 
-	if len(got) != 1 || got[0].Source != SourceMixed || got[0].Total != 2050 || got[0].DailyBurn != 205 || got[0].CoveredDays != 10 {
+	// Each card's day split describes only that card, so a period the cards
+	// measure differently has none.
+	if len(got) != 1 || got[0].Source != SourceMixed || got[0].Total != 2050 || got[0].DailyBurn != 205 ||
+		got[0].CoveredDays != 10 || got[0].BalanceDays != 0 {
 		t.Errorf("unexpected combination: %+v", got)
+	}
+}
+
+func TestCombineKeepsTheDaySplitOfASingleMixedCard(t *testing.T) {
+	p := models.BillingPeriod{Label: "Sep"}
+	td := []PeriodSpend{{Period: p, Source: SourceMixed, Total: 900, CoveredDays: 10, BalanceDays: 8}}
+
+	if got := Combine([][]PeriodSpend{td}); got[0].Source != SourceMixed || got[0].BalanceDays != 8 {
+		t.Errorf("one mixed card keeps its split, got %+v", got[0])
+	}
+}
+
+// Snapshots are stored only when the balance changes, so on a healthy feed the
+// last reading usually predates the newest charge. The days after it come
+// from charges, which makes the cycle mixed.
+func TestCardPeriodsHealthySeriesEndingBeforeDataThroughIsMixed(t *testing.T) {
+	periods := periodsAroundSep15(midnight(time.September, 25))
+	snaps := []models.BalanceSnapshot{
+		snap(0, midnight(time.September, 15)), snap(-400, midnight(time.September, 18)), snap(-900, midnight(time.September, 21)),
+	}
+	charges := []models.DBTransaction{tx("IGA", -120, "Groceries", day(time.September, 22))}
+
+	got := CardPeriods(periods, snaps, nil, midnight(time.September, 23).Unix(), charges)[1]
+
+	if got.Source != SourceMixed || !near(got.BalanceDays, 6) || !near(got.CoveredDays, 8) || !near(got.Total, 1020) {
+		t.Errorf("expected mixed: 6 balance days of 8, total 900 + 120, got %+v", got)
 	}
 }
 

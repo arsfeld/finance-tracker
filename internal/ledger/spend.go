@@ -22,9 +22,12 @@ const (
 
 // MaxTrustedGap is the longest stretch between two SimpleFin readings whose
 // balance change is trusted as spending. Sync runs every two days, so a missed
-// run or two still fits. A longer gap means the connection was failing, and
+// run or two still fits. A longer gap may mean the connection was failing, and
 // the reading at its end may be a frozen balance: TD's Sep 23 reading predated
 // $8,450 of payments, and booking them as spending zeroed the next cycle.
+// Readings are stored only when the balance changes, so a long gap can also be
+// an idle card on a healthy feed. That stretch falls back to its charges,
+// which is harmless: an idle card has none.
 const MaxTrustedGap = 7 * 24 * time.Hour
 
 // ImportSnapshotSource marks a balance read from an imported statement. It is
@@ -247,13 +250,19 @@ func CardPeriods(periods []models.BillingPeriod, snaps []models.BalanceSnapshot,
 // Combine adds up several cards' periods. Totals and burn rates add; coverage
 // is the widest card's. A period is balance or transactions when every card
 // agrees, and mixed otherwise.
+//
+// BalanceDays is kept only when every card agrees on the source and, for mixed
+// cards, on the split: one card's balance days set against another card's
+// coverage would describe neither.
 func Combine(perCard [][]PeriodSpend) []PeriodSpend {
 	if len(perCard) == 0 {
 		return nil
 	}
 	out := make([]PeriodSpend, len(perCard[0]))
 	for i := range out {
-		out[i] = PeriodSpend{Period: perCard[0][i].Period, Source: perCard[0][i].Source}
+		first := perCard[0][i]
+		out[i] = PeriodSpend{Period: first.Period, Source: first.Source}
+		split := true
 		for _, card := range perCard {
 			c := card[i]
 			out[i].Total += c.Total
@@ -263,9 +272,13 @@ func Combine(perCard [][]PeriodSpend) []PeriodSpend {
 			out[i].DailyBurn += c.DailyBurn
 			out[i].CoveredDays = max(out[i].CoveredDays, c.CoveredDays)
 			out[i].BalanceDays = max(out[i].BalanceDays, c.BalanceDays)
-			if c.Source != out[i].Source {
-				out[i].Source = SourceMixed
+			if c.Source != first.Source || (c.Source == SourceMixed &&
+				(c.BalanceDays != first.BalanceDays || c.CoveredDays != first.CoveredDays)) {
+				split = false
 			}
+		}
+		if !split {
+			out[i].Source, out[i].BalanceDays = SourceMixed, 0
 		}
 	}
 	return out

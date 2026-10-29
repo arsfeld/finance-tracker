@@ -122,12 +122,13 @@ func Build(periods []models.BillingPeriod, accounts []models.DBAccount, txns []m
 // FetchFrom returns how far back transactions must be loaded to measure the
 // range starting at start. The interval straddling start begins at the last
 // snapshot before it, and payments settling it may post up to
-// PaymentMatchWindow earlier.
+// PaymentMatchWindow earlier. Import snapshots start no interval, so they are
+// skipped: one just before start would cut the fetch short.
 func FetchFrom(snapshots map[string][]models.BalanceSnapshot, start time.Time) time.Time {
 	from := start.Unix()
 	for _, snaps := range snapshots {
 		for i := len(snaps) - 1; i >= 0; i-- {
-			if snaps[i].BalanceDate < start.Unix() {
+			if snaps[i].Source != ImportSnapshotSource && snaps[i].BalanceDate < start.Unix() {
 				from = min(from, snaps[i].BalanceDate)
 				break
 			}

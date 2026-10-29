@@ -3,6 +3,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { JobStatusProvider } from "@/hooks/JobStatusContext";
 import Dashboard from "@/pages/Dashboard";
 import Transactions from "@/pages/Transactions";
+import Import from "@/pages/Import";
 import Analysis from "@/pages/Analysis";
 import Settings from "@/pages/Settings";
 import Chat from "@/pages/Chat";
@@ -17,6 +18,7 @@ export default function App() {
         <Route element={<AppLayout />}>
           <Route index element={<Dashboard />} />
           <Route path="transactions" element={<Transactions />} />
+          <Route path="import" element={<Import />} />
           <Route path="analytics" element={<Analytics />} />
           <Route path="budgets" element={<Budgets />} />
           <Route path="analysis" element={<Analysis />} />

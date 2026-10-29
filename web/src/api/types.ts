@@ -62,10 +62,61 @@ export interface SyncLogEntry {
   started_at: string;
   completed_at: string;
   status: string;
+  source: string;
+  filename?: string;
+  account_id?: string;
   transactions_added: number;
   transactions_updated: number;
   error_message: string;
   api_errors: string;
+}
+
+export interface ImportStatementInfo {
+  account_id: string;
+  account_type?: string;
+  currency?: string;
+  start?: number;
+  end?: number;
+  ledger_balance?: number;
+  balance_date?: number;
+  transaction_count: number;
+}
+
+export interface ImportRow {
+  date: number;
+  description: string;
+  amount: number;
+  status: "new" | "duplicate" | "updated";
+  fitid?: string;
+  existing_id?: string;
+}
+
+export interface ImportCandidate {
+  account_id: string;
+  name: string;
+  org_name: string;
+  score: number;
+}
+
+export interface ImportPreview {
+  filename: string;
+  statement: ImportStatementInfo;
+  candidates: ImportCandidate[];
+  account?: DBAccount;
+  new_count: number;
+  duplicate_count: number;
+  updated_count: number;
+  rows: ImportRow[];
+  warnings?: string[];
+}
+
+export interface ImportResult {
+  log_id: number;
+  account: DBAccount;
+  added: number;
+  updated: number;
+  duplicates: number;
+  warnings?: string[];
 }
 
 export interface CategoryTrendPeriod {

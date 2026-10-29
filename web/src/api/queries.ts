@@ -14,6 +14,8 @@ import type {
   BudgetStatusResponse,
   BudgetHistoryResponse,
   TransactionSummary,
+  ImportPreview,
+  ImportResult,
 } from "./types";
 
 async function fetchApi<T>(url: string): Promise<T> {
@@ -32,6 +34,16 @@ async function postApi<T>(url: string, body?: unknown): Promise<T> {
     headers: { "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
+    throw new Error(err.error?.message || res.statusText);
+  }
+  const json: ApiResponse<T> = await res.json();
+  return json.data;
+}
+
+async function postFormApi<T>(url: string, form: FormData): Promise<T> {
+  const res = await fetch(url, { method: "POST", body: form });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
     throw new Error(err.error?.message || res.statusText);
@@ -284,6 +296,25 @@ export function useSyncLog() {
   return useQuery({
     queryKey: ["sync-log"],
     queryFn: () => fetchApi<SyncLogEntry[] | null>("/api/sync/log"),
+  });
+}
+
+// Statement import
+export function useImportPreview() {
+  return useMutation({
+    mutationFn: (form: FormData) => postFormApi<ImportPreview>("/api/import/preview", form),
+  });
+}
+
+export function useImportStatement() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (form: FormData) => postFormApi<ImportResult>("/api/import", form),
+    onSuccess: () => {
+      for (const key of ["dashboard", "transactions", "accounts", "analytics", "budgets", "sync-log"]) {
+        qc.invalidateQueries({ queryKey: [key] });
+      }
+    },
   });
 }
 

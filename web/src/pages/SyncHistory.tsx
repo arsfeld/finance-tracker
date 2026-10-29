@@ -42,10 +42,10 @@ export default function SyncHistory() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold">Sync History</h1>
+      <h1 className="text-2xl font-semibold">Sync & Import History</h1>
       <Card>
         <CardHeader>
-          <CardTitle>Recent Sync Attempts</CardTitle>
+          <CardTitle>Recent Runs</CardTitle>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -61,6 +61,7 @@ export default function SyncHistory() {
                   <TableRow>
                     <TableHead>Started At</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Source</TableHead>
                     <TableHead>Duration</TableHead>
                     <TableHead className="text-right">Added</TableHead>
                     <TableHead className="text-right">Updated</TableHead>
@@ -81,6 +82,12 @@ export default function SyncHistory() {
                           </TableCell>
                           <TableCell className={`text-sm font-medium capitalize ${getStatusColor(log.status)}`}>
                             {log.status}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            <div>{log.source === "import" ? "Import" : "SimpleFIN"}</div>
+                            {log.filename && (
+                              <div className="text-xs text-muted-foreground">{log.filename}</div>
+                            )}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
                             {formatDuration(log.started_at, log.completed_at)}
@@ -105,7 +112,7 @@ export default function SyncHistory() {
                         </TableRow>
                         {isExpanded && (
                           <TableRow className="bg-muted/30">
-                            <TableCell colSpan={6} className="p-4">
+                            <TableCell colSpan={7} className="p-4">
                               <div className="space-y-3">
                                 {log.error_message && (
                                   <div>

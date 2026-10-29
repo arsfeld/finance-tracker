@@ -159,6 +159,9 @@ type SyncLogEntry struct {
 	StartedAt           string `json:"started_at"`
 	CompletedAt         string `json:"completed_at,omitempty"`
 	Status              string `json:"status"`
+	Source              string `json:"source"`
+	Filename            string `json:"filename,omitempty"`
+	AccountID           string `json:"account_id,omitempty"`
 	TransactionsAdded   int    `json:"transactions_added"`
 	TransactionsUpdated int    `json:"transactions_updated"`
 	ErrorMessage        string `json:"error_message,omitempty"`

@@ -16,8 +16,16 @@ func NewSyncLogStore(read, write *sql.DB) *SyncLogStore {
 	return &SyncLogStore{read: read, write: write}
 }
 
+// Create starts a SimpleFIN sync log entry.
 func (s *SyncLogStore) Create(ctx context.Context) (int64, error) {
-	res, err := s.write.ExecContext(ctx, `INSERT INTO sync_log (status) VALUES ('running')`)
+	return s.CreateEntry(ctx, "simplefin", "", "")
+}
+
+// CreateEntry starts a log entry for a named source, such as an imported file.
+func (s *SyncLogStore) CreateEntry(ctx context.Context, source, filename, accountID string) (int64, error) {
+	res, err := s.write.ExecContext(ctx, `
+		INSERT INTO sync_log (status, source, filename, account_id) VALUES ('running', ?, ?, ?)`,
+		source, filename, accountID)
 	if err != nil {
 		return 0, err
 	}
@@ -43,7 +51,8 @@ func (s *SyncLogStore) List(ctx context.Context, limit int) ([]models.SyncLogEnt
 		limit = 20
 	}
 	rows, err := s.read.QueryContext(ctx, `
-		SELECT id, started_at, COALESCE(completed_at, ''), status, transactions_added, transactions_updated, error_message, api_errors
+		SELECT id, started_at, COALESCE(completed_at, ''), status, transactions_added, transactions_updated, error_message, api_errors,
+			source, filename, account_id
 		FROM sync_log ORDER BY started_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -53,7 +62,8 @@ func (s *SyncLogStore) List(ctx context.Context, limit int) ([]models.SyncLogEnt
 	var entries []models.SyncLogEntry
 	for rows.Next() {
 		var e models.SyncLogEntry
-		if err := rows.Scan(&e.ID, &e.StartedAt, &e.CompletedAt, &e.Status, &e.TransactionsAdded, &e.TransactionsUpdated, &e.ErrorMessage, &e.APIErrors); err != nil {
+		if err := rows.Scan(&e.ID, &e.StartedAt, &e.CompletedAt, &e.Status, &e.TransactionsAdded, &e.TransactionsUpdated, &e.ErrorMessage, &e.APIErrors,
+			&e.Source, &e.Filename, &e.AccountID); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)

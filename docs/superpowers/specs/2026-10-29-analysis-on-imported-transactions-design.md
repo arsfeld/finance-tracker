@@ -48,9 +48,9 @@ SimpleFin may be reconnected later, so both sources have to coexist.
   (7 days). Sync runs every two days, so one or two missed runs stay trusted.
   Untrusted intervals contribute no balance spending.
 - The unchanged-balance coverage extension after the last reading becomes
-  `min(coverageEnd, lastReading + MaxTrustedGap)`. Without the cap, a
-  `balance_date` set by an import would stretch SimpleFin coverage over the
-  outage.
+  `min(dataThrough, lastReading + MaxTrustedGap)`, and applies only when the
+  last interval is itself trusted. Without these limits, a `balance_date` set
+  by an import would stretch SimpleFin coverage over the outage.
 - `CardPeriods` takes a list of trusted ranges (merged adjacent trusted
   intervals plus the capped extension) instead of one `[covFrom, covTo]` range.
   For each period:
@@ -63,7 +63,9 @@ SimpleFin may be reconnected later, so both sources have to coexist.
     trusted) or `mixed`. `SourceItemizedOnly` is renamed `SourceTransactions`,
     and `SourceMixed` is added.
   - `CoveredDays` counts the period's days up to the card's **data-through
-    date**, which is the current account's `balance_date` (see section 2).
+    date**: the later of the current account's `balance_date` (see section 2)
+    and the card's newest transaction, so an import without an ending balance
+    still counts.
     `DailyBurn = Total / CoveredDays`. An in-progress cycle is no longer
     diluted by days nobody has reported yet.
 - `Combine` takes `mixed` when cards disagree, or when any card is `mixed`.

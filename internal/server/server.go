@@ -99,6 +99,11 @@ func New(db *database.DB, cfg *config.Config, sched *scheduler.Scheduler) *Serve
 	s.mux.HandleFunc("GET /api/analyses/{id}", analysisHandler.GetByID)
 	s.mux.HandleFunc("POST /api/analyses/run", analysisRunHandler.TriggerAnalysis)
 
+	// Statement import
+	importHandler := api.NewImportHandler(cfg, accountStore, txnStore, catStore, snapshotStore, syncLogStore, sched, events)
+	s.mux.HandleFunc("POST /api/import/preview", importHandler.Preview)
+	s.mux.HandleFunc("POST /api/import", importHandler.Commit)
+
 	// Sync
 	s.mux.HandleFunc("POST /api/sync", syncHandler.TriggerSync)
 	s.mux.HandleFunc("GET /api/sync/status", syncHandler.GetStatus)

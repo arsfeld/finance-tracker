@@ -12,7 +12,7 @@ import (
 
 const (
 	SnapshotSourceSync        = "sync"
-	SnapshotSourceImport      = "import"
+	SnapshotSourceImport      = ledger.ImportSnapshotSource
 	SnapshotSourceSeedAnchor  = "seed_anchor"
 	SnapshotSourceSeedCurrent = "seed_current"
 )

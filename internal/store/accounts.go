@@ -25,7 +25,9 @@ func (s *AccountStore) Upsert(ctx context.Context, acct models.DBAccount) error 
 	// Card fields are set on insert only: they are a guess from the name, and a
 	// hand correction must survive every later sync. Inclusion is likewise set
 	// on insert only, and a new row takes it from its identity so a re-auth's
-	// fresh IDs keep the user's choice.
+	// fresh IDs keep the user's choice. The balance only moves forward: a failing
+	// connection can keep reporting a frozen balance after a newer statement was
+	// imported (the same guard as UpdateBalance).
 	isCard := ledger.IsCreditCardName(acct.Name)
 	cardKey, ok := ledger.CardKey(acct.OrgName, acct.Name, acct.ID)
 	if isCard && !ok {
@@ -42,8 +44,9 @@ func (s *AccountStore) Upsert(ctx context.Context, acct models.DBAccount) error 
 			?, ?, ?, ?, datetime('now'))
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
-			balance = excluded.balance,
-			balance_date = excluded.balance_date,
+			balance = CASE WHEN excluded.balance_date >= COALESCE(accounts.balance_date, 0)
+				THEN excluded.balance ELSE accounts.balance END,
+			balance_date = MAX(excluded.balance_date, COALESCE(accounts.balance_date, 0)),
 			currency = excluded.currency,
 			org_name = excluded.org_name,
 			org_domain = excluded.org_domain,

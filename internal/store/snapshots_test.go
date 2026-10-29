@@ -129,3 +129,35 @@ func TestRecordCurrentIgnoresSupersededAccount(t *testing.T) {
 		t.Errorf("the superseded account must not be recorded, got %d rows (err %v)", n, err)
 	}
 }
+
+// After an import, RecordCurrent must not copy the imported balance back as a
+// SimpleFin reading: that would let a statement balance into balance math.
+func TestRecordCurrentDoesNotRelabelAnImportedBalance(t *testing.T) {
+	ctx := context.Background()
+	_, accts, snaps := seedProductionTD(t)
+	snaps.Seed(ctx)
+
+	importedAt := at(time.October, 27)
+	if _, err := accts.UpdateBalance(ctx, "ACT-new", -3187.08, importedAt); err != nil {
+		t.Fatalf("import balance: %v", err)
+	}
+	if _, err := snaps.Record(ctx, models.BalanceSnapshot{
+		CardKey: "TD Canada Trust|4520", AccountID: "ACT-new", Balance: -3187.08, BalanceDate: importedAt, Source: SnapshotSourceImport,
+	}); err != nil {
+		t.Fatalf("record import: %v", err)
+	}
+	seedAccountFull(t, accts, models.DBAccount{
+		ID: "ACT-new", Name: "TD AEROPLAN VISA INFINITE (4520)", OrgName: "TD Canada Trust",
+		Balance: -8024.04, BalanceDate: at(time.September, 25),
+	})
+
+	n, err := snaps.RecordCurrent(ctx)
+	if err != nil || n != 0 {
+		t.Errorf("expected no sync reading after a stale sync, got %d (err %v)", n, err)
+	}
+	byCard, _ := snaps.ListByCard(ctx)
+	hist := byCard["TD Canada Trust|4520"]
+	if last := hist[len(hist)-1]; last.Source != SnapshotSourceImport {
+		t.Errorf("latest snapshot should still be the import, got %+v", last)
+	}
+}

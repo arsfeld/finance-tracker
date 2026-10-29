@@ -585,3 +585,36 @@ func TestUpdateBalanceOnlyMovesForward(t *testing.T) {
 		t.Errorf("newer statement did not land: %v @ %d", got.Balance, got.BalanceDate)
 	}
 }
+
+// SimpleFin keeps reporting TD's frozen Sep 25 balance after an Oct 27
+// statement was imported. The sync must not roll the account back, or the
+// card reads as stale and its data-through date regresses.
+func TestUpsertKeepsANewerImportedBalance(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	accts := NewAccountStore(db.Read, db.Write)
+	card := models.DBAccount{
+		ID: "ACT-card", Name: "TD AEROPLAN VISA INFINITE (4520)", OrgName: "TD Canada Trust",
+		Balance: -8024.04, BalanceDate: 1790380000, IsIncluded: true,
+	}
+	seedAccountFull(t, accts, card)
+	if _, err := accts.UpdateBalance(ctx, "ACT-card", -3187.08, 1793102400); err != nil {
+		t.Fatalf("import balance: %v", err)
+	}
+
+	card.Name = "TD AEROPLAN VISA INFINITE (4520) renamed"
+	if err := accts.Upsert(ctx, card); err != nil {
+		t.Fatalf("sync upsert: %v", err)
+	}
+
+	got, err := accts.GetByID(ctx, "ACT-card")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Balance != -3187.08 || got.BalanceDate != 1793102400 {
+		t.Errorf("stale sync rolled the balance back to %v @ %d", got.Balance, got.BalanceDate)
+	}
+	if got.Name != card.Name {
+		t.Errorf("a sync still refreshes the name, got %q", got.Name)
+	}
+}

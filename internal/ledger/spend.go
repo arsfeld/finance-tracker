@@ -154,9 +154,8 @@ func inSpans(spans []span, at int64) bool {
 // apart; there an interval crossing a period boundary is split in proportion
 // to time. Every other day, outages and imported stretches included, is
 // measured by its itemized charges. dataThrough is the last moment the card
-// has data for, from either source. An unchanged balance is not stored as a
-// snapshot, so a trusted stretch runs on past the last reading toward it, but
-// no further than MaxTrustedGap.
+// has data for, from either source. Balance coverage ends at the last reading:
+// anything after it may be an outage filled by imports.
 func CardPeriods(periods []models.BillingPeriod, snaps []models.BalanceSnapshot, payments []Payment,
 	dataThrough int64, charges []models.DBTransaction) []PeriodSpend {
 	var readings []models.BalanceSnapshot
@@ -182,10 +181,6 @@ func CardPeriods(periods []models.BillingPeriod, snaps []models.BalanceSnapshot,
 		} else {
 			spans = append(spans, span{iv.From, iv.To})
 		}
-	}
-	if n := len(intervals); n > 0 && intervals[n-1].To-intervals[n-1].From <= gap {
-		last := intervals[n-1].To
-		spans[len(spans)-1].to = max(last, min(dataThrough, last+gap))
 	}
 	if n := len(spans); n > 0 {
 		dataThrough = max(dataThrough, spans[n-1].to)

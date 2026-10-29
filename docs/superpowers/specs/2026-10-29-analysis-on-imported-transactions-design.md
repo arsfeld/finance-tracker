@@ -47,12 +47,9 @@ SimpleFin may be reconnected later, so both sources have to coexist.
   Afterwards an interval is **trusted** when `To - From <= MaxTrustedGap`
   (7 days). Sync runs every two days, so one or two missed runs stay trusted.
   Untrusted intervals contribute no balance spending.
-- The unchanged-balance coverage extension after the last reading becomes
-  `min(dataThrough, lastReading + MaxTrustedGap)`, and applies only when the
-  last interval is itself trusted. Without these limits, a `balance_date` set
-  by an import would stretch SimpleFin coverage over the outage.
+- Balance coverage ends at the last SimpleFin reading. The old unchanged-balance extension is dropped: once imports advance balance_date it would stretch SimpleFin coverage over an outage and hide imported charges. On a healthy connection only the days since the last sync are measured from charges.
 - `CardPeriods` takes a list of trusted ranges (merged adjacent trusted
-  intervals plus the capped extension) instead of one `[covFrom, covTo]` range.
+  intervals) instead of one `[covFrom, covTo]` range.
   For each period:
   - `BalanceSpend` is the trusted intervals' spending, split by time overlap as
     today.
@@ -124,7 +121,7 @@ transactions: the current cycle shows $2,886 over 12.5 days instead of $0.
   - Import snapshots never create balance spending.
   - A period with trusted and untrusted days is `mixed`, and its `Total` is
     balance spend plus outside charges.
-  - The coverage extension is capped at last reading + 7 days.
+  - Balance coverage ends at the last reading.
   - `DailyBurn` divides by days up to the data-through date.
   - A regression test built from the production TD readings and payments
     (Sep 11, Sep 23, import Oct 27) reports the current cycle from its

@@ -204,10 +204,10 @@ func TestCardPeriodsDailyBurnUsesCoveredCalendarDays(t *testing.T) {
 	periods := periodsAroundSep15(midnight(time.September, 25))
 	snaps := []models.BalanceSnapshot{snap(0, midnight(time.September, 12)), snap(-600, midnight(time.September, 18))}
 
-	got := CardPeriods(periods, snaps, nil, midnight(time.September, 20).Unix(), nil)[1]
+	got := CardPeriods(periods, snaps, nil, midnight(time.September, 18).Unix(), nil)[1]
 
-	if got.Source != SourceBalance || !near(got.CoveredDays, 5) || !near(got.DailyBurn, 60) {
-		t.Errorf("expected a balance period of 5 covered days at $60/day, got %+v", got)
+	if got.Source != SourceBalance || !near(got.CoveredDays, 3) || !near(got.DailyBurn, 100) {
+		t.Errorf("expected a balance period of 3 covered days at $100/day, got %+v", got)
 	}
 }
 
@@ -301,24 +301,23 @@ func TestCardPeriodsMixesBalanceAndTransactionDays(t *testing.T) {
 	}
 }
 
-// An unchanged balance is not stored as a snapshot, so coverage runs on to the
-// account's balance date, but never more than MaxTrustedGap past the last
-// reading: an import's balance date must not stretch SimpleFin over an outage.
-func TestCardPeriodsCapsCoverageExtension(t *testing.T) {
+// An import's balance date must not stretch SimpleFin coverage over an
+// outage, so charges after the last reading are counted.
+func TestCardPeriodsEndsBalanceCoverageAtTheLastReading(t *testing.T) {
 	periods := []models.BillingPeriod{
 		{Label: "Sep 1 - Sep 30", Start: midnight(time.September, 1), End: midnight(time.September, 30), IsComplete: true},
 	}
 	snaps := []models.BalanceSnapshot{snap(0, midnight(time.September, 1)), snap(-300, midnight(time.September, 3))}
 	charges := []models.DBTransaction{
 		tx("IGA", -300, "Groceries", day(time.September, 2)),
-		tx("METRO", -80, "Groceries", day(time.September, 8)),    // inside the extension: the balance says it was paid off
-		tx("COSTCO", -200, "Groceries", day(time.September, 20)), // past the cap: measured from transactions
+		tx("METRO", -80, "Groceries", day(time.September, 8)),
+		tx("COSTCO", -200, "Groceries", day(time.September, 20)),
 	}
 
 	got := CardPeriods(periods, snaps, nil, midnight(time.September, 25).Unix(), charges)[0]
 
-	if !near(got.BalanceDays, 9) || !near(got.CoveredDays, 24) || !near(got.Total, 500) || got.Source != SourceMixed {
-		t.Errorf("expected 9 balance days (2 measured + 7 extension) of 24, total 300 + 200, got %+v", got)
+	if !near(got.BalanceDays, 2) || !near(got.CoveredDays, 24) || !near(got.Total, 580) || got.Source != SourceMixed {
+		t.Errorf("expected 2 balance days of 24, total 300 + 80 + 200, got %+v", got)
 	}
 }
 

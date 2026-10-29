@@ -106,7 +106,7 @@ func buildPeriodTable(periods []ledger.PeriodSpend) string {
 			status += " [FOCUS]"
 		}
 		source, covered := "balance", fmt.Sprintf("%.1f", p.CoveredDays)
-		if p.Source == ledger.SourceItemizedOnly {
+		if p.Source == ledger.SourceTransactions {
 			source, covered = "itemized only", "—"
 		} else if !fullyCovered(p) {
 			days := periodDays(p.Period)

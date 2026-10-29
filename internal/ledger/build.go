@@ -95,17 +95,22 @@ func Build(periods []models.BillingPeriod, accounts []models.DBAccount, txns []m
 			}
 		}
 		payments := DetectPayments(cardTxns, paying, patterns[key])
-		// Coverage ends where the current account last reported. A superseded
-		// ID can carry a fresh balance_date over a frozen balance, which would
-		// stretch coverage over days nobody measured.
-		coverageEnd := analyzed[key].BalanceDate
-		perCard = append(perCard, CardPeriods(periods, snapshots[key], payments, coverageEnd, charges))
+		// Data ends where the current account last reported, or at the card's
+		// newest transaction when an import without an ending balance brought
+		// it further. A superseded ID can carry a fresh balance_date over a
+		// frozen balance, which would stretch coverage over days nobody
+		// measured, so only the current account's date counts.
+		dataThrough := analyzed[key].BalanceDate
+		for _, t := range cardTxns {
+			dataThrough = max(dataThrough, t.Posted)
+		}
+		perCard = append(perCard, CardPeriods(periods, snapshots[key], payments, dataThrough, charges))
 	}
 
 	report.Periods = Combine(perCard)
 	if report.Periods == nil {
 		for _, p := range periods {
-			report.Periods = append(report.Periods, PeriodSpend{Period: p, Source: SourceItemizedOnly})
+			report.Periods = append(report.Periods, PeriodSpend{Period: p, Source: SourceTransactions})
 		}
 	}
 	sort.SliceStable(report.Charges, func(i, j int) bool {

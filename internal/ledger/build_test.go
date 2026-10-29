@@ -32,25 +32,23 @@ func productionPeriods() []models.BillingPeriod {
 	}
 }
 
-// End to end on the galactica fixture: no card transactions at all, payments
-// found only on the chequing and savings side.
+// A healthy connection: readings a few days apart, no card transactions at
+// all, payments found only on the paying side.
 func TestBuildMeasuresSpendingWithoutCardTransactions(t *testing.T) {
 	snaps := map[string][]models.BalanceSnapshot{tdKey: {
-		snap(-12124.34, day(time.August, 31)),
-		snap(-7129.23, day(time.September, 11)),
-		snap(-8024.04, day(time.September, 23)),
+		snap(-5000, day(time.September, 4)),
+		snap(-1000, day(time.September, 8)),
+		snap(-1600, day(time.September, 12)),
 	}}
 	txns := []models.DBTransaction{
-		on("ACT-chq", tx("Bill Payment - TD VISA - ************4533", -7340, "Payment", day(time.September, 1))),
-		on("ACT-sav", tx("WW591 TFR-A  C/C", -1800, "Payment", day(time.September, 22))),
-		on("ACT-chq", tx("EFT Withdrawal to HYDRO-QUEBEC", -74.17, "Utilities", day(time.September, 16))),
+		on("ACT-chq", tx("Bill Payment - TD VISA - ************4533", -4500, "Payment", day(time.September, 6))),
+		on("ACT-chq", tx("EFT Withdrawal to HYDRO-QUEBEC", -74.17, "Utilities", day(time.September, 9))),
 	}
 
 	report := Build(productionPeriods(), productionAccounts(), txns, snaps, DefaultPaymentPatterns, []string{"Payment"})
 
-	total := report.Periods[0].BalanceSpend + report.Periods[1].BalanceSpend
-	if !near(total, 2344.89+2694.81) {
-		t.Errorf("expected 5039.70 of balance spending across the periods, got %.2f", total)
+	if got := report.Periods[0]; !near(got.BalanceSpend, 1100) {
+		t.Errorf("expected 500 + 600 of balance spending, got %+v", got)
 	}
 	if len(report.Charges) != 0 {
 		t.Errorf("chequing charges are out of scope, got %+v", report.Charges)
@@ -87,7 +85,7 @@ func TestBuildTakesCoverageFromTheCurrentAccountOnly(t *testing.T) {
 
 	report := Build(productionPeriods(), accounts, nil, snaps, DefaultPaymentPatterns, nil)
 
-	if cur := report.Periods[1]; cur.Source != SourceItemizedOnly || cur.CoveredDays != 0 {
+	if cur := report.Periods[1]; cur.Source != SourceTransactions || cur.CoveredDays != 0 {
 		t.Errorf("the current account last reported Sep 11, so Sep 15 on is not covered, got %+v", cur)
 	}
 }
@@ -132,5 +130,43 @@ func TestFetchFromReachesBackToTheStraddlingSnapshot(t *testing.T) {
 
 	if want := day(time.August, 10).Add(-PaymentMatchWindow); !got.Equal(want) {
 		t.Errorf("expected %v, got %v", want, got)
+	}
+}
+
+// Galactica on 2026-10-29: SimpleFin's last TD readings are seeds 11 and 12
+// days apart, the Sep 23 one predating $8,450 of payments, and imports carry
+// everything since. Balance math booked the payments as September spending
+// and reported the current cycle at $0/day.
+func TestBuildMeasuresAnImportedOutageFromTransactions(t *testing.T) {
+	imported := snap(-3187.08, day(time.October, 27))
+	imported.Source = ImportSnapshotSource
+	snaps := map[string][]models.BalanceSnapshot{tdKey: {
+		snap(-12124.34, day(time.August, 31)),
+		snap(-7129.23, day(time.September, 11)),
+		snap(-8024.04, day(time.September, 23)),
+		imported,
+	}}
+	accounts := productionAccounts()
+	accounts[1].BalanceDate = day(time.October, 27).Unix() // ACT-new, set by the import
+	txns := []models.DBTransaction{
+		on("ACT-new", tx("PAYMENT - THANK YOU", 1800, "Payment", day(time.September, 22))),
+		on("ACT-new", tx("PAYMENT - THANK YOU", 6650, "Payment", day(time.September, 22))),
+		on("ACT-new", tx("MAXI", -320, "Groceries", day(time.October, 2))),
+		on("ACT-new", tx("QUALITY INN", -556.12, "Travel", day(time.October, 15))),
+		on("ACT-new", tx("IGA", -129.85, "Groceries", day(time.October, 26))),
+	}
+	periods := []models.BillingPeriod{
+		{Label: "Sep 15 - Oct 14", Start: midnight(time.September, 15), End: midnight(time.October, 14), IsComplete: true},
+		{Label: "Oct 15 - Oct 29", Start: midnight(time.October, 15), End: day(time.October, 29), IsComplete: false},
+	}
+
+	report := Build(periods, accounts, txns, snaps, DefaultPaymentPatterns, []string{"Payment"})
+
+	sep, oct := report.Periods[0], report.Periods[1]
+	if sep.Source != SourceTransactions || !near(sep.Total, 320) {
+		t.Errorf("September must come from its charges, got %+v", sep)
+	}
+	if oct.Source != SourceTransactions || !near(oct.Total, 685.97) || !near(oct.CoveredDays, 12.5) {
+		t.Errorf("October must be its charges over the 12.5 days imported, got %+v", oct)
 	}
 }

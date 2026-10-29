@@ -16,8 +16,21 @@ type Source string
 
 const (
 	SourceBalance      Source = "balance"
-	SourceItemizedOnly Source = "itemized_only"
+	SourceTransactions Source = "transactions"
+	SourceMixed        Source = "mixed"
 )
+
+// MaxTrustedGap is the longest stretch between two SimpleFin readings whose
+// balance change is trusted as spending. Sync runs every two days, so a missed
+// run or two still fits. A longer gap means the connection was failing, and
+// the reading at its end may be a frozen balance: TD's Sep 23 reading predated
+// $8,450 of payments, and booking them as spending zeroed the next cycle.
+const MaxTrustedGap = 7 * 24 * time.Hour
+
+// ImportSnapshotSource marks a balance read from an imported statement. It is
+// kept as a record but never measured: one reading per import spans weeks,
+// and the statement's own transactions are complete.
+const ImportSnapshotSource = "import"
 
 // Interval is the spending between two consecutive balance snapshots.
 type Interval struct {
@@ -90,10 +103,11 @@ func Intervals(snaps []models.BalanceSnapshot, payments []Payment) []Interval {
 type PeriodSpend struct {
 	Period       models.BillingPeriod
 	Source       Source
-	Total        float64 // headline: balance spending plus itemized charges outside the covered window
+	Total        float64 // headline: balance spending plus itemized charges outside the balance-measured days
 	BalanceSpend float64
-	CoveredDays  float64
-	DailyBurn    float64
+	CoveredDays  float64 // days of the period up to the card's data-through date
+	BalanceDays  float64 // of those, days measured by the balance
+	DailyBurn    float64 // Total over CoveredDays
 	Itemized     float64
 	NotItemized  float64 // balance spending the transactions don't account for; 0 when under NotItemizedMin
 }
@@ -124,19 +138,57 @@ func overlap(a0, a1, b0, b1 int64) int64 {
 	return hi - lo
 }
 
-// CardPeriods measures one card's spending in each billing period. Where the
-// balance history covers the period, the balance decides the total, and an
-// interval crossing a period boundary is split in proportion to time. Where it
-// doesn't, the period falls back to its itemized charges and is labeled as
-// such. coverageEnd is the card's latest balance_date: an unchanged balance is
-// not stored as a snapshot but still counts as coverage.
+type span struct{ from, to int64 }
+
+func inSpans(spans []span, at int64) bool {
+	for _, s := range spans {
+		if at >= s.from && at < s.to {
+			return true
+		}
+	}
+	return false
+}
+
+// CardPeriods measures one card's spending in each billing period. The balance
+// decides the total only between SimpleFin readings at most MaxTrustedGap
+// apart; there an interval crossing a period boundary is split in proportion
+// to time. Every other day, outages and imported stretches included, is
+// measured by its itemized charges. dataThrough is the last moment the card
+// has data for, from either source. An unchanged balance is not stored as a
+// snapshot, so a trusted stretch runs on past the last reading toward it, but
+// no further than MaxTrustedGap.
 func CardPeriods(periods []models.BillingPeriod, snaps []models.BalanceSnapshot, payments []Payment,
-	coverageEnd int64, charges []models.DBTransaction) []PeriodSpend {
-	intervals := Intervals(snaps, payments)
-	var covFrom, covTo int64
-	if len(snaps) >= 2 {
-		covFrom = snaps[0].BalanceDate
-		covTo = max(coverageEnd, snaps[len(snaps)-1].BalanceDate)
+	dataThrough int64, charges []models.DBTransaction) []PeriodSpend {
+	var readings []models.BalanceSnapshot
+	for _, s := range snaps {
+		if s.Source != ImportSnapshotSource {
+			readings = append(readings, s)
+		}
+	}
+
+	// Netting runs over the whole series so a payment can still move back to
+	// the interval whose drop it explains; trust is decided afterwards.
+	gap := int64(MaxTrustedGap / time.Second)
+	intervals := Intervals(readings, payments)
+	var trusted []Interval
+	var spans []span
+	for _, iv := range intervals {
+		if iv.To-iv.From > gap {
+			continue
+		}
+		trusted = append(trusted, iv)
+		if n := len(spans); n > 0 && spans[n-1].to == iv.From {
+			spans[n-1].to = iv.To
+		} else {
+			spans = append(spans, span{iv.From, iv.To})
+		}
+	}
+	if n := len(intervals); n > 0 && intervals[n-1].To-intervals[n-1].From <= gap {
+		last := intervals[n-1].To
+		spans[len(spans)-1].to = max(last, min(dataThrough, last+gap))
+	}
+	if n := len(spans); n > 0 {
+		dataThrough = max(dataThrough, spans[n-1].to)
 	}
 
 	out := make([]PeriodSpend, len(periods))
@@ -144,17 +196,24 @@ func CardPeriods(periods []models.BillingPeriod, snaps []models.BalanceSnapshot,
 		from, to := PeriodBounds(p)
 		ps := PeriodSpend{Period: p}
 
-		for _, iv := range intervals {
+		for _, iv := range trusted {
 			if ov := overlap(iv.From, iv.To, from, to); ov > 0 {
 				ps.BalanceSpend += iv.Spend * float64(ov) / float64(iv.To-iv.From)
 			}
 		}
 
-		coveredFrom, coveredTo := max(from, covFrom), min(to, covTo)
-		covered := len(snaps) >= 2 && coveredTo > coveredFrom
-		if covered {
-			ps.CoveredDays = float64(coveredTo-coveredFrom) / 86400
+		dataEnd := to
+		if dataThrough > 0 {
+			dataEnd = min(to, dataThrough)
 		}
+		if dataEnd > from {
+			ps.CoveredDays = float64(dataEnd-from) / 86400
+		}
+		var balanceSecs int64
+		for _, s := range spans {
+			balanceSecs += overlap(s.from, s.to, from, to)
+		}
+		ps.BalanceDays = float64(balanceSecs) / 86400
 
 		var inside float64
 		for _, t := range charges {
@@ -163,23 +222,26 @@ func CardPeriods(periods []models.BillingPeriod, snaps []models.BalanceSnapshot,
 				continue
 			}
 			ps.Itemized += -t.Amount
-			if covered && d >= coveredFrom && d < coveredTo {
+			if inSpans(spans, d) {
 				inside += -t.Amount
 			}
 		}
 
-		if covered {
+		ps.Total = ps.BalanceSpend + (ps.Itemized - inside)
+		if ps.CoveredDays > 0 {
+			ps.DailyBurn = ps.Total / ps.CoveredDays
+		}
+		switch {
+		case balanceSecs == 0:
+			ps.Source = SourceTransactions
+		case ps.BalanceDays >= ps.CoveredDays-0.5:
 			ps.Source = SourceBalance
-			ps.Total = ps.BalanceSpend + (ps.Itemized - inside)
-			ps.DailyBurn = ps.BalanceSpend / ps.CoveredDays
+		default:
+			ps.Source = SourceMixed
+		}
+		if balanceSecs > 0 {
 			if gap := ps.BalanceSpend - inside; gap > NotItemizedMin {
 				ps.NotItemized = gap
-			}
-		} else {
-			ps.Source = SourceItemizedOnly
-			ps.Total = ps.Itemized
-			if days := float64(to-from) / 86400; days > 0 {
-				ps.DailyBurn = ps.Itemized / days
 			}
 		}
 		out[i] = ps
@@ -188,14 +250,15 @@ func CardPeriods(periods []models.BillingPeriod, snaps []models.BalanceSnapshot,
 }
 
 // Combine adds up several cards' periods. Totals and burn rates add; coverage
-// is the widest card's; a period has balance data if any card does.
+// is the widest card's. A period is balance or transactions when every card
+// agrees, and mixed otherwise.
 func Combine(perCard [][]PeriodSpend) []PeriodSpend {
 	if len(perCard) == 0 {
 		return nil
 	}
 	out := make([]PeriodSpend, len(perCard[0]))
 	for i := range out {
-		out[i] = PeriodSpend{Period: perCard[0][i].Period, Source: SourceItemizedOnly}
+		out[i] = PeriodSpend{Period: perCard[0][i].Period, Source: perCard[0][i].Source}
 		for _, card := range perCard {
 			c := card[i]
 			out[i].Total += c.Total
@@ -204,8 +267,9 @@ func Combine(perCard [][]PeriodSpend) []PeriodSpend {
 			out[i].NotItemized += c.NotItemized
 			out[i].DailyBurn += c.DailyBurn
 			out[i].CoveredDays = max(out[i].CoveredDays, c.CoveredDays)
-			if c.Source == SourceBalance {
-				out[i].Source = SourceBalance
+			out[i].BalanceDays = max(out[i].BalanceDays, c.BalanceDays)
+			if c.Source != out[i].Source {
+				out[i].Source = SourceMixed
 			}
 		}
 	}

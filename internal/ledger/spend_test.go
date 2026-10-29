@@ -188,32 +188,34 @@ func periodsAroundSep15(now time.Time) []models.BillingPeriod {
 
 func TestCardPeriodsSplitsIntervalAtBillingDay(t *testing.T) {
 	periods := periodsAroundSep15(midnight(time.September, 25))
-	snaps := []models.BalanceSnapshot{snap(0, midnight(time.September, 10)), snap(-1000, midnight(time.September, 20))}
+	snaps := []models.BalanceSnapshot{snap(0, midnight(time.September, 12)), snap(-600, midnight(time.September, 18))}
 
-	got := CardPeriods(periods, snaps, nil, midnight(time.September, 20).Unix(), nil)
+	got := CardPeriods(periods, snaps, nil, midnight(time.September, 18).Unix(), nil)
 
-	if !near(got[0].BalanceSpend, 500) || !near(got[1].BalanceSpend, 500) {
-		t.Errorf("expected 500 on each side of Sep 15, got %.2f and %.2f", got[0].BalanceSpend, got[1].BalanceSpend)
+	if !near(got[0].BalanceSpend, 300) || !near(got[1].BalanceSpend, 300) {
+		t.Errorf("expected 300 on each side of Sep 15, got %.2f and %.2f", got[0].BalanceSpend, got[1].BalanceSpend)
 	}
 }
 
-// Burn is spend over calendar days covered by the balance, not over days that
-// happen to have transactions. Dividing by 6 "transaction days" is how a dead
-// feed once reported a quiet month.
+// Burn is spend over calendar days with data, not over days that happen to
+// have transactions. Dividing by 6 "transaction days" is how a dead feed once
+// reported a quiet month.
 func TestCardPeriodsDailyBurnUsesCoveredCalendarDays(t *testing.T) {
 	periods := periodsAroundSep15(midnight(time.September, 25))
-	snaps := []models.BalanceSnapshot{snap(0, midnight(time.September, 10)), snap(-1000, midnight(time.September, 20))}
+	snaps := []models.BalanceSnapshot{snap(0, midnight(time.September, 12)), snap(-600, midnight(time.September, 18))}
 
-	got := CardPeriods(periods, snaps, nil, midnight(time.September, 20).Unix(), nil)
+	got := CardPeriods(periods, snaps, nil, midnight(time.September, 20).Unix(), nil)[1]
 
-	if !near(got[1].CoveredDays, 5) || !near(got[1].DailyBurn, 100) {
-		t.Errorf("expected 5 covered days at $100/day, got %.2f days at %.2f", got[1].CoveredDays, got[1].DailyBurn)
+	if got.Source != SourceBalance || !near(got.CoveredDays, 5) || !near(got.DailyBurn, 60) {
+		t.Errorf("expected a balance period of 5 covered days at $60/day, got %+v", got)
 	}
 }
 
 func TestCardPeriodsReportsNotItemizedGap(t *testing.T) {
 	periods := periodsAroundSep15(midnight(time.September, 25))
-	snaps := []models.BalanceSnapshot{snap(0, midnight(time.September, 15)), snap(-8000, midnight(time.September, 25))}
+	snaps := []models.BalanceSnapshot{
+		snap(0, midnight(time.September, 15)), snap(-4000, midnight(time.September, 20)), snap(-8000, midnight(time.September, 25)),
+	}
 	charges := []models.DBTransaction{tx("COSTCO", -5000, "Groceries", day(time.September, 18))}
 
 	got := CardPeriods(periods, snaps, nil, midnight(time.September, 25).Unix(), charges)[1]
@@ -227,7 +229,9 @@ func TestCardPeriodsReportsNotItemizedGap(t *testing.T) {
 // noise and must not be reported as missing spending.
 func TestCardPeriodsIgnoresSmallGap(t *testing.T) {
 	periods := periodsAroundSep15(midnight(time.September, 25))
-	snaps := []models.BalanceSnapshot{snap(0, midnight(time.September, 15)), snap(-8000, midnight(time.September, 25))}
+	snaps := []models.BalanceSnapshot{
+		snap(0, midnight(time.September, 15)), snap(-4000, midnight(time.September, 20)), snap(-8000, midnight(time.September, 25)),
+	}
 	charges := []models.DBTransaction{tx("COSTCO", -7970, "Groceries", day(time.September, 18))}
 
 	got := CardPeriods(periods, snaps, nil, midnight(time.September, 25).Unix(), charges)[1]
@@ -237,21 +241,21 @@ func TestCardPeriodsIgnoresSmallGap(t *testing.T) {
 	}
 }
 
-func TestCardPeriodsSingleSnapshotIsItemizedOnly(t *testing.T) {
+func TestCardPeriodsSingleSnapshotIsMeasuredFromTransactions(t *testing.T) {
 	periods := periodsAroundSep15(midnight(time.September, 25))
 	snaps := []models.BalanceSnapshot{snap(-500, midnight(time.September, 20))}
 	charges := []models.DBTransaction{tx("IGA", -300, "Groceries", day(time.September, 18))}
 
 	got := CardPeriods(periods, snaps, nil, midnight(time.September, 20).Unix(), charges)[1]
 
-	if got.Source != SourceItemizedOnly || !near(got.Total, 300) {
-		t.Errorf("one snapshot has no interval; expected itemized only with total 300, got %+v", got)
+	if got.Source != SourceTransactions || !near(got.Total, 300) || !near(got.CoveredDays, 5) || !near(got.DailyBurn, 60) {
+		t.Errorf("one snapshot has no interval; expected transactions with total 300 over 5 days, got %+v", got)
 	}
 }
 
-// Aug 15 - Sep 14 has balance data only from Aug 31. The covered part comes
-// from the balance and the part before it from itemized charges.
-func TestCardPeriodsPartialCoverageAddsItemizedOutsideWindow(t *testing.T) {
+// Readings 11 days apart span a failing connection; the one at the end may be
+// a frozen balance. The period falls back to its charges.
+func TestCardPeriodsLongGapFallsBackToTransactions(t *testing.T) {
 	periods := periodsAroundSep15(midnight(time.September, 25))
 	snaps := []models.BalanceSnapshot{snap(-12124.34, day(time.August, 31)), snap(-7129.23, day(time.September, 11))}
 	payments := []Payment{{Amount: 7340, At: day(time.September, 1).Unix()}}
@@ -259,19 +263,83 @@ func TestCardPeriodsPartialCoverageAddsItemizedOutsideWindow(t *testing.T) {
 
 	got := CardPeriods(periods, snaps, payments, day(time.September, 11).Unix(), charges)[0]
 
-	if !near(got.Total, 2444.89) || !near(got.CoveredDays, 11) {
-		t.Errorf("expected total 2344.89 + 100 over 11 covered days, got %+v", got)
+	if got.Source != SourceTransactions || got.BalanceSpend != 0 || !near(got.Total, 100) {
+		t.Errorf("expected only the itemized 100 from transactions, got %+v", got)
 	}
 }
 
-func TestCombineAddsCardsAndKeepsBalanceSource(t *testing.T) {
+// Statement balances are recorded but are not SimpleFin readings: a reading
+// per import spans weeks and is spread across cycles by elapsed time.
+func TestCardPeriodsIgnoresImportSnapshots(t *testing.T) {
+	periods := periodsAroundSep15(midnight(time.September, 25))
+	imported := snap(-900, midnight(time.September, 18))
+	imported.Source = ImportSnapshotSource
+	snaps := []models.BalanceSnapshot{snap(0, midnight(time.September, 14)), imported}
+	charges := []models.DBTransaction{tx("IGA", -250, "Groceries", day(time.September, 16))}
+
+	got := CardPeriods(periods, snaps, nil, midnight(time.September, 18).Unix(), charges)[1]
+
+	if got.Source != SourceTransactions || got.BalanceSpend != 0 || !near(got.Total, 250) {
+		t.Errorf("an import snapshot must not create balance spending, got %+v", got)
+	}
+}
+
+// Aug 15 - Sep 14 has trusted balance data only from Sep 5 to Sep 10. Those
+// days come from the balance and the rest from charges.
+func TestCardPeriodsMixesBalanceAndTransactionDays(t *testing.T) {
+	periods := periodsAroundSep15(midnight(time.September, 25))
+	snaps := []models.BalanceSnapshot{snap(0, midnight(time.September, 5)), snap(-500, midnight(time.September, 10))}
+	charges := []models.DBTransaction{
+		tx("METRO", -100, "Groceries", day(time.August, 20)),
+		tx("IGA", -450, "Groceries", day(time.September, 7)),
+	}
+
+	got := CardPeriods(periods, snaps, nil, midnight(time.September, 10).Unix(), charges)[0]
+
+	if got.Source != SourceMixed || !near(got.Total, 600) || !near(got.BalanceDays, 5) || !near(got.CoveredDays, 26) || got.NotItemized != 0 {
+		t.Errorf("expected mixed: 500 balance + 100 outside over 26 days, 5 by balance, got %+v", got)
+	}
+}
+
+// An unchanged balance is not stored as a snapshot, so coverage runs on to the
+// account's balance date, but never more than MaxTrustedGap past the last
+// reading: an import's balance date must not stretch SimpleFin over an outage.
+func TestCardPeriodsCapsCoverageExtension(t *testing.T) {
+	periods := []models.BillingPeriod{
+		{Label: "Sep 1 - Sep 30", Start: midnight(time.September, 1), End: midnight(time.September, 30), IsComplete: true},
+	}
+	snaps := []models.BalanceSnapshot{snap(0, midnight(time.September, 1)), snap(-300, midnight(time.September, 3))}
+	charges := []models.DBTransaction{
+		tx("IGA", -300, "Groceries", day(time.September, 2)),
+		tx("METRO", -80, "Groceries", day(time.September, 8)),    // inside the extension: the balance says it was paid off
+		tx("COSTCO", -200, "Groceries", day(time.September, 20)), // past the cap: measured from transactions
+	}
+
+	got := CardPeriods(periods, snaps, nil, midnight(time.September, 25).Unix(), charges)[0]
+
+	if !near(got.BalanceDays, 9) || !near(got.CoveredDays, 24) || !near(got.Total, 500) || got.Source != SourceMixed {
+		t.Errorf("expected 9 balance days (2 measured + 7 extension) of 24, total 300 + 200, got %+v", got)
+	}
+}
+
+func TestCombineAddsCardsAndMixesSources(t *testing.T) {
 	p := models.BillingPeriod{Label: "Sep"}
-	td := []PeriodSpend{{Period: p, Source: SourceBalance, Total: 2000, DailyBurn: 200, CoveredDays: 10}}
-	mc := []PeriodSpend{{Period: p, Source: SourceItemizedOnly, Total: 50, DailyBurn: 5}}
+	td := []PeriodSpend{{Period: p, Source: SourceBalance, Total: 2000, DailyBurn: 200, CoveredDays: 10, BalanceDays: 10}}
+	mc := []PeriodSpend{{Period: p, Source: SourceTransactions, Total: 50, DailyBurn: 5, CoveredDays: 10}}
 
 	got := Combine([][]PeriodSpend{td, mc})
 
-	if len(got) != 1 || got[0].Source != SourceBalance || got[0].Total != 2050 || got[0].DailyBurn != 205 || got[0].CoveredDays != 10 {
+	if len(got) != 1 || got[0].Source != SourceMixed || got[0].Total != 2050 || got[0].DailyBurn != 205 || got[0].CoveredDays != 10 {
 		t.Errorf("unexpected combination: %+v", got)
+	}
+}
+
+func TestCombineKeepsASharedSource(t *testing.T) {
+	p := models.BillingPeriod{Label: "Sep"}
+	a := []PeriodSpend{{Period: p, Source: SourceTransactions, Total: 10}}
+	b := []PeriodSpend{{Period: p, Source: SourceTransactions, Total: 20}}
+
+	if got := Combine([][]PeriodSpend{a, b}); got[0].Source != SourceTransactions {
+		t.Errorf("two transaction cards stay transactions, got %+v", got[0])
 	}
 }

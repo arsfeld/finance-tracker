@@ -30,7 +30,7 @@ var (
 // history, August is partly covered, September is covered and unitemized.
 func productionPeriods() []ledger.PeriodSpend {
 	return []ledger.PeriodSpend{
-		{Period: julyCycle, Source: ledger.SourceItemizedOnly, Total: 2522.38, Itemized: 2522.38, DailyBurn: 81.37},
+		{Period: julyCycle, Source: ledger.SourceTransactions, Total: 2522.38, Itemized: 2522.38, DailyBurn: 81.37},
 		{Period: augCycle, Source: ledger.SourceBalance, Total: 3131.30, BalanceSpend: 3131.30, CoveredDays: 14.5, DailyBurn: 215.95, NotItemized: 3131.30},
 		{Period: sepCycle, Source: ledger.SourceBalance, Total: 1908.62, BalanceSpend: 1908.62, CoveredDays: 8.5, DailyBurn: 224.54, Itemized: 100, NotItemized: 1808.62},
 	}
@@ -178,7 +178,7 @@ func TestGeneratePromptComparesBurnWithLastCompletedCycle(t *testing.T) {
 
 func TestGeneratePromptSaysWhenNoCompletedCycleHasBalanceData(t *testing.T) {
 	periods := productionPeriods()
-	periods[1].Source = ledger.SourceItemizedOnly
+	periods[1].Source = ledger.SourceTransactions
 
 	if p := prompt(periods, nil); !strings.Contains(p, "No completed cycle has balance data yet") {
 		t.Errorf("expected the missing-comparison note; prompt was:\n%s", p)

@@ -16,8 +16,8 @@ import (
 const SystemPrompt = `You are an expert financial analyst specializing in personal finance and spending pattern analysis for families.
 You are analyzing credit card spending for a Canadian family of 4: 2 adults, 2 daughters (born 2021 and 2024, currently ~4 and ~1 years old).
 The family pays the card in full every month, so card spending is what the household spends day to day.
-Spending totals and daily burn rates come from card balances and are authoritative, even when individual transactions are missing.
-Categories and individual charges describe only the itemized part of that spending.
+Spending totals and daily burn rates come from card balances where the balance feed is healthy, and from individual charges (bank statement imports) elsewhere. Both are authoritative.
+Where totals come from balances, categories and individual charges describe only the itemized part of that spending.
 Be concise, specific, and use the pre-calculated data provided — do not recalculate totals or percentages.`
 
 // PromptInput is everything the analysis prompt is built from.
@@ -31,12 +31,12 @@ type PromptInput struct {
 }
 
 const readingGuide = `How to read these numbers:
-- "Total" and "Daily burn" come from the card balance: debt going up is spending, debt going down is a payment. They are authoritative even when transactions are missing.
+- "Source" says how a period was measured. "balance": from the card balance (debt going up is spending, debt going down is a payment), authoritative even when transactions are missing. "transactions": from individual charges imported from bank statements, complete for the days covered. "mixed": some days each way.
 - "Itemized" is the part of that spending with individual transactions. Categories and top expenses describe only this part.
 - "Not itemized" is spending the balance shows but the transaction feed did not deliver. It is real spending with an unknown category — never treat it as savings.
 - Card payments and transfers are not expenses and are not shown.
-- Periods marked "itemized only" have no balance history; their totals are a lower bound. Do not compare them with balance periods or read a trend across that boundary.
-- A balance period marked "balance (X of Y days)" is covered for only part of its days, so its Total is a lower bound. When coverage differs, compare cycles by Daily burn, not Total.
+- Periods marked "transactions" are measured from individual charges and are complete through the covered days. Do not read a trend across a change between "balance" and "transactions" periods.
+- A period marked "(X of Y days)" has data for only part of its days, so its Total is a lower bound. When coverage differs, compare cycles by Daily burn, not Total.
 `
 
 const reportInstructions = `### Instructions
@@ -105,24 +105,25 @@ func buildPeriodTable(periods []ledger.PeriodSpend) string {
 		if p.Period.IsFocus {
 			status += " [FOCUS]"
 		}
-		source, covered := "balance", fmt.Sprintf("%.1f", p.CoveredDays)
-		if p.Source == ledger.SourceTransactions {
-			source, covered = "itemized only", "—"
-		} else if !fullyCovered(p) {
-			days := periodDays(p.Period)
-			// A cycle the balance history only partly covers has a partial
-			// Total that otherwise reads as the whole cycle.
-			source = fmt.Sprintf("balance (%.1f of %g days)", p.CoveredDays, math.Round(days*10)/10)
+		source, covered := string(p.Source), fmt.Sprintf("%.1f", p.CoveredDays)
+		days := math.Round(periodDays(p.Period)*10) / 10
+		switch {
+		case p.Source == ledger.SourceMixed:
+			source = fmt.Sprintf("mixed (%.1f of %g days by balance)", p.BalanceDays, days)
+		case !fullyCovered(p):
+			// A cycle with data for only part of its days has a partial Total
+			// that otherwise reads as the whole cycle.
+			source = fmt.Sprintf("%s (%.1f of %g days)", p.Source, p.CoveredDays, days)
 		}
-		// A cycle in progress has a partial total, so only completed balance
-		// cycles are compared; the burn trend covers the current one. When
+		// A cycle in progress has a partial total, so only completed cycles
+		// measured the same way are compared; the burn trend covers the current one. When
 		// either cycle is only partly covered its Total is a lower bound, so
 		// the comparison switches to daily burn: comparing August's 14 covered
 		// days with a full September would read as spending doubling.
 		change := "—"
 		if i > 0 {
 			prev := periods[i-1]
-			if p.Period.IsComplete && p.Source == ledger.SourceBalance && prev.Source == ledger.SourceBalance {
+			if p.Period.IsComplete && comparable(p, prev) {
 				if fullyCovered(p) && fullyCovered(prev) {
 					if prev.Total > 0 {
 						change = fmt.Sprintf("%+.1f%%", (p.Total-prev.Total)/prev.Total*100)
@@ -142,26 +143,32 @@ func buildPeriodTable(periods []ledger.PeriodSpend) string {
 	return b.String()
 }
 
+// comparable reports whether two cycles were measured the same way. A trend
+// read across a switch between balance and transactions measures the switch.
+func comparable(a, b ledger.PeriodSpend) bool {
+	return a.Source == b.Source && a.Source != ledger.SourceMixed
+}
+
 // buildBurnTrend compares the current cycle's daily burn with the last
-// completed cycle that has balance data. It answers "is spending going up?"
+// completed cycle measured the same way. It answers "is spending going up?"
 // even when nothing can be itemized.
 func buildBurnTrend(periods []ledger.PeriodSpend) string {
 	if len(periods) == 0 {
 		return ""
 	}
 	cur := periods[len(periods)-1]
-	if cur.Period.IsComplete || cur.Source != ledger.SourceBalance {
+	if cur.Period.IsComplete {
 		return ""
 	}
 	for i := len(periods) - 2; i >= 0; i-- {
 		prev := periods[i]
-		if prev.Period.IsComplete && prev.Source == ledger.SourceBalance && prev.DailyBurn > 0 {
+		if prev.Period.IsComplete && comparable(cur, prev) && prev.DailyBurn > 0 {
 			return fmt.Sprintf("\nCurrent cycle burn: %s/day over %.1f days vs %s/day in %s (%+.1f%%).\n",
 				money(cur.DailyBurn), cur.CoveredDays, money(prev.DailyBurn), prev.Period.Label,
 				(cur.DailyBurn-prev.DailyBurn)/prev.DailyBurn*100)
 		}
 	}
-	return fmt.Sprintf("\nCurrent cycle burn: %s/day over %.1f days. No completed cycle has balance data yet, so there is no balance-based comparison.\n",
+	return fmt.Sprintf("\nCurrent cycle burn: %s/day over %.1f days. No completed cycle is measured the same way yet, so there is no comparison.\n",
 		money(cur.DailyBurn), cur.CoveredDays)
 }
 
@@ -170,7 +177,7 @@ func periodDays(p models.BillingPeriod) float64 {
 	return float64(to-from) / 86400
 }
 
-// fullyCovered reports whether the balance history spans the whole period. Half
+// fullyCovered reports whether the period has data for every day. Half
 // a day of slack absorbs the gap between midnight boundaries and the time of
 // day a balance was read.
 func fullyCovered(p ledger.PeriodSpend) bool {
@@ -178,12 +185,12 @@ func fullyCovered(p ledger.PeriodSpend) bool {
 }
 
 // buildCoverageLine says how much of the balance-measured spending the
-// categories explain. Itemized-only periods are left out: there the itemized
+// categories explain. Transaction periods are left out: there the itemized
 // charges are the whole total by construction, which would inflate the share.
 func buildCoverageLine(periods []ledger.PeriodSpend) string {
 	var total, itemized float64
 	for _, p := range periods {
-		if p.Source == ledger.SourceBalance {
+		if p.Source != ledger.SourceTransactions {
 			total += p.Total
 			itemized += p.Itemized
 		}
@@ -330,7 +337,7 @@ func buildBudgetSection(budgets []models.Budget, expenses []models.DBTransaction
 	// know. Below a fifth, every category is trivially under budget, so the
 	// figures are withheld rather than hedged.
 	itemizedShare := 1.0
-	if current != nil && current.Source == ledger.SourceBalance && current.Total > 0 {
+	if current != nil && current.Source != ledger.SourceTransactions && current.Total > 0 {
 		itemizedShare = current.Itemized / current.Total
 	}
 	if itemizedShare < 0.2 {
@@ -417,8 +424,8 @@ func CyclePeriods(start, end time.Time, billingDay int) []models.BillingPeriod {
 	return periods
 }
 
-// buildDataLagWarning tells the model which cards stopped refreshing. Their
-// balances, and so their share of the totals, are out of date. A card whose
+// buildDataLagWarning tells the model which cards have no recent data, from a
+// sync or an import. Their figures for later days are missing. A card whose
 // balance is current but whose transactions fall short needs no warning: the
 // table's Not itemized column already carries it, and a second figure from
 // the drift detector, which cannot see paying-side payments, contradicted it.
@@ -426,12 +433,12 @@ func buildDataLagWarning(stale []models.StaleConnection, now time.Time) string {
 	var b strings.Builder
 	if len(stale) > 0 {
 		b.WriteString("\n> [!WARNING]\n> **DATA LAG DETECTED**: ")
-		fmt.Fprintf(&b, "%d card(s) stopped refreshing, so their figures are out of date. ", len(stale))
+		fmt.Fprintf(&b, "%d card(s) have no data after the date shown, so their figures for later days are missing. ", len(stale))
 		b.WriteString("Do not congratulate the user on low spending, and do not read a downward trend into it.\n")
 		for _, c := range stale {
-			lastSync := time.Unix(c.BalanceDate, 0).UTC()
-			line := fmt.Sprintf("> - **%s** (%s): last refreshed %s (%d days ago)",
-				c.Name, c.OrgName, lastSync.Format("Jan 2, 2006"), daysBetween(lastSync, now))
+			through := time.Unix(c.BalanceDate, 0).UTC()
+			line := fmt.Sprintf("> - **%s** (%s): data through %s (%d days ago)",
+				c.Name, c.OrgName, through.Format("Jan 2, 2006"), daysBetween(through, now))
 			if c.LastTransaction > 0 {
 				lastTxn := time.Unix(c.LastTransaction, 0).UTC()
 				line += fmt.Sprintf("; newest transaction %s (%d days ago)",

@@ -30,7 +30,7 @@ var (
 // history, August is partly covered, September is covered and unitemized.
 func productionPeriods() []ledger.PeriodSpend {
 	return []ledger.PeriodSpend{
-		{Period: julyCycle, Source: ledger.SourceTransactions, Total: 2522.38, Itemized: 2522.38, DailyBurn: 81.37},
+		{Period: julyCycle, Source: ledger.SourceTransactions, Total: 2522.38, Itemized: 2522.38, CoveredDays: 31, DailyBurn: 81.37},
 		{Period: augCycle, Source: ledger.SourceBalance, Total: 3131.30, BalanceSpend: 3131.30, CoveredDays: 14.5, DailyBurn: 215.95, NotItemized: 3131.30},
 		{Period: sepCycle, Source: ledger.SourceBalance, Total: 1908.62, BalanceSpend: 1908.62, CoveredDays: 8.5, DailyBurn: 224.54, Itemized: 100, NotItemized: 1808.62},
 	}
@@ -148,10 +148,10 @@ func TestGeneratePromptSaysWhenNoChargesArrivedThisCycle(t *testing.T) {
 	}
 }
 
-func TestGeneratePromptLabelsItemizedOnlyPeriods(t *testing.T) {
+func TestGeneratePromptLabelsTransactionPeriods(t *testing.T) {
 	p := prompt(productionPeriods(), nil)
 
-	if !strings.Contains(p, "| Jul 15 - Aug 14 | completed [FOCUS] | itemized only |") {
+	if !strings.Contains(p, "| Jul 15 - Aug 14 | completed [FOCUS] | transactions |") {
 		t.Errorf("July has no balance history and must say so; prompt was:\n%s", p)
 	}
 }
@@ -176,11 +176,11 @@ func TestGeneratePromptComparesBurnWithLastCompletedCycle(t *testing.T) {
 	}
 }
 
-func TestGeneratePromptSaysWhenNoCompletedCycleHasBalanceData(t *testing.T) {
+func TestGeneratePromptSaysWhenNoCompletedCycleShareTheCurrentSource(t *testing.T) {
 	periods := productionPeriods()
 	periods[1].Source = ledger.SourceTransactions
 
-	if p := prompt(periods, nil); !strings.Contains(p, "No completed cycle has balance data yet") {
+	if p := prompt(periods, nil); !strings.Contains(p, "No completed cycle is measured the same way yet") {
 		t.Errorf("expected the missing-comparison note; prompt was:\n%s", p)
 	}
 }
@@ -234,7 +234,7 @@ func TestGeneratePromptNamesCardsThatStoppedRefreshing(t *testing.T) {
 	}
 	// Only the stale card's figures are out of date; the rest of the analysis
 	// still stands.
-	if !strings.Contains(p, "1 card(s) stopped refreshing, so their figures are out of date.") {
+	if !strings.Contains(p, "1 card(s) have no data after the date shown, so their figures for later days are missing.") {
 		t.Errorf("the warning must be scoped to the stale card; prompt was:\n%s", p)
 	}
 }
@@ -244,5 +244,53 @@ func TestGeneratePromptOmitsWarningsWhenConnectionsAreHealthy(t *testing.T) {
 
 	if strings.Contains(p, "DATA LAG") || strings.Contains(p, "ITEMIZATION GAP") {
 		t.Errorf("nothing is wrong, so nothing should be flagged; prompt was:\n%s", p)
+	}
+}
+
+// Imported cycles are complete through the import, so cycles measured the
+// same way are compared like balance cycles.
+func TestGeneratePromptComparesTransactionCycles(t *testing.T) {
+	periods := []ledger.PeriodSpend{
+		{Period: augCycle, Source: ledger.SourceTransactions, Total: 3100, Itemized: 3100, CoveredDays: 31, DailyBurn: 100},
+		{Period: sepCycle, Source: ledger.SourceTransactions, Total: 1200, Itemized: 1200, CoveredDays: 8.5, DailyBurn: 141.18},
+	}
+	periods[0].Period.IsComplete = true
+
+	p := prompt(periods, nil)
+
+	if !strings.Contains(p, "Current cycle burn: $141.18/day over 8.5 days vs $100.00/day in Aug 15 - Sep 14 (+41.2%)") {
+		t.Errorf("expected a transactions-to-transactions burn comparison; prompt was:\n%s", p)
+	}
+	if strings.Contains(p, "lower bound. Do not compare them with balance periods") {
+		t.Errorf("transaction periods are complete, not lower bounds; prompt was:\n%s", p)
+	}
+}
+
+func TestGeneratePromptLabelsMixedPeriods(t *testing.T) {
+	periods := productionPeriods()
+	periods[1].Source, periods[1].CoveredDays, periods[1].BalanceDays = ledger.SourceMixed, 31, 14.5
+
+	if p := prompt(periods, nil); !strings.Contains(p, "| mixed (14.5 of 31 days by balance) |") {
+		t.Errorf("a mixed period must say how much the balance measured; prompt was:\n%s", p)
+	}
+}
+
+func TestGeneratePromptMarksPartlyCoveredTransactionPeriods(t *testing.T) {
+	periods := productionPeriods()
+	periods[0].CoveredDays = 20
+
+	if p := prompt(periods, nil); !strings.Contains(p, "| transactions (20.0 of 31 days) |") {
+		t.Errorf("a transactions period with missing days must say so; prompt was:\n%s", p)
+	}
+}
+
+func TestGeneratePromptExplainsTransactionPeriods(t *testing.T) {
+	p := prompt(productionPeriods(), nil)
+
+	if !strings.Contains(p, `Periods marked "transactions" are measured from individual charges`) {
+		t.Errorf("the reading guide must explain transaction periods; prompt was:\n%s", p)
+	}
+	if strings.Contains(p, "itemized only") {
+		t.Errorf("the old label must be gone; prompt was:\n%s", p)
 	}
 }

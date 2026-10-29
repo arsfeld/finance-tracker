@@ -88,10 +88,11 @@ transactions: the current cycle shows $2,886 over 12.5 days instead of $0.
 - The "itemized only … lower bound" guidance is replaced by: periods marked
   `transactions` are measured from individual charges (statement imports) and
   are complete through the card's data-through date. `mixed` periods combine
-  both. Keep the instruction not to read a trend across a `balance` /
+  both and are compared with `balance` periods by daily burn. Keep the instruction not to read a trend across a `balance` /
   `transactions` boundary.
-- The data-lag warning keeps its 72-hour threshold, which `balance_date` now
-  measures correctly. The wording changes from "stopped refreshing" to "data
+- The data-lag warning keeps its 72-hour threshold, measured in the analysis
+  from the newer of `balance_date` and the newest transaction (the sync alert
+  keeps `balance_date` alone). The wording changes from "stopped refreshing" to "data
   through <date> (<n> days ago); spending after that date is missing", which
   fits both an import and a sync.
 

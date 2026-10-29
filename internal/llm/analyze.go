@@ -36,6 +36,7 @@ const readingGuide = `How to read these numbers:
 - "Not itemized" is spending the balance shows but the transaction feed did not deliver. It is real spending with an unknown category — never treat it as savings.
 - Card payments and transfers are not expenses and are not shown.
 - Periods marked "transactions" are measured from individual charges and are complete through the covered days. Do not read a trend across a change between "balance" and "transactions" periods.
+- A mixed period measures some days by the balance and the rest from charges; its Total covers every covered day. For comparison it counts with "balance" periods, by Daily burn.
 - A period marked "(X of Y days)" has data for only part of its days, so its Total is a lower bound. When coverage differs, compare cycles by Daily burn, not Total.
 `
 
@@ -57,7 +58,8 @@ Notes:
 - When a period has "Not itemized" spending, say how much could not be broken down instead of guessing what it was.
 `
 
-// GeneratePrompt builds the analysis prompt from balance-derived card spending.
+// GeneratePrompt builds the analysis prompt from the ledger's card spending,
+// measured by balance where SimpleFin is healthy and by charges elsewhere.
 func GeneratePrompt(in PromptInput) string {
 	// Only charges are itemized spending; a credit reaching this point would be
 	// a payment or refund and has no place in the prompt.
@@ -107,24 +109,27 @@ func buildPeriodTable(periods []ledger.PeriodSpend) string {
 		}
 		source, covered := string(p.Source), fmt.Sprintf("%.1f", p.CoveredDays)
 		days := math.Round(periodDays(p.Period)*10) / 10
-		switch {
-		case p.Source == ledger.SourceMixed:
-			source = fmt.Sprintf("mixed (%.1f of %g days by balance)", p.BalanceDays, days)
-		case !fullyCovered(p):
+		// Combined cards that disagree on the source have no common day split,
+		// and Combine leaves BalanceDays at zero.
+		if p.Source == ledger.SourceMixed && p.BalanceDays > 0 && p.BalanceDays < p.CoveredDays {
+			source = fmt.Sprintf("mixed: %.1f d balance, %.1f d charges", p.BalanceDays, p.CoveredDays-p.BalanceDays)
+		}
+		if !fullyCovered(p) {
 			// A cycle with data for only part of its days has a partial Total
 			// that otherwise reads as the whole cycle.
-			source = fmt.Sprintf("%s (%.1f of %g days)", p.Source, p.CoveredDays, days)
+			source += fmt.Sprintf(" (%.1f of %g days)", p.CoveredDays, days)
 		}
 		// A cycle in progress has a partial total, so only completed cycles
 		// measured the same way are compared; the burn trend covers the current one. When
-		// either cycle is only partly covered its Total is a lower bound, so
-		// the comparison switches to daily burn: comparing August's 14 covered
-		// days with a full September would read as spending doubling.
+		// either cycle is only partly covered or mixed its Total is not
+		// like for like, so the comparison switches to daily burn: comparing
+		// August's 14 covered days with a full September would read as
+		// spending doubling. A cycle with no covered days has no burn at all.
 		change := "—"
 		if i > 0 {
 			prev := periods[i-1]
-			if p.Period.IsComplete && comparable(p, prev) {
-				if fullyCovered(p) && fullyCovered(prev) {
+			if p.Period.IsComplete && comparable(p, prev) && p.CoveredDays > 0 && prev.CoveredDays > 0 {
+				if fullyCovered(p) && fullyCovered(prev) && p.Source != ledger.SourceMixed && prev.Source != ledger.SourceMixed {
 					if prev.Total > 0 {
 						change = fmt.Sprintf("%+.1f%%", (p.Total-prev.Total)/prev.Total*100)
 					}
@@ -145,8 +150,12 @@ func buildPeriodTable(periods []ledger.PeriodSpend) string {
 
 // comparable reports whether two cycles were measured the same way. A trend
 // read across a switch between balance and transactions measures the switch.
+// Mixed counts with balance: snapshots are stored only when the balance
+// changes, so a healthy card's current cycle usually ends in a few days
+// measured from charges, and rejecting it lost the comparison on every
+// healthy connection.
 func comparable(a, b ledger.PeriodSpend) bool {
-	return a.Source == b.Source && a.Source != ledger.SourceMixed
+	return (a.Source == ledger.SourceTransactions) == (b.Source == ledger.SourceTransactions)
 }
 
 // buildBurnTrend compares the current cycle's daily burn with the last
@@ -160,15 +169,20 @@ func buildBurnTrend(periods []ledger.PeriodSpend) string {
 	if cur.Period.IsComplete {
 		return ""
 	}
+	// Under a day of data has no burn worth comparing, and an empty cycle
+	// compared with a full one reads as spending stopping.
+	if cur.CoveredDays < 1 {
+		return "\nCurrent cycle: no data yet; the latest data predates this cycle.\n"
+	}
 	for i := len(periods) - 2; i >= 0; i-- {
 		prev := periods[i]
-		if prev.Period.IsComplete && comparable(cur, prev) && prev.DailyBurn > 0 {
+		if prev.Period.IsComplete && comparable(cur, prev) && prev.CoveredDays >= 1 && prev.DailyBurn > 0 {
 			return fmt.Sprintf("\nCurrent cycle burn: %s/day over %.1f days vs %s/day in %s (%+.1f%%).\n",
 				money(cur.DailyBurn), cur.CoveredDays, money(prev.DailyBurn), prev.Period.Label,
 				(cur.DailyBurn-prev.DailyBurn)/prev.DailyBurn*100)
 		}
 	}
-	return fmt.Sprintf("\nCurrent cycle burn: %s/day over %.1f days. No completed cycle is measured the same way yet, so there is no comparison.\n",
+	return fmt.Sprintf("\nCurrent cycle burn: %s/day over %.1f days. No completed cycle is measured the same way, so there is no comparison.\n",
 		money(cur.DailyBurn), cur.CoveredDays)
 }
 
@@ -198,7 +212,7 @@ func buildCoverageLine(periods []ledger.PeriodSpend) string {
 	if total <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("Categories cover %s of %s (%.0f%%) of balance-tracked card spending.\n",
+	return fmt.Sprintf("Categories cover %s of %s (%.0f%%) of card spending in balance-measured cycles.\n",
 		money(itemized), money(total), math.Min(100, itemized/total*100))
 }
 
@@ -436,15 +450,18 @@ func buildDataLagWarning(stale []models.StaleConnection, now time.Time) string {
 		fmt.Fprintf(&b, "%d card(s) have no data after the date shown, so their figures for later days are missing. ", len(stale))
 		b.WriteString("Do not congratulate the user on low spending, and do not read a downward trend into it.\n")
 		for _, c := range stale {
-			through := time.Unix(c.BalanceDate, 0).UTC()
+			// The data runs to whichever is newer: an import brings transactions
+			// past a frozen balance, and the ledger measures those days.
+			through := time.Unix(max(c.BalanceDate, c.LastTransaction), 0).UTC()
 			line := fmt.Sprintf("> - **%s** (%s): data through %s (%d days ago)",
 				c.Name, c.OrgName, through.Format("Jan 2, 2006"), daysBetween(through, now))
-			if c.LastTransaction > 0 {
+			switch {
+			case c.LastTransaction == 0:
+				line += "; no transactions on record"
+			case c.LastTransaction < c.BalanceDate:
 				lastTxn := time.Unix(c.LastTransaction, 0).UTC()
 				line += fmt.Sprintf("; newest transaction %s (%d days ago)",
 					lastTxn.Format("Jan 2, 2006"), daysBetween(lastTxn, now))
-			} else {
-				line += "; no transactions on record"
 			}
 			b.WriteString(line + "\n")
 		}

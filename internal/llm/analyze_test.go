@@ -59,7 +59,7 @@ func TestGeneratePromptLabelsCategoriesAsPartial(t *testing.T) {
 
 	// July is itemized only: counting it would make categories look like they
 	// cover most of the spending the balance measured.
-	if !strings.Contains(p, "Categories cover $100.00 of $5039.92 (2%) of balance-tracked card spending.") {
+	if !strings.Contains(p, "Categories cover $100.00 of $5039.92 (2%) of card spending in balance-measured cycles.") {
 		t.Errorf("the category breakdown must state its coverage of balance periods; prompt was:\n%s", p)
 	}
 }
@@ -180,7 +180,7 @@ func TestGeneratePromptSaysWhenNoCompletedCycleShareTheCurrentSource(t *testing.
 	periods := productionPeriods()
 	periods[1].Source = ledger.SourceTransactions
 
-	if p := prompt(periods, nil); !strings.Contains(p, "No completed cycle is measured the same way yet") {
+	if p := prompt(periods, nil); !strings.Contains(p, "No completed cycle is measured the same way, so there is no comparison.") {
 		t.Errorf("expected the missing-comparison note; prompt was:\n%s", p)
 	}
 }
@@ -270,8 +270,130 @@ func TestGeneratePromptLabelsMixedPeriods(t *testing.T) {
 	periods := productionPeriods()
 	periods[1].Source, periods[1].CoveredDays, periods[1].BalanceDays = ledger.SourceMixed, 31, 14.5
 
-	if p := prompt(periods, nil); !strings.Contains(p, "| mixed (14.5 of 31 days by balance) |") {
+	if p := prompt(periods, nil); !strings.Contains(p, "| mixed: 14.5 d balance, 16.5 d charges |") {
 		t.Errorf("a mixed period must say how much the balance measured; prompt was:\n%s", p)
+	}
+}
+
+// A mixed cycle with missing days is a lower bound like any other, and the
+// marker must survive the day split.
+func TestGeneratePromptMarksPartlyCoveredMixedPeriods(t *testing.T) {
+	periods := productionPeriods()
+	periods[1].Source, periods[1].CoveredDays, periods[1].BalanceDays = ledger.SourceMixed, 20, 5
+
+	if p := prompt(periods, nil); !strings.Contains(p, "| mixed: 5.0 d balance, 15.0 d charges (20.0 of 31 days) |") {
+		t.Errorf("a partly covered mixed period must keep its coverage marker; prompt was:\n%s", p)
+	}
+}
+
+// Cards that disagree on the source have no common day split.
+func TestGeneratePromptLabelsMixedPeriodsWithoutASplit(t *testing.T) {
+	periods := productionPeriods()
+	periods[1].Source, periods[1].CoveredDays, periods[1].BalanceDays = ledger.SourceMixed, 20, 0
+
+	p := prompt(periods, nil)
+
+	if !strings.Contains(p, "| mixed (20.0 of 31 days) |") {
+		t.Errorf("expected a plain mixed label with its coverage marker; prompt was:\n%s", p)
+	}
+	if !strings.Contains(p, "A mixed period measures some days by the balance and the rest from charges; its Total covers every covered day.") {
+		t.Errorf("the reading guide must explain mixed periods; prompt was:\n%s", p)
+	}
+}
+
+// Snapshots are stored only when the balance changes, so a healthy card's
+// current cycle usually ends in a few days measured from charges. Rejecting
+// mixed cycles dropped the burn comparison on every healthy connection.
+func TestGeneratePromptComparesAMixedCurrentCycleWithABalanceCycle(t *testing.T) {
+	periods := productionPeriods()
+	periods[2].Source, periods[2].BalanceDays = ledger.SourceMixed, 6.5
+
+	if p := prompt(periods, nil); !strings.Contains(p, "Current cycle burn: $224.54/day over 8.5 days vs $215.95/day in Aug 15 - Sep 14 (+4.0%)") {
+		t.Errorf("a mixed cycle compares with a balance cycle; prompt was:\n%s", p)
+	}
+}
+
+// Two fully covered cycles are still compared by daily burn when one is
+// mixed: its charge-measured days count only what was itemized.
+func TestGeneratePromptComparesMixedCyclesByDailyBurn(t *testing.T) {
+	fullSep := models.BillingPeriod{Label: "Sep 15 - Oct 14", Start: date(time.September, 15), End: date(time.October, 14), IsComplete: true}
+	fullOct := models.BillingPeriod{Label: "Oct 15 - Nov 14", Start: date(time.October, 15), End: date(time.November, 14), IsComplete: true}
+	periods := []ledger.PeriodSpend{
+		{Period: fullSep, Source: ledger.SourceBalance, Total: 6000, CoveredDays: 30, DailyBurn: 200},
+		{Period: fullOct, Source: ledger.SourceMixed, Total: 6600, CoveredDays: 31, BalanceDays: 28, DailyBurn: 212.90},
+	}
+
+	if p := prompt(periods, nil); !strings.Contains(p, "| +6.5% daily burn |") {
+		t.Errorf("a mixed cycle compares by daily burn; prompt was:\n%s", p)
+	}
+}
+
+func TestGeneratePromptDoesNotCompareTransactionsWithMixedCycles(t *testing.T) {
+	periods := productionPeriods()
+	periods[1].Source = ledger.SourceTransactions
+	periods[2].Source, periods[2].BalanceDays = ledger.SourceMixed, 6.5
+
+	if p := prompt(periods, nil); !strings.Contains(p, "No completed cycle is measured the same way, so there is no comparison.") {
+		t.Errorf("transactions and mixed cycles must not be compared; prompt was:\n%s", p)
+	}
+}
+
+// When the newest data predates the cycle, its burn is not zero spending; it
+// is no data. Comparing it reported a -100% burn.
+func TestGeneratePromptSaysWhenTheCurrentCycleHasNoData(t *testing.T) {
+	periods := productionPeriods()
+	periods[2].Total, periods[2].BalanceSpend, periods[2].CoveredDays, periods[2].DailyBurn = 0, 0, 0, 0
+	periods[2].Itemized, periods[2].NotItemized = 0, 0
+
+	p := prompt(periods, nil)
+
+	if !strings.Contains(p, "\nCurrent cycle: no data yet; the latest data predates this cycle.\n") {
+		t.Errorf("expected the no-data note; prompt was:\n%s", p)
+	}
+	if strings.Contains(p, "-100.0%") {
+		t.Errorf("an empty cycle must not read as a -100%% burn; prompt was:\n%s", p)
+	}
+}
+
+func TestGeneratePromptShowsNoChangeForAnEmptyCycle(t *testing.T) {
+	fullSep := models.BillingPeriod{Label: "Sep 15 - Oct 14", Start: date(time.September, 15), End: date(time.October, 14), IsComplete: true}
+	fullOct := models.BillingPeriod{Label: "Oct 15 - Nov 14", Start: date(time.October, 15), End: date(time.November, 14), IsComplete: true}
+	periods := []ledger.PeriodSpend{
+		{Period: fullSep, Source: ledger.SourceBalance, Total: 6000, CoveredDays: 30, DailyBurn: 200},
+		{Period: fullOct, Source: ledger.SourceBalance},
+	}
+
+	if p := prompt(periods, nil); !strings.Contains(p, "| $0.00 | $0.00/day | — |") {
+		t.Errorf("a cycle with no covered days has no change; prompt was:\n%s", p)
+	}
+}
+
+// Half a day of data is not a cycle to compare against.
+func TestGeneratePromptSkipsBarelyCoveredCyclesAsComparisonBase(t *testing.T) {
+	periods := productionPeriods()
+	periods[0].Source = ledger.SourceBalance
+	periods[1].CoveredDays, periods[1].DailyBurn = 0.6, 500
+
+	if p := prompt(periods, nil); !strings.Contains(p, "vs $81.37/day in Jul 15 - Aug 14") {
+		t.Errorf("expected the comparison to skip the barely covered cycle; prompt was:\n%s", p)
+	}
+}
+
+// A card's balance can lag while its charges keep arriving; the warning must
+// date the newest data, not the balance.
+func TestGeneratePromptDatesDataLagByTheNewestData(t *testing.T) {
+	stale := []models.StaleConnection{{
+		Name: "TD AEROPLAN VISA INFINITE (4520)", OrgName: "TD Canada Trust",
+		BalanceDate: date(time.August, 21).Unix(), LastTransaction: date(time.September, 10).Unix(),
+	}}
+
+	p := GeneratePrompt(PromptInput{Periods: productionPeriods(), Stale: stale, Now: now})
+
+	if !strings.Contains(p, "data through Sep 10, 2026 (13 days ago)") {
+		t.Errorf("expected the newest transaction to date the data; prompt was:\n%s", p)
+	}
+	if strings.Contains(p, "Aug 21") {
+		t.Errorf("the older balance date must not be reported; prompt was:\n%s", p)
 	}
 }
 

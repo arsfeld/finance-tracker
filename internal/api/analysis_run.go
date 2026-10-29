@@ -134,6 +134,7 @@ func (h *AnalysisRunHandler) BuildPrompt(ctx context.Context, now time.Time) (*A
 	// for an analyzed card it disagrees with the table's Not itemized column,
 	// which already reports the same gap correctly.
 	stale, _ = filterHealth(stale, nil, func(id string) bool { return analyzed[id] })
+	stale = staleByNewestData(stale, now)
 
 	budgets, _ := h.budgetStore.GetAll(ctx)
 
@@ -227,4 +228,20 @@ func (h *AnalysisRunHandler) RunAnalysis() {
 	}
 	defer h.scheduler.Release()
 	h.runAnalysis(context.Background())
+}
+
+// staleByNewestData keeps the connections whose newest data, balance or
+// transaction, is older than StaleConnectionThreshold. An import brings
+// transactions past a frozen balance_date and the ledger measures those days,
+// so dating the lag by the balance alone contradicted the period table. The
+// sync alert keeps the balance-only test: it asks whether SimpleFin is alive.
+func staleByNewestData(stale []models.StaleConnection, now time.Time) []models.StaleConnection {
+	cutoff := now.Add(-StaleConnectionThreshold).Unix()
+	var out []models.StaleConnection
+	for _, c := range stale {
+		if max(c.BalanceDate, c.LastTransaction) < cutoff {
+			out = append(out, c)
+		}
+	}
+	return out
 }

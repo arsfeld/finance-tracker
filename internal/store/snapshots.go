@@ -12,6 +12,7 @@ import (
 
 const (
 	SnapshotSourceSync        = "sync"
+	SnapshotSourceImport      = "import"
 	SnapshotSourceSeedAnchor  = "seed_anchor"
 	SnapshotSourceSeedCurrent = "seed_current"
 )

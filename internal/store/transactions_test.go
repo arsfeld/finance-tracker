@@ -129,3 +129,47 @@ func TestGetForPeriodAllAccountsIncludesExcludedAccounts(t *testing.T) {
 		t.Errorf("expected AccountID 'ACT-sav', got %s", got[0].AccountID)
 	}
 }
+
+// Imported rows belong to the current account row, but the old row of the same
+// identity still holds the SimpleFIN history an import has to deduplicate
+// against. The lookup spans every row of the identity.
+func TestGetForAccountsPeriodSpansIdentity(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	accts := NewAccountStore(db.Read, db.Write)
+	txns := NewTransactionStore(db.Read, db.Write)
+	for _, id := range []string{"ACT-old", "ACT-new"} {
+		if err := accts.Upsert(ctx, models.DBAccount{
+			ID: id, Name: "TD AEROPLAN VISA INFINITE (4520)", OrgName: "TD Canada Trust", IsIncluded: true,
+		}); err != nil {
+			t.Fatalf("seed %s: %v", id, err)
+		}
+	}
+	if err := accts.Upsert(ctx, models.DBAccount{
+		ID: "ACT-other", Name: "Tangerine Chequing Account (2106)", OrgName: "Tangerine Bank (CA)", IsIncluded: true,
+	}); err != nil {
+		t.Fatalf("seed other: %v", err)
+	}
+
+	if _, _, err := txns.UpsertBatch(ctx, []models.DBTransaction{
+		{ID: "old-1", AccountID: "ACT-old", Description: "METRO", Amount: -10, Posted: 1790000000},
+		{ID: "new-1", AccountID: "ACT-new", Description: "IGA", Amount: -20, Posted: 1790000100},
+		{ID: "other-1", AccountID: "ACT-other", Description: "COFFEE", Amount: -5, Posted: 1790000200},
+		{ID: "outside", AccountID: "ACT-old", Description: "OLD", Amount: -1, Posted: 1700000000},
+	}); err != nil {
+		t.Fatalf("seed transactions: %v", err)
+	}
+
+	got, err := txns.GetForAccountsPeriod(ctx, []string{"ACT-old", "ACT-new"}, 1789999999, 1790001000)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d transactions, want 2: %+v", len(got), got)
+	}
+	for _, txn := range got {
+		if txn.AccountID == "ACT-other" || txn.ID == "outside" {
+			t.Errorf("unexpected transaction %+v", txn)
+		}
+	}
+}

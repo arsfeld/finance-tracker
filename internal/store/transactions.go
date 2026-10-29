@@ -299,6 +299,50 @@ func (s *TransactionStore) GetForPeriodAllAccounts(ctx context.Context, start, e
 	return s.queryPeriod(ctx, "", "", start, end)
 }
 
+// GetForAccountsPeriod returns transactions for a set of account rows in a
+// date range. Import uses it to look across every row of one account identity,
+// because SimpleFIN history lives on the superseded row while new imports land
+// on the current one.
+func (s *TransactionStore) GetForAccountsPeriod(ctx context.Context, accountIDs []string, start, end int64) ([]models.DBTransaction, error) {
+	if len(accountIDs) == 0 {
+		return nil, nil
+	}
+
+	placeholders := make([]string, len(accountIDs))
+	args := make([]interface{}, 0, len(accountIDs)+2)
+	args = append(args, start, end)
+	for i, id := range accountIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT t.id, t.account_id, t.description, t.amount, t.posted, t.transacted_at, t.pending,
+			COALESCE(co.category, c.category, '') as category,
+			t.cached_at, t.updated_at
+		FROM transactions t
+		LEFT JOIN categories c ON t.description = c.merchant_description
+		LEFT JOIN category_overrides co ON t.id = co.transaction_id
+		WHERE t.posted >= ? AND t.posted <= ? AND t.account_id IN (%s)
+		ORDER BY t.posted DESC`, strings.Join(placeholders, ","))
+
+	rows, err := s.read.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var txns []models.DBTransaction
+	for rows.Next() {
+		var t models.DBTransaction
+		if err := rows.Scan(&t.ID, &t.AccountID, &t.Description, &t.Amount, &t.Posted, &t.TransactedAt, &t.Pending, &t.Category, &t.CachedAt, &t.UpdatedAt); err != nil {
+			return nil, err
+		}
+		txns = append(txns, t)
+	}
+	return txns, rows.Err()
+}
+
 // CountByCategory returns category totals for a date range.
 func (s *TransactionStore) CountByCategory(ctx context.Context, start, end int64) (map[string]float64, error) {
 	rows, err := s.read.QueryContext(ctx, `

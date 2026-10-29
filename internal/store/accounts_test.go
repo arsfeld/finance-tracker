@@ -543,3 +543,37 @@ func TestUpdateAppliesInclusionAndCardKeyTogether(t *testing.T) {
 		t.Errorf("the patched row should carry the new card key, got %q", updated.CardKey)
 	}
 }
+
+// A statement can arrive out of order. An older balance must not roll the
+// account back after a newer statement has already been imported.
+func TestUpdateBalanceOnlyMovesForward(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	accts := NewAccountStore(db.Read, db.Write)
+	seedAccountFull(t, accts, models.DBAccount{
+		ID: "ACT-card", Name: "TD AEROPLAN VISA INFINITE (4520)", OrgName: "TD Canada Trust",
+		Balance: 100, BalanceDate: 1790000000, IsIncluded: true,
+	})
+
+	if err := accts.UpdateBalance(ctx, "ACT-card", 50, 1780000000); err != nil {
+		t.Fatalf("update older balance: %v", err)
+	}
+	got, err := accts.GetByID(ctx, "ACT-card")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Balance != 100 || got.BalanceDate != 1790000000 {
+		t.Errorf("older statement moved balance to %v @ %d", got.Balance, got.BalanceDate)
+	}
+
+	if err := accts.UpdateBalance(ctx, "ACT-card", -3187.08, 1793000000); err != nil {
+		t.Fatalf("update newer balance: %v", err)
+	}
+	got, err = accts.GetByID(ctx, "ACT-card")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Balance != -3187.08 || got.BalanceDate != 1793000000 {
+		t.Errorf("newer statement did not land: %v @ %d", got.Balance, got.BalanceDate)
+	}
+}

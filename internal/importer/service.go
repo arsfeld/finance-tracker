@@ -50,11 +50,12 @@ type Plan struct {
 
 // Result is the outcome of a committed import.
 type Result struct {
-	Account    models.DBAccount
-	Added      int
-	Updated    int
-	Duplicates int
-	Warnings   []string
+	Account        models.DBAccount
+	Added          int
+	Updated        int
+	Duplicates     int
+	BalanceApplied bool
+	Warnings       []string
 }
 
 // Service plans and commits statement imports.
@@ -80,11 +81,27 @@ func (s *Service) Plan(ctx context.Context, accountID string, stmt *ofx.Statemen
 		StatementBalance: stmt.LedgerBalance,
 		BalanceDate:      statementBalanceDate(stmt),
 	}
+	warned := make(map[string]bool)
+	warn := func(message string) {
+		if !warned[message] {
+			warned[message] = true
+			plan.Warnings = append(plan.Warnings, message)
+		}
+	}
 	if stmt.LedgerBalance == nil {
-		plan.Warnings = append(plan.Warnings, "The file has no ending balance; the account balance was left unchanged.")
+		warn("The file has no ending balance; the account balance was left unchanged.")
 	}
 	if len(stmt.Transactions) == 0 {
-		plan.Warnings = append(plan.Warnings, "The file contains no transactions.")
+		warn("The file contains no transactions.")
+	}
+	if stmt.Currency != "" && current.Currency != "" && !strings.EqualFold(stmt.Currency, current.Currency) {
+		warn(fmt.Sprintf("The statement is in %s but the account is in %s.", stmt.Currency, current.Currency))
+	}
+	for _, tx := range stmt.Transactions {
+		if tx.FITID == "" {
+			warn("One or more transactions have no FITID; a stable ID was derived from the row itself.")
+			break
+		}
 	}
 
 	existing, err := s.existingForRange(ctx, identityIDs, stmt.Transactions)
@@ -92,51 +109,76 @@ func (s *Service) Plan(ctx context.Context, accountID string, stmt *ofx.Statemen
 		return nil, err
 	}
 
-	byID := make(map[string]models.DBTransaction, len(existing))
-	legacy := make(map[string][]models.DBTransaction)
-	for _, txn := range existing {
-		byID[txn.ID] = txn
-		if !strings.HasPrefix(txn.ID, "IMP-") {
-			key := matchKey(txn.Posted, txn.Amount, txn.Description)
-			legacy[key] = append(legacy[key], txn)
-		}
+	// Count occurrences by signature so FITID-less rows get an ID that does
+	// not change when an unrelated row is prepended to a later export.
+	occurrences := make(map[string]int, len(stmt.Transactions))
+	nth := make([]int, len(stmt.Transactions))
+	for i, tx := range stmt.Transactions {
+		key := matchKey(tx.Posted.Unix(), tx.Amount, description(tx))
+		nth[i] = occurrences[key]
+		occurrences[key]++
+	}
+
+	// A row is identified by its FITID-derived ID first. The signature pool is
+	// the fallback for rows SimpleFIN already stored under a TRN- ID, and it
+	// must count both kinds of existing row so repeated identical purchases are
+	// neither collapsed nor duplicated.
+	type existingRow struct {
+		txn  models.DBTransaction
+		used bool
+	}
+	byID := make(map[string]*existingRow, len(existing))
+	bySignature := make(map[string][]*existingRow)
+	for i := range existing {
+		row := &existingRow{txn: existing[i]}
+		byID[row.txn.ID] = row
+		key := matchKey(row.txn.Posted, row.txn.Amount, row.txn.Description)
+		bySignature[key] = append(bySignature[key], row)
 	}
 
 	identity := ledger.IdentityKey(*current)
+	rows := make([]Row, len(stmt.Transactions))
+	var pending []int
 	for i, tx := range stmt.Transactions {
-		id := importID(identity, tx, i)
-		row := Row{Transaction: tx, ID: id}
-		if tx.FITID == "" {
-			plan.Warnings = append(plan.Warnings, "One or more transactions have no FITID; a stable ID was derived from the row itself.")
-		}
+		id := importID(identity, tx, nth[i])
+		rows[i] = Row{Transaction: tx, ID: id}
 
-		if old, ok := byID[id]; ok {
-			row.ExistingID = old.ID
-			if sameTransaction(old, tx) {
-				row.Status = StatusDuplicate
+		if old := byID[id]; old != nil && !old.used {
+			old.used = true
+			rows[i].ExistingID = old.txn.ID
+			if sameTransaction(old.txn, tx) {
+				rows[i].Status = StatusDuplicate
 				plan.DuplicateCount++
 			} else {
-				row.Status = StatusUpdated
+				rows[i].Status = StatusUpdated
 				plan.UpdatedCount++
 			}
-			plan.Rows = append(plan.Rows, row)
 			continue
 		}
+		pending = append(pending, i)
+	}
 
-		key := matchKey(tx.Posted.Unix(), tx.Amount, description(tx))
-		if matches := legacy[key]; len(matches) > 0 {
-			row.ExistingID = matches[0].ID
+	for _, i := range pending {
+		row := &rows[i]
+		key := matchKey(row.Transaction.Posted.Unix(), row.Transaction.Amount, description(row.Transaction))
+		var match *existingRow
+		for _, candidate := range bySignature[key] {
+			if !candidate.used {
+				match = candidate
+				break
+			}
+		}
+		if match != nil {
+			match.used = true
+			row.ExistingID = match.txn.ID
 			row.Status = StatusDuplicate
 			plan.DuplicateCount++
-			legacy[key] = matches[1:]
-			plan.Rows = append(plan.Rows, row)
 			continue
 		}
-
 		row.Status = StatusNew
 		plan.NewCount++
-		plan.Rows = append(plan.Rows, row)
 	}
+	plan.Rows = rows
 
 	return plan, nil
 }
@@ -154,13 +196,9 @@ func (s *Service) Commit(ctx context.Context, accountID string, stmt *ofx.Statem
 		if row.Status == StatusDuplicate {
 			continue
 		}
-		account := plan.Account.ID
-		if row.ExistingID != "" {
-			account = plan.Account.ID
-		}
 		batch = append(batch, models.DBTransaction{
 			ID:          row.ID,
-			AccountID:   account,
+			AccountID:   plan.Account.ID,
 			Description: description(row.Transaction),
 			Amount:      row.Transaction.Amount,
 			Posted:      row.Transaction.Posted.Unix(),
@@ -177,13 +215,28 @@ func (s *Service) Commit(ctx context.Context, accountID string, stmt *ofx.Statem
 		}
 	}
 
-	account := plan.Account
+	// Once the transactions are written, a later failure must still report what
+	// landed so the sync log does not claim nothing happened.
+	result := &Result{
+		Account:    plan.Account,
+		Added:      added,
+		Updated:    updated,
+		Duplicates: plan.DuplicateCount,
+		Warnings:   plan.Warnings,
+	}
+
 	if stmt.LedgerBalance != nil {
 		date := statementBalanceDate(stmt)
-		if err := s.accounts.UpdateBalance(ctx, plan.Account.ID, *stmt.LedgerBalance, date.Unix()); err != nil {
-			return nil, fmt.Errorf("update account balance: %w", err)
+		applied, err := s.accounts.UpdateBalance(ctx, plan.Account.ID, *stmt.LedgerBalance, date.Unix())
+		if err != nil {
+			return result, fmt.Errorf("update account balance: %w", err)
 		}
-		if plan.Account.IsCreditCard && plan.Account.CardKey != "" {
+		result.BalanceApplied = applied
+		if applied {
+			result.Account.Balance = *stmt.LedgerBalance
+			result.Account.BalanceDate = date.Unix()
+		}
+		if applied && plan.Account.IsCreditCard && plan.Account.CardKey != "" {
 			if _, err := s.snapshots.Record(ctx, models.BalanceSnapshot{
 				CardKey:     plan.Account.CardKey,
 				AccountID:   plan.Account.ID,
@@ -191,23 +244,12 @@ func (s *Service) Commit(ctx context.Context, accountID string, stmt *ofx.Statem
 				BalanceDate: date.Unix(),
 				Source:      store.SnapshotSourceImport,
 			}); err != nil {
-				return nil, fmt.Errorf("record card balance: %w", err)
+				return result, fmt.Errorf("record card balance: %w", err)
 			}
-		}
-		// The result is shown immediately after import, so it must carry the
-		// balance the import just wrote, not the one read before the write.
-		if fresh, err := s.accounts.GetByID(ctx, plan.Account.ID); err == nil && fresh != nil {
-			account = *fresh
 		}
 	}
 
-	return &Result{
-		Account:    account,
-		Added:      added,
-		Updated:    updated,
-		Duplicates: plan.DuplicateCount,
-		Warnings:   plan.Warnings,
-	}, nil
+	return result, nil
 }
 
 // Resolve returns the current account row for a selected row. An import always
@@ -281,10 +323,10 @@ func statementBalanceDate(stmt *ofx.Statement) time.Time {
 	return time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
 }
 
-func importID(identity string, tx ofx.Transaction, index int) string {
+func importID(identity string, tx ofx.Transaction, occurrence int) string {
 	fitid := tx.FITID
 	if fitid == "" {
-		fitid = fmt.Sprintf("%s|%.2f|%s|%s|%d", tx.Posted.Format("2006-01-02"), tx.Amount, tx.Name, tx.Memo, index)
+		fitid = fmt.Sprintf("%s|%.2f|%s|%s|%d", tx.Posted.Format("2006-01-02"), tx.Amount, tx.Name, tx.Memo, occurrence)
 	}
 	sum := sha256.Sum256([]byte(identity + "\x00" + fitid))
 	return "IMP-" + hex.EncodeToString(sum[:12])

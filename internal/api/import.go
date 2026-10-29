@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -98,12 +99,13 @@ type importPreviewResponse struct {
 }
 
 type importResultResponse struct {
-	LogID      int64            `json:"log_id"`
-	Account    models.DBAccount `json:"account"`
-	Added      int              `json:"added"`
-	Updated    int              `json:"updated"`
-	Duplicates int              `json:"duplicates"`
-	Warnings   []string         `json:"warnings,omitempty"`
+	LogID          int64            `json:"log_id"`
+	Account        models.DBAccount `json:"account"`
+	Added          int              `json:"added"`
+	Updated        int              `json:"updated"`
+	Duplicates     int              `json:"duplicates"`
+	BalanceApplied bool             `json:"balance_applied"`
+	Warnings       []string         `json:"warnings,omitempty"`
 }
 
 // Preview parses a statement and reports what an import would do.
@@ -123,6 +125,7 @@ func (h *ImportHandler) Preview(w http.ResponseWriter, r *http.Request) {
 		Filename:   filename,
 		Statement:  statementInfo(stmt),
 		Candidates: candidateInfo(candidates),
+		Rows:       []importRow{},
 	}
 
 	if accountID == "" {
@@ -131,6 +134,7 @@ func (h *ImportHandler) Preview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if accountID == "" {
+		resp.Warnings = h.importWarnings(nil, candidates, "")
 		WriteData(w, resp)
 		return
 	}
@@ -144,7 +148,7 @@ func (h *ImportHandler) Preview(w http.ResponseWriter, r *http.Request) {
 	resp.NewCount = plan.NewCount
 	resp.Duplicates = plan.DuplicateCount
 	resp.Updated = plan.UpdatedCount
-	resp.Warnings = plan.Warnings
+	resp.Warnings = h.importWarnings(plan.Warnings, candidates, plan.Account.ID)
 	resp.Rows = rowInfo(plan.Rows)
 	WriteData(w, resp)
 }
@@ -169,26 +173,37 @@ func (h *ImportHandler) Commit(w http.ResponseWriter, r *http.Request) {
 		defer h.scheduler.Release()
 	}
 
-	logID, err := h.syncLog.CreateEntry(r.Context(), "import", filename, accountID)
+	plan, err := h.importer.Plan(r.Context(), accountID, stmt)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "ACCOUNT_NOT_FOUND", err.Error())
+		return
+	}
+
+	// Log the row the import actually lands on, not the superseded row the
+	// user may have selected from the account list.
+	logID, err := h.syncLog.CreateEntry(r.Context(), "import", filename, plan.Account.ID)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error())
 		return
 	}
 
-	plan, err := h.importer.Plan(r.Context(), accountID, stmt)
-	if err != nil {
-		h.syncLog.Complete(context.Background(), logID, "error", 0, 0, err.Error(), "[]")
-		WriteError(w, http.StatusBadRequest, "ACCOUNT_NOT_FOUND", err.Error())
-		return
-	}
+	candidates := importer.Candidates([]models.DBAccount{plan.Account}, stmt.AccountID)
 
 	result, err := h.importer.Commit(r.Context(), accountID, stmt)
 	if err != nil {
-		h.syncLog.Complete(context.Background(), logID, "error", 0, 0, err.Error(), "[]")
+		status, added, updated := "error", 0, 0
+		if result != nil {
+			added, updated = result.Added, result.Updated
+			if added+updated > 0 {
+				status = "partial"
+			}
+		}
+		h.syncLog.Complete(context.Background(), logID, status, added, updated, err.Error(), "[]")
 		WriteError(w, http.StatusInternalServerError, "IMPORT_FAILED", err.Error())
 		return
 	}
 
+	warnings := h.importWarnings(result.Warnings, candidates, result.Account.ID)
 	h.syncLog.Complete(context.Background(), logID, "success", result.Added, result.Updated, "", "[]")
 	h.events.Broadcast("sync_complete", fmt.Sprintf(`{"status":"success","source":"import","transactions":%d}`, result.Added))
 
@@ -197,18 +212,24 @@ func (h *ImportHandler) Commit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	WriteData(w, importResultResponse{
-		LogID:      logID,
-		Account:    result.Account,
-		Added:      result.Added,
-		Updated:    result.Updated,
-		Duplicates: result.Duplicates,
-		Warnings:   result.Warnings,
+		LogID:          logID,
+		Account:        result.Account,
+		Added:          result.Added,
+		Updated:        result.Updated,
+		Duplicates:     result.Duplicates,
+		BalanceApplied: result.BalanceApplied,
+		Warnings:       warnings,
 	})
 }
 
 func (h *ImportHandler) readStatement(w http.ResponseWriter, r *http.Request) (*ofx.Statement, string, string, bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxImportBytes)
 	if err := r.ParseMultipartForm(maxImportBytes); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			WriteError(w, http.StatusRequestEntityTooLarge, "FILE_TOO_LARGE", "The statement is larger than 10 MB.")
+			return nil, "", "", false
+		}
 		WriteError(w, http.StatusBadRequest, "BAD_FILE", "Could not read the uploaded file: "+err.Error())
 		return nil, "", "", false
 	}
@@ -232,6 +253,39 @@ func (h *ImportHandler) readStatement(w http.ResponseWriter, r *http.Request) (*
 		return nil, "", "", false
 	}
 	return stmt, header.Filename, r.FormValue("account_id"), true
+}
+
+// importWarnings adds the cross-cutting cautions the importer service cannot
+// know about: whether SimpleFIN is still configured, and whether the chosen
+// account actually resembles the statement's account number.
+func (h *ImportHandler) importWarnings(warnings []string, candidates []importer.Candidate, accountID string) []string {
+	seen := make(map[string]bool, len(warnings))
+	for _, warning := range warnings {
+		seen[warning] = true
+	}
+	add := func(message string) {
+		if !seen[message] {
+			seen[message] = true
+			warnings = append(warnings, message)
+		}
+	}
+
+	if h.cfg != nil && h.cfg.SimplefinBridgeURL != "" {
+		add("SimpleFIN is still configured; a later sync may overwrite this statement balance or duplicate these transactions.")
+	}
+	if accountID != "" {
+		matched := false
+		for _, candidate := range candidates {
+			if candidate.Account.ID == accountID {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			add("The statement's account number does not match this account's name; confirm the destination account.")
+		}
+	}
+	return warnings
 }
 
 func (h *ImportHandler) categorize(rows []models.DBTransaction) {

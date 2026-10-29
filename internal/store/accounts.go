@@ -58,8 +58,8 @@ func (s *AccountStore) Upsert(ctx context.Context, acct models.DBAccount) error 
 // UpdateBalance writes a statement balance only when it is at least as new as
 // the balance already stored. An older export can still backfill transactions,
 // but it must not roll the account back.
-func (s *AccountStore) UpdateBalance(ctx context.Context, id string, balance float64, balanceDate int64) error {
-	_, err := s.write.ExecContext(ctx, `
+func (s *AccountStore) UpdateBalance(ctx context.Context, id string, balance float64, balanceDate int64) (bool, error) {
+	res, err := s.write.ExecContext(ctx, `
 		UPDATE accounts SET
 			balance = ?,
 			balance_date = ?,
@@ -68,7 +68,11 @@ func (s *AccountStore) UpdateBalance(ctx context.Context, id string, balance flo
 			updated_at = datetime('now')
 		WHERE id = ? AND (balance_date IS NULL OR balance_date <= ?)`,
 		balance, balanceDate, balance, balanceDate, id, balanceDate)
-	return err
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }
 
 func (s *AccountStore) List(ctx context.Context) ([]models.DBAccount, error) {

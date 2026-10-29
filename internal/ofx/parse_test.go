@@ -2,6 +2,8 @@ package ofx
 
 import (
 	"os"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 )
@@ -55,6 +57,11 @@ func TestParseQFX(t *testing.T) {
 	if !first.Posted.Equal(wantDate) {
 		t.Errorf("first posted = %v, want %v", first.Posted, wantDate)
 	}
+
+	last := stmt.Transactions[len(stmt.Transactions)-1]
+	if last.FITID != "2026-10-15~2026-10-15~1819510" {
+		t.Errorf("last fitid = %q", last.FITID)
+	}
 }
 
 func TestParseMaskedOFX(t *testing.T) {
@@ -103,6 +110,8 @@ func TestParseRejectsNonOFX(t *testing.T) {
 
 	if _, err := Parse(f); err == nil {
 		t.Fatal("expected an error for a non-OFX file")
+	} else if !strings.Contains(err.Error(), "not an OFX") {
+		t.Errorf("error = %q, want it to mention not an OFX", err)
 	}
 }
 
@@ -116,5 +125,83 @@ func TestParseOFXDate(t *testing.T) {
 		if !got.Equal(want) {
 			t.Errorf("parse %q = %v, want %v", raw, got, want)
 		}
+	}
+}
+
+// OFX 1.x commonly omits closing tags on aggregate elements. The parser must
+// rely on the next aggregate, not on closing tags that may not exist.
+func TestParseWithoutAggregateClosingTags(t *testing.T) {
+	data, err := os.ReadFile("testdata/accountactivity.qfx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stripped := regexp.MustCompile(`</[A-Za-z0-9.]+>`).ReplaceAllString(string(data), "")
+	stmt, err := Parse(strings.NewReader(stripped))
+	if err != nil {
+		t.Fatalf("parse stripped OFX: %v", err)
+	}
+	if len(stmt.Transactions) != 50 {
+		t.Errorf("transactions = %d, want 50", len(stmt.Transactions))
+	}
+	if stmt.LedgerBalance == nil || *stmt.LedgerBalance != -3187.08 {
+		t.Errorf("ledger balance = %v", stmt.LedgerBalance)
+	}
+}
+
+func TestParseRejectsMultipleStatements(t *testing.T) {
+	body := `OFXHEADER:100
+DATA:OFXSGML
+<OFX>
+<STMTRS><CURDEF>CAD</CURDEF></STMTRS>
+<STMTRS><CURDEF>CAD</CURDEF></STMTRS>
+</OFX>`
+	if _, err := Parse(strings.NewReader(body)); err == nil {
+		t.Fatal("expected multiple statements to be rejected")
+	}
+}
+
+func TestParseBankStatement(t *testing.T) {
+	body := `OFXHEADER:100
+DATA:OFXSGML
+<OFX>
+<BANKMSGSRSV1>
+<STMTTRNRS>
+<STMTRS>
+<CURDEF>CAD
+<BANKACCTFROM>
+<ACCTID>123456789
+<ACCTTYPE>CHECKING
+</BANKACCTFROM>
+<BANKTRANLIST>
+<DTSTART>20261001
+<DTEND>20261031
+<STMTTRN>
+<TRNTYPE>DEBIT
+<DTPOSTED>20261002
+<TRNAMT>-10.00
+<FITID>abc
+<NAME>COFFEE
+</STMTTRN>
+</BANKTRANLIST>
+<LEDGERBAL>
+<BALAMT>100.00
+<DTASOF>20261031
+</LEDGERBAL>
+</STMTRS>
+</STMTTRNRS>
+</BANKMSGSRSV1>
+</OFX>`
+	stmt, err := Parse(strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("parse bank statement: %v", err)
+	}
+	if stmt.AccountID != "123456789" || stmt.AccountType != "CHECKING" {
+		t.Errorf("account = %q/%q", stmt.AccountID, stmt.AccountType)
+	}
+	if len(stmt.Transactions) != 1 || stmt.Transactions[0].FITID != "abc" {
+		t.Errorf("transactions = %+v", stmt.Transactions)
+	}
+	if stmt.LedgerBalance == nil || *stmt.LedgerBalance != 100 {
+		t.Errorf("ledger balance = %v", stmt.LedgerBalance)
 	}
 }

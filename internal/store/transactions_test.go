@@ -173,3 +173,30 @@ func TestGetForAccountsPeriodSpansIdentity(t *testing.T) {
 		}
 	}
 }
+
+// An imported row found again after a re-auth must move to the current account
+// row when it is updated, not stay on the superseded one.
+func TestUpsertBatchMovesRowToPassedAccount(t *testing.T) {
+	ctx := context.Background()
+	accts, txns := upsertStores(t)
+	seedAccount(t, accts, "ACT-old")
+	seedAccount(t, accts, "ACT-new")
+	if _, _, err := txns.UpsertBatch(ctx, []models.DBTransaction{
+		{ID: "IMP-row", AccountID: "ACT-old", Description: "COFFEE", Amount: -4.5, Posted: 1790000000},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if _, _, err := txns.UpsertBatch(ctx, []models.DBTransaction{
+		{ID: "IMP-row", AccountID: "ACT-new", Description: "COFFEE", Amount: -4.5, Posted: 1790000000},
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	got, err := txns.GetByID(ctx, "IMP-row")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got == nil || got.AccountID != "ACT-new" {
+		t.Errorf("row account = %+v, want ACT-new", got)
+	}
+}

@@ -53,7 +53,7 @@ func (s *SyncLogStore) List(ctx context.Context, limit int) ([]models.SyncLogEnt
 	rows, err := s.read.QueryContext(ctx, `
 		SELECT id, started_at, COALESCE(completed_at, ''), status, transactions_added, transactions_updated, error_message, api_errors,
 			source, filename, account_id
-		FROM sync_log ORDER BY started_at DESC LIMIT ?`, limit)
+		FROM sync_log ORDER BY started_at DESC, id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}

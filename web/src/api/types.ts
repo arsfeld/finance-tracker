@@ -116,6 +116,7 @@ export interface ImportResult {
   added: number;
   updated: number;
   duplicates: number;
+  balance_applied: boolean;
   warnings?: string[];
 }
 

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"finance_tracker/internal/config"
@@ -187,5 +188,136 @@ func TestImportCommitRequiresAccount(t *testing.T) {
 	}
 	if errBody.Error.Code != "ACCOUNT_REQUIRED" {
 		t.Errorf("code = %q, want ACCOUNT_REQUIRED", errBody.Error.Code)
+	}
+}
+
+func TestImportPreviewWithoutCandidateReturnsEmptyRows(t *testing.T) {
+	h, _, _, _ := newImportTestHandler(t)
+	content := strings.Replace(fixture(t), "4520883071874533", "7777000011112222", 1)
+	rec := httptest.NewRecorder()
+
+	h.Preview(rec, importFormRequest(t, "/api/import/preview", "", content))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"rows":[]`) {
+		t.Errorf("empty preview must serialize rows as [], got %s", rec.Body.String())
+	}
+	got := decodeData[importPreviewResponse](t, rec)
+	if got.Account != nil {
+		t.Errorf("account = %+v, want nil when nothing matched", got.Account)
+	}
+}
+
+func TestImportPreviewDoesNotAutoSelectTiedCandidates(t *testing.T) {
+	h, accts, _, _ := newImportTestHandler(t)
+	ctx := context.Background()
+	for _, acct := range []models.DBAccount{
+		{ID: "ACT-tie-1", Name: "TD VISA (4520)", OrgName: "TD Canada Trust", IsIncluded: true},
+		{ID: "ACT-tie-2", Name: "Other Bank VISA (4520)", OrgName: "Other Bank", IsIncluded: true},
+	} {
+		if err := accts.Upsert(ctx, acct); err != nil {
+			t.Fatalf("seed tie: %v", err)
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	h.Preview(rec, importFormRequest(t, "/api/import/preview", "", fixture(t)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	got := decodeData[importPreviewResponse](t, rec)
+	if got.Account != nil {
+		t.Errorf("account = %+v, want nil for a tie", got.Account)
+	}
+	if len(got.Candidates) < 2 {
+		t.Errorf("candidates = %+v, want the tied accounts", got.Candidates)
+	}
+}
+
+func TestImportWarnsWhenAccountDoesNotMatch(t *testing.T) {
+	h, accts, _, _ := newImportTestHandler(t)
+	ctx := context.Background()
+	if err := accts.Upsert(ctx, models.DBAccount{
+		ID: "ACT-other", Name: "Tangerine Chequing Account (9999)", OrgName: "Tangerine Bank (CA)", IsIncluded: true,
+	}); err != nil {
+		t.Fatalf("seed other: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	h.Preview(rec, importFormRequest(t, "/api/import/preview", "ACT-other", fixture(t)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	got := decodeData[importPreviewResponse](t, rec)
+	found := false
+	for _, warning := range got.Warnings {
+		if strings.Contains(warning, "does not match") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("warnings = %v, want an account-number mismatch warning", got.Warnings)
+	}
+}
+
+func TestImportWarnsWhenSimpleFINStillConfigured(t *testing.T) {
+	h, _, _, _ := newImportTestHandler(t)
+	h.cfg.SimplefinBridgeURL = "https://example.invalid/simplefin"
+
+	rec := httptest.NewRecorder()
+	h.Preview(rec, importFormRequest(t, "/api/import/preview", "ACT-new", fixture(t)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	got := decodeData[importPreviewResponse](t, rec)
+	found := false
+	for _, warning := range got.Warnings {
+		if strings.Contains(warning, "SimpleFIN") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("warnings = %v, want a SimpleFIN coexistence warning", got.Warnings)
+	}
+}
+
+func TestImportCommitLogsResolvedAccount(t *testing.T) {
+	h, _, _, logs := newImportTestHandler(t)
+	rec := httptest.NewRecorder()
+
+	h.Commit(rec, importFormRequest(t, "/api/import", "ACT-old", fixture(t)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	entries, err := logs.List(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list logs: %v", err)
+	}
+	if len(entries) != 1 || entries[0].AccountID != "ACT-new" {
+		t.Errorf("log account = %+v, want the resolved ACT-new", entries)
+	}
+}
+
+func TestImportReportsStaleBalanceNotApplied(t *testing.T) {
+	h, accts, _, _ := newImportTestHandler(t)
+	if _, err := accts.UpdateBalance(context.Background(), "ACT-new", 100, 1795000000); err != nil {
+		t.Fatalf("seed future balance: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	h.Commit(rec, importFormRequest(t, "/api/import", "ACT-new", fixture(t)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	got := decodeData[importResultResponse](t, rec)
+	if got.BalanceApplied {
+		t.Error("an older statement balance must not be reported as applied")
 	}
 }

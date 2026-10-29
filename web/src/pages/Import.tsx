@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import {
   useAccounts,
@@ -52,19 +52,27 @@ export default function Import() {
   const [selected, setSelected] = useState("");
   const [result, setResult] = useState<ImportResult | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [previewStale, setPreviewStale] = useState(false);
+  const previewSeq = useRef(0);
 
   const accountsForSelect = useMemo(() => currentAccounts(accounts), [accounts]);
   const currency = preview?.statement.currency || "CAD";
 
   const runPreview = (nextFile: File, accountID?: string) => {
     setResult(null);
+    setPreviewStale(true);
+    const seq = ++previewSeq.current;
     const form = new FormData();
     form.append("file", nextFile);
     if (accountID) form.append("account_id", accountID);
     previewMutation.mutate(form, {
       onSuccess: (data) => {
+        if (seq !== previewSeq.current) return;
         setPreview(data);
-        setSelected(data.account?.id || data.candidates[0]?.account_id || "");
+        // Only preselect when the server resolved one account. A tie is
+        // deliberately left blank so the user has to choose.
+        setSelected(data.account?.id || "");
+        setPreviewStale(false);
       },
     });
   };
@@ -96,7 +104,8 @@ export default function Import() {
   };
 
   const busy = previewMutation.isPending || commitMutation.isPending;
-  const canImport = !!file && !!selected && !busy;
+  const canImport = !!file && !!selected && !!preview && !previewStale && !busy;
+  const previewRows = preview?.rows ?? [];
 
   return (
     <div className="space-y-6">
@@ -131,7 +140,13 @@ export default function Import() {
               type="file"
               accept=".ofx,.qfx,.qbo,.aso"
               className="sr-only"
-              onChange={(e) => chooseFile(e.target.files?.[0])}
+              disabled={busy}
+              onChange={(e) => {
+                const next = e.currentTarget.files?.[0];
+                // Clear the input so choosing the same file again still fires.
+                e.currentTarget.value = "";
+                chooseFile(next);
+              }}
             />
             <div className="font-medium">
               {file ? file.name : "Drop a statement here, or click to choose one"}
@@ -192,7 +207,8 @@ export default function Import() {
                 id="import-account"
                 value={selected}
                 onChange={(e) => chooseAccount(e.target.value)}
-                className="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
+                disabled={busy}
+                className="border-input bg-background h-9 w-full rounded-md border px-3 text-sm disabled:opacity-50"
               >
                 <option value="">Choose an account</option>
                 {accountsForSelect.map((account) => (
@@ -203,7 +219,9 @@ export default function Import() {
               </select>
               {preview.candidates.length > 0 && (
                 <p className="text-muted-foreground text-xs">
-                  Suggested from the statement: {preview.candidates[0].name}
+                  {preview.account
+                    ? `Suggested from the statement: ${preview.candidates[0].name}`
+                    : "The statement matches more than one account. Choose the destination explicitly."}
                 </p>
               )}
             </div>
@@ -231,7 +249,7 @@ export default function Import() {
               </div>
             )}
 
-            {preview.rows.length > 0 && (
+            {previewRows.length > 0 && (
               <div className="max-h-96 overflow-y-auto rounded-md border">
                 <Table>
                   <TableHeader>
@@ -243,7 +261,7 @@ export default function Import() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {preview.rows.map((row, index) => (
+                    {previewRows.map((row, index) => (
                       <TableRow key={`${row.fitid || row.date}-${index}`}>
                         <TableCell className="whitespace-nowrap text-muted-foreground">
                           {formatDate(row.date)}
@@ -277,14 +295,21 @@ export default function Import() {
             )}
 
             <div className="flex items-center gap-3">
+              {previewStale && (
+                <span className="text-muted-foreground text-sm">Updating preview...</span>
+              )}
               <Button onClick={commit} disabled={!canImport}>
                 {preview.new_count > 0
                   ? `Import ${preview.new_count} transaction${preview.new_count === 1 ? "" : "s"}`
-                  : "Update balance"}
+                  : preview.updated_count > 0
+                    ? `Update ${preview.updated_count} changed transaction${preview.updated_count === 1 ? "" : "s"}`
+                    : "Update balance"}
               </Button>
               {preview.new_count === 0 && preview.updated_count === 0 && (
                 <span className="text-muted-foreground text-sm">
-                  Nothing new; the statement balance will still be applied.
+                  {preview.statement.ledger_balance !== undefined
+                    ? "Nothing new; the statement balance will still be applied."
+                    : "Nothing new to import."}
                 </span>
               )}
             </div>
@@ -315,6 +340,11 @@ export default function Import() {
               {result.account.name} · balance now{" "}
               {formatMoney(result.account.balance, result.account.currency || currency)}
             </div>
+            {!result.balance_applied && (
+              <div className="rounded-md border border-yellow-200 bg-yellow-50 p-3 text-yellow-800 dark:border-yellow-900/40 dark:bg-yellow-900/20 dark:text-yellow-200">
+                The statement balance was not applied because it is older than the account balance (or the file has no ending balance).
+              </div>
+            )}
             {result.warnings && result.warnings.length > 0 && (
               <ul className="text-muted-foreground list-inside list-disc space-y-1">
                 {result.warnings.map((warning) => (

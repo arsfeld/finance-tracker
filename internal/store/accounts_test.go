@@ -555,8 +555,12 @@ func TestUpdateBalanceOnlyMovesForward(t *testing.T) {
 		Balance: 100, BalanceDate: 1790000000, IsIncluded: true,
 	})
 
-	if err := accts.UpdateBalance(ctx, "ACT-card", 50, 1780000000); err != nil {
+	applied, err := accts.UpdateBalance(ctx, "ACT-card", 50, 1780000000)
+	if err != nil {
 		t.Fatalf("update older balance: %v", err)
+	}
+	if applied {
+		t.Error("older balance must not be applied")
 	}
 	got, err := accts.GetByID(ctx, "ACT-card")
 	if err != nil {
@@ -566,8 +570,12 @@ func TestUpdateBalanceOnlyMovesForward(t *testing.T) {
 		t.Errorf("older statement moved balance to %v @ %d", got.Balance, got.BalanceDate)
 	}
 
-	if err := accts.UpdateBalance(ctx, "ACT-card", -3187.08, 1793000000); err != nil {
+	applied, err = accts.UpdateBalance(ctx, "ACT-card", -3187.08, 1793000000)
+	if err != nil {
 		t.Fatalf("update newer balance: %v", err)
+	}
+	if !applied {
+		t.Error("newer balance should be applied")
 	}
 	got, err = accts.GetByID(ctx, "ACT-card")
 	if err != nil {

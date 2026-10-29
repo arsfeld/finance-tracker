@@ -45,13 +45,15 @@ func (s *TransactionStore) UpsertBatch(ctx context.Context, txns []models.DBTran
 		INSERT INTO transactions (id, account_id, description, amount, posted, transacted_at, pending, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
 		ON CONFLICT(id) DO UPDATE SET
+			account_id = excluded.account_id,
 			description = excluded.description,
 			amount = excluded.amount,
 			posted = excluded.posted,
 			transacted_at = excluded.transacted_at,
 			pending = excluded.pending,
 			updated_at = datetime('now')
-		WHERE transactions.description IS NOT excluded.description
+		WHERE transactions.account_id IS NOT excluded.account_id
+			OR transactions.description IS NOT excluded.description
 			OR transactions.amount IS NOT excluded.amount
 			OR transactions.posted IS NOT excluded.posted
 			OR transactions.transacted_at IS NOT excluded.transacted_at
